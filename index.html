@@ -14,47 +14,41 @@
         <p class="subtitle">글로컬대학사업본부 전체 자산 목록</p>
       </div>
       <div class="header-actions">
+        <button class="btn btn-secondary" id="myReqBtn" hidden>
+          내 신청 <span class="count-badge" id="myReqCount" hidden>0</span>
+        </button>
         <button class="btn btn-secondary" id="reviewBtn" hidden>
           승인 대기 <span class="count-badge" id="pendingCount">0</span>
         </button>
         <button class="btn btn-secondary" id="histBtn" hidden>결재 내역</button>
+        <button class="btn btn-secondary" id="membersBtn" hidden>회원 관리</button>
         <button class="btn btn-primary" id="addBtn">+ 자산 등록</button>
-        <span class="admin-tag" id="adminTag" hidden></span>
-        <button class="btn btn-secondary" id="loginBtn">관리자 로그인</button>
+        <span class="admin-tag" id="userTag" hidden></span>
+        <button class="btn btn-secondary" id="loginBtn">로그인</button>
+        <button class="btn btn-secondary" id="signupBtn">회원가입</button>
         <button class="btn btn-secondary" id="logoutBtn" hidden>로그아웃</button>
       </div>
     </div>
   </header>
 
   <main class="container">
-    <!-- 안내 배너 -->
     <div class="notice" id="userNotice">
-      등록·수정·삭제는 <b>요청</b>으로 접수되며, 관리자 승인 후 반영됩니다.
+      자산 조회는 누구나 가능합니다. 등록·수정·삭제를 <b>요청</b>하려면 로그인하세요. (요청은 관리자 승인 후 반영)
     </div>
 
-    <!-- 통계 요약 -->
     <section class="stats" id="stats"></section>
 
-    <!-- 검색 영역 -->
     <section class="toolbar">
       <div class="search-box">
-        <input
-          type="text"
-          id="searchInput"
-          placeholder="자산명, 자산번호, 위치, 담당자, 부서, 제작사 검색..."
-          autocomplete="off"
-        />
+        <input type="text" id="searchInput" placeholder="자산명, 자산번호, 위치, 담당자, 부서, 제작사 검색..." autocomplete="off" />
         <button id="clearBtn" class="btn-clear" title="검색어 지우기">✕</button>
       </div>
-      <select id="categoryFilter" class="filter-select">
-        <option value="">전체 분류</option>
-      </select>
+      <select id="categoryFilter" class="filter-select"><option value="">전체 분류</option></select>
       <button class="btn btn-secondary" id="advToggle">상세 필터</button>
       <button class="btn btn-secondary" id="exportBtn">📥 엑셀 다운로드</button>
       <span class="result-count" id="resultCount"></span>
     </section>
 
-    <!-- 상세 필터 패널 -->
     <section class="adv-panel" id="advPanel" hidden>
       <div class="adv-field">
         <label>운영 부서</label>
@@ -75,7 +69,6 @@
       <button class="btn btn-secondary" id="advReset">필터 초기화</button>
     </section>
 
-    <!-- 자산 목록 테이블 -->
     <section class="table-wrap">
       <table class="asset-table">
         <thead>
@@ -96,7 +89,6 @@
       <div id="emptyMsg" class="empty-msg" hidden>검색 결과가 없습니다.</div>
     </section>
 
-    <!-- 페이지네이션 -->
     <nav class="pagination" id="pagination"></nav>
   </main>
 
@@ -109,6 +101,7 @@
       </div>
       <div class="modal-body" id="detailBody"></div>
       <div class="modal-footer">
+        <button class="btn btn-secondary" id="detailDownloadBtn" hidden>사진 다운로드</button>
         <button class="btn btn-primary" id="detailEditBtn">수정</button>
         <button class="btn btn-danger" id="detailDeleteBtn">삭제</button>
         <button class="btn btn-secondary" data-close>목록으로 돌아가기</button>
@@ -153,7 +146,7 @@
             <input type="text" id="f-location" required />
           </div>
           <div class="form-row">
-            <label>담당자(등록자) <span class="req">*</span></label>
+            <label>담당자 <span class="req">*</span></label>
             <input type="text" id="f-manager" required />
           </div>
           <div class="form-row">
@@ -183,13 +176,9 @@
           <div class="form-row full">
             <label>물품 사진</label>
             <input type="file" id="f-image" accept="image/*" />
-            <div class="photo-preview" id="photoPreview">
-              <span class="photo-placeholder">사진 없음</span>
-            </div>
+            <div class="photo-preview" id="photoPreview"><span class="photo-placeholder">사진 없음</span></div>
             <button type="button" class="btn-link" id="removePhotoBtn" hidden>사진 제거</button>
           </div>
-
-          <!-- 요청 정보 (비관리자 전용) -->
           <div class="form-row request-only">
             <label>신청자 이름</label>
             <input type="text" id="f-requester" placeholder="승인 검토용 (선택)" />
@@ -208,7 +197,7 @@
     </div>
   </div>
 
-  <!-- 삭제 요청 모달 (비관리자) -->
+  <!-- 삭제 요청 모달 -->
   <div class="modal-overlay" id="delReqOverlay" hidden>
     <div class="modal modal-narrow" role="dialog" aria-modal="true">
       <div class="modal-header">
@@ -233,39 +222,43 @@
     </div>
   </div>
 
-  <!-- 관리자 로그인 모달 -->
-  <div class="modal-overlay" id="loginOverlay" hidden>
+  <!-- 로그인 / 회원가입 모달 -->
+  <div class="modal-overlay" id="authOverlay" hidden>
     <div class="modal modal-narrow" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <h2>관리자 로그인</h2>
+        <h2 id="authTitle">로그인</h2>
         <button class="modal-close" data-close>✕</button>
       </div>
-      <form id="loginForm" class="modal-body">
+      <form id="authForm" class="modal-body">
         <div class="form-row" style="margin-bottom:12px;">
-          <label>이메일</label>
-          <input type="email" id="loginEmail" autocomplete="username" required />
+          <label>아이디</label>
+          <div class="id-field">
+            <input type="text" id="authId" autocomplete="username" placeholder="아이디" required />
+            <span class="id-suffix">@inje.ac.kr</span>
+          </div>
         </div>
         <div class="form-row">
           <label>비밀번호</label>
-          <input type="password" id="loginPassword" autocomplete="current-password" required />
+          <input type="password" id="authPw" autocomplete="current-password" required />
         </div>
-        <p class="form-error" id="loginError" hidden></p>
-        <p class="form-info" id="loginInfo" hidden></p>
-        <button type="button" class="btn-link" id="forgotBtn" style="margin-top:14px;">비밀번호를 잊으셨나요?</button>
+        <p class="form-error" id="authError" hidden></p>
+        <p class="form-info" id="authInfo" hidden></p>
+        <button type="button" class="btn-link" id="forgotBtn" style="margin-top:12px;">비밀번호를 잊으셨나요?</button>
       </form>
-      <div class="modal-footer">
-        <button class="btn btn-primary" id="loginSubmit">로그인</button>
-        <button class="btn btn-secondary" data-close>취소</button>
+      <div class="modal-footer" style="justify-content:space-between;">
+        <button class="btn-link" id="authSwitch">회원가입으로 →</button>
+        <span class="footer-btns">
+          <button class="btn btn-primary" id="authSubmit">로그인</button>
+          <button class="btn btn-secondary" data-close>취소</button>
+        </span>
       </div>
     </div>
   </div>
 
-  <!-- 새 비밀번호 설정 모달 (이메일 재설정 링크 클릭 후) -->
+  <!-- 새 비밀번호 설정 모달 -->
   <div class="modal-overlay" id="pwOverlay" hidden>
     <div class="modal modal-narrow" role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <h2>새 비밀번호 설정</h2>
-      </div>
+      <div class="modal-header"><h2>새 비밀번호 설정</h2></div>
       <form id="pwForm" class="modal-body">
         <div class="form-row">
           <label>새 비밀번호 (6자 이상)</label>
@@ -279,7 +272,19 @@
     </div>
   </div>
 
-  <!-- 승인 대기 패널 모달 (관리자) -->
+  <!-- 내 신청 내역 모달 (사용자) -->
+  <div class="modal-overlay" id="myReqOverlay" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>내 신청 내역</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body" id="myReqBody"></div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
+    </div>
+  </div>
+
+  <!-- 승인 대기 모달 (관리자) -->
   <div class="modal-overlay" id="reviewOverlay" hidden>
     <div class="modal modal-wide" role="dialog" aria-modal="true">
       <div class="modal-header">
@@ -287,9 +292,7 @@
         <button class="modal-close" data-close>✕</button>
       </div>
       <div class="modal-body" id="reviewBody"></div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-close>닫기</button>
-      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
     </div>
   </div>
 
@@ -304,9 +307,19 @@
         <input type="text" id="histSearch" class="hist-search" placeholder="자산명 또는 자산번호로 검색..." autocomplete="off" />
         <div id="histBody"></div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-close>닫기</button>
+      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
+    </div>
+  </div>
+
+  <!-- 회원 관리 모달 (관리자) -->
+  <div class="modal-overlay" id="membersOverlay" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>회원 관리</h2>
+        <button class="modal-close" data-close>✕</button>
       </div>
+      <div class="modal-body" id="membersBody"></div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
     </div>
   </div>
 

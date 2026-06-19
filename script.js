@@ -1,41 +1,45 @@
 // ===== 자산관리 시스템 =====
-// 베이스: assets.json (엑셀 원본, 읽기 전용 파일)
-// 공유 오버레이: Supabase assets 테이블 (등록/수정/삭제 결과, 승인된 것만)
-//   kind = 'added'(직접등록) | 'override'(엑셀자산 수정) | 'deleted'(엑셀자산 삭제)
-// 변경 요청: Supabase requests 테이블 (일반 사용자가 요청 → 관리자 승인 시 오버레이에 반영)
-// 관리자: Supabase Auth 로그인 (로그인해야 승인/직접반영 가능)
+// 베이스: assets.json (엑셀 원본, 읽기 전용)
+// 공유 오버레이: Supabase assets (kind = added | override | deleted) — 관리자만 쓰기
+// 요청: Supabase requests (로그인 사용자가 등록 → 관리자 결재) + 본인 신청 내역
+// 이력: Supabase history (스냅샷 기반 되돌리기) — 관리자
+// 회원: Supabase Auth + profiles(role) — 로그인은 아이디@inje.ac.kr
 
 const SUPABASE_URL = "https://pmjwwvgcmaywbatryibc.supabase.co";
 const SUPABASE_KEY = "sb_publishable_dOgVVneeoU9xeZlRWY7zFg_FdRE_PVp";
+const DOMAIN = "inje.ac.kr";
 const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-let baseAssets = []; // assets.json 원본
-let overlay = []; // Supabase assets 테이블 rows [{id, kind, data}]
-let requests = []; // Supabase requests 테이블 (pending)
-let history = []; // Supabase history 테이블 (결재/변경 이력)
-let assets = []; // 병합 결과 (화면 데이터)
+let baseAssets = [];
+let overlay = [];
+let requests = [];     // 대기중 요청 (관리자 결재용)
+let myRequests = [];   // 내 신청 내역 (로그인 사용자)
+let history = [];
+let members = [];
+let assets = [];
 let filtered = [];
 let currentPage = 1;
 const PER_PAGE = 20;
 
 let sortState = { key: null, dir: 1 };
 let currentPhoto = "";
+let currentUser = null;
+let myProfile = null;
 let isAdmin = false;
-let adminEmail = "";
 let detailCurrentId = null;
+let delReqId = null;
+let delReqEditId = null;   // 본인 삭제요청 수정 중인 request id
+let editingRequestId = null; // 본인 등록/수정요청 수정 중인 request id
+let authMode = "login";
+let authInited = false;
 
 // ===== 유틸 =====
 const won = (n) => (n ? Number(n).toLocaleString("ko-KR") + "원" : "-");
 const val = (v) => (v !== undefined && v !== null && String(v).trim() ? v : "-");
 
 function esc(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-
 function statusBadge(status) {
   const s = status || "";
   let cls = "badge-gray";
@@ -43,44 +47,75 @@ function statusBadge(status) {
   else if (s.includes("불용") || s.includes("폐기") || s.includes("매각")) cls = "badge-warn";
   return `<span class="badge ${cls}">${val(s)}</span>`;
 }
-
 function todayStr() {
   const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
-
+function fmtTime(iso) {
+  if (!iso) return "-";
+  try {
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch { return iso; }
+}
 function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
-
 const findAsset = (id) => assets.find((x) => String(x.id) === String(id));
 
-// ===== Supabase: 데이터 로드 =====
+// ===== 스냅샷 =====
+const SNAP_FIELDS = ["assetName", "assetNumber", "category", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
+const DATA_FIELDS = ["assetName", "assetNumber", "category", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
+function snapshotOf(a) {
+  if (!a) return null;
+  const o = {};
+  SNAP_FIELDS.forEach((k) => (o[k] = a[k] ?? ""));
+  return o;
+}
+function cleanFields(f) {
+  const o = {};
+  DATA_FIELDS.forEach((k) => { if (f[k] !== undefined) o[k] = f[k]; });
+  return o;
+}
+
+// ===== 데이터 로드 =====
 async function sbLoadOverlay() {
   if (!sb) return;
   const { data, error } = await sb.from("assets").select("id, kind, data, updated_at");
   if (error) { console.error("오버레이 로드 오류:", error.message); return; }
   overlay = data || [];
 }
-
 async function sbLoadRequests() {
-  if (!sb) return;
-  const { data, error } = await sb
-    .from("requests")
-    .select("*")
-    .eq("status", "pending")
-    .order("created_at", { ascending: true });
+  if (!sb || !isAdmin) { requests = []; return; }
+  const { data, error } = await sb.from("requests").select("*").eq("status", "pending").order("created_at", { ascending: true });
   if (error) { console.error("요청 로드 오류:", error.message); return; }
   requests = data || [];
 }
+async function sbLoadMyRequests() {
+  if (!sb || !currentUser) { myRequests = []; return; }
+  const { data, error } = await sb.from("requests").select("*").eq("user_id", currentUser.id).order("created_at", { ascending: false });
+  if (error) { console.error("내 요청 로드 오류:", error.message); return; }
+  myRequests = data || [];
+}
+async function sbLoadHistory() {
+  if (!sb || !isAdmin) { history = []; return; }
+  const { data, error } = await sb.from("history").select("*").order("created_at", { ascending: false }).limit(500);
+  if (error) { console.error("이력 로드 오류:", error.message); return; }
+  history = data || [];
+}
+async function sbLoadMembers() {
+  if (!sb || !isAdmin) { members = []; return; }
+  const { data, error } = await sb.from("profiles").select("*").order("created_at", { ascending: true });
+  if (error) { console.error("회원 로드 오류:", error.message); return; }
+  members = data || [];
+}
 
-// 베이스 + 오버레이 병합
 function buildAssets() {
   const addedRows = overlay.filter((o) => o.kind === "added");
   const overrideMap = {};
   overlay.filter((o) => o.kind === "override").forEach((o) => (overrideMap[String(o.id)] = o.data));
   const deletedSet = new Set(overlay.filter((o) => o.kind === "deleted").map((o) => String(o.id)));
-
   const base = baseAssets
     .filter((a) => !deletedSet.has(String(a.id)))
     .map((a) => {
@@ -90,13 +125,24 @@ function buildAssets() {
   const added = addedRows.map((o) => ({ ...o.data, id: o.id, _added: true }));
   assets = [...added, ...base];
 }
-
-// 대기중인 요청 대상 id 집합 (목록에 "요청중" 표시용)
 function pendingTargetSet() {
   return new Set(requests.filter((r) => r.target_id).map((r) => String(r.target_id)));
 }
 
-// ===== 초기 로드 =====
+async function reloadAll() {
+  await sbLoadOverlay();
+  await sbLoadMyRequests();
+  await sbLoadRequests();
+  await sbLoadHistory();
+  buildAssets();
+}
+function rerender() {
+  initFilters();
+  renderStats();
+  updateUI();
+  applyFilter();
+}
+
 async function loadData() {
   try {
     const res = await fetch("assets.json");
@@ -107,37 +153,22 @@ async function loadData() {
       `<tr><td colspan="9" style="padding:40px;text-align:center;color:#c2410c;">엑셀 데이터를 불러오지 못했습니다.</td></tr>`;
   }
   await initAuth();
-  await sbLoadOverlay();
-  await sbLoadRequests();
-  buildAssets();
-  filtered = assets;
-  initFilters();
-  renderStats();
-  updateAdminUI();
-  render();
+  await reloadAll();
+  rerender();
   sbSubscribe();
+  authInited = true;
 }
 
-function refresh() {
-  buildAssets();
-  initFilters();
-  renderStats();
-  updateAdminUI();
-  applyFilter();
-}
-
-// 실시간 동기화
 function sbSubscribe() {
   if (!sb) return;
   sb.channel("realtime-all")
     .on("postgres_changes", { event: "*", schema: "public", table: "assets" }, async () => {
-      await sbLoadOverlay();
-      refresh();
+      await sbLoadOverlay(); buildAssets(); rerender();
     })
     .on("postgres_changes", { event: "*", schema: "public", table: "requests" }, async () => {
-      await sbLoadRequests();
-      refresh();
+      await sbLoadMyRequests(); await sbLoadRequests(); rerender();
       if (!document.getElementById("reviewOverlay").hidden) renderReview();
+      if (!document.getElementById("myReqOverlay").hidden) renderMyRequests();
     })
     .subscribe();
 }
@@ -146,115 +177,162 @@ function sbSubscribe() {
 async function initAuth() {
   if (!sb) return;
   const { data } = await sb.auth.getSession();
-  setAdmin(data.session);
-  sb.auth.onAuthStateChange((event, session) => {
+  await applySession(data.session);
+  sb.auth.onAuthStateChange(async (event, session) => {
     if (event === "PASSWORD_RECOVERY") show("pwOverlay");
-    setAdmin(session);
-    refresh();
+    await applySession(session);
+    if (!authInited) return;
+    await reloadAll();
+    rerender();
   });
 }
-
-function setAdmin(session) {
-  isAdmin = !!session;
-  adminEmail = session?.user?.email || "";
+async function applySession(session) {
+  currentUser = session?.user || null;
+  if (currentUser) {
+    const { data } = await sb.from("profiles").select("*").eq("id", currentUser.id).maybeSingle();
+    myProfile = data || null;
+    isAdmin = myProfile?.role === "admin";
+  } else {
+    myProfile = null;
+    isAdmin = false;
+  }
 }
 
-async function login() {
-  const email = document.getElementById("loginEmail").value.trim();
-  const password = document.getElementById("loginPassword").value;
-  const errEl = document.getElementById("loginError");
-  errEl.hidden = true;
-  const btn = document.getElementById("loginSubmit");
+function idToEmail(input, forceDomain) {
+  let v = (input || "").trim();
+  if (forceDomain) v = v.split("@")[0].trim();
+  return v.includes("@") ? v : `${v}@${DOMAIN}`;
+}
+
+function openAuth(mode) {
+  authMode = mode;
+  document.getElementById("authError").hidden = true;
+  document.getElementById("authInfo").hidden = true;
+  document.getElementById("authId").value = "";
+  document.getElementById("authPw").value = "";
+  applyAuthMode();
+  show("authOverlay");
+}
+function applyAuthMode() {
+  const isSignup = authMode === "signup";
+  document.getElementById("authTitle").textContent = isSignup ? "회원가입" : "로그인";
+  document.getElementById("authSubmit").textContent = isSignup ? "가입하기" : "로그인";
+  document.getElementById("authSwitch").textContent = isSignup ? "← 로그인으로" : "회원가입으로 →";
+  document.getElementById("forgotBtn").style.display = isSignup ? "none" : "";
+  document.getElementById("authPw").setAttribute("autocomplete", isSignup ? "new-password" : "current-password");
+}
+
+async function authSubmit() {
+  const idVal = document.getElementById("authId").value.trim();
+  const pw = document.getElementById("authPw").value;
+  const errEl = document.getElementById("authError");
+  const infoEl = document.getElementById("authInfo");
+  errEl.hidden = true; infoEl.hidden = true;
+  if (!idVal || !pw) { errEl.textContent = "아이디와 비밀번호를 입력하세요."; errEl.hidden = false; return; }
+
+  const btn = document.getElementById("authSubmit");
   btn.disabled = true;
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  btn.disabled = false;
-  if (error) {
-    errEl.textContent = "로그인 실패: 이메일 또는 비밀번호를 확인하세요.";
-    errEl.hidden = false;
-    return;
+  try {
+    if (authMode === "signup") {
+      const email = idToEmail(idVal, true);
+      const { data, error } = await sb.auth.signUp({ email, password: pw });
+      if (error) { errEl.textContent = "가입 실패: " + error.message; errEl.hidden = false; return; }
+      if (data.session) {
+        hide("authOverlay");
+        alert("가입이 완료되었습니다. 환영합니다!");
+      } else {
+        infoEl.textContent = "가입 요청이 접수되었습니다. 이메일 인증이 필요한 설정이면 메일을 확인하세요.";
+        infoEl.hidden = false;
+      }
+    } else {
+      const email = idToEmail(idVal, false);
+      const { error } = await sb.auth.signInWithPassword({ email, password: pw });
+      if (error) { errEl.textContent = "로그인 실패: 아이디 또는 비밀번호를 확인하세요."; errEl.hidden = false; return; }
+      hide("authOverlay");
+    }
+  } finally {
+    btn.disabled = false;
   }
-  hide("loginOverlay");
-  await sbLoadRequests();
-  refresh();
 }
 
 async function logout() {
   await sb.auth.signOut();
-  refresh();
 }
 
-// 비밀번호 찾기: 입력된 이메일로 재설정 메일 발송
 async function forgotPassword() {
-  const email = document.getElementById("loginEmail").value.trim();
-  const errEl = document.getElementById("loginError");
-  const infoEl = document.getElementById("loginInfo");
-  errEl.hidden = true;
-  infoEl.hidden = true;
-  if (!email) {
-    errEl.textContent = "재설정 메일을 받을 이메일을 먼저 입력하세요.";
-    errEl.hidden = false;
-    return;
-  }
-  // 보안: 입력한 이메일이 실제 등록 계정인지 화면에 드러내지 않는다.
-  // (Supabase는 등록된 계정에만 실제로 메일을 발송한다)
+  const idVal = document.getElementById("authId").value.trim();
+  const errEl = document.getElementById("authError");
+  const infoEl = document.getElementById("authInfo");
+  errEl.hidden = true; infoEl.hidden = true;
+  if (!idVal) { errEl.textContent = "아이디를 먼저 입력하세요."; errEl.hidden = false; return; }
+  const email = idToEmail(idVal, false);
   await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-  infoEl.textContent = "입력하신 주소가 등록된 관리자 계정이면 재설정 메일이 발송됩니다. 메일함을 확인해주세요.";
+  infoEl.textContent = "등록된 계정이면 재설정 메일이 발송됩니다. 메일함을 확인해주세요.";
   infoEl.hidden = false;
 }
 
-// 재설정 링크로 돌아온 뒤 새 비밀번호 적용
 async function updatePassword() {
   const pw = document.getElementById("newPassword").value;
   const errEl = document.getElementById("pwError");
   errEl.hidden = true;
-  if (pw.length < 6) {
-    errEl.textContent = "비밀번호는 6자 이상이어야 합니다.";
-    errEl.hidden = false;
-    return;
-  }
+  if (pw.length < 6) { errEl.textContent = "비밀번호는 6자 이상이어야 합니다."; errEl.hidden = false; return; }
   const btn = document.getElementById("pwSubmit");
   btn.disabled = true;
   const { error } = await sb.auth.updateUser({ password: pw });
   btn.disabled = false;
-  if (error) {
-    errEl.textContent = "변경 실패: " + error.message;
-    errEl.hidden = false;
-    return;
-  }
+  if (error) { errEl.textContent = "변경 실패: " + error.message; errEl.hidden = false; return; }
   hide("pwOverlay");
-  alert("비밀번호가 변경되었습니다. 새 비밀번호로 로그인됩니다.");
-  refresh();
+  alert("비밀번호가 변경되었습니다.");
 }
 
-// 관리자 여부에 따라 UI 갱신
-function updateAdminUI() {
-  const loginBtn = document.getElementById("loginBtn");
-  const logoutBtn = document.getElementById("logoutBtn");
-  const adminTag = document.getElementById("adminTag");
-  const reviewBtn = document.getElementById("reviewBtn");
-  const histBtn = document.getElementById("histBtn");
-  const notice = document.getElementById("userNotice");
-  const addBtn = document.getElementById("addBtn");
+function requireLogin() {
+  if (currentUser) return true;
+  alert("요청하려면 로그인이 필요합니다.");
+  openAuth("login");
+  return false;
+}
 
-  if (isAdmin) {
-    loginBtn.hidden = true;
-    logoutBtn.hidden = false;
-    adminTag.hidden = false;
-    adminTag.textContent = `관리자: ${adminEmail}`;
-    reviewBtn.hidden = false;
-    histBtn.hidden = false;
-    document.getElementById("pendingCount").textContent = requests.length;
-    notice.hidden = true;
-    addBtn.textContent = "+ 자산 등록";
-  } else {
-    loginBtn.hidden = false;
-    logoutBtn.hidden = true;
-    adminTag.hidden = true;
-    reviewBtn.hidden = true;
-    histBtn.hidden = true;
-    notice.hidden = false;
-    addBtn.textContent = "+ 자산 등록 요청";
+// ===== 알림 (본인 요청 결재/반려) =====
+function notifSeenKey() { return currentUser ? "notif_seen_" + currentUser.id : ""; }
+function unseenCount() {
+  if (!currentUser) return 0;
+  const seen = localStorage.getItem(notifSeenKey()) || "";
+  return myRequests.filter((r) => r.status !== "pending" && r.decided_at && r.decided_at > seen).length;
+}
+function markNotifSeen() {
+  if (currentUser) localStorage.setItem(notifSeenKey(), new Date().toISOString());
+}
+
+// ===== UI 상태 =====
+function updateUI() {
+  const g = (id) => document.getElementById(id);
+  const loggedIn = !!currentUser;
+  g("loginBtn").hidden = loggedIn;
+  g("signupBtn").hidden = loggedIn;
+  g("logoutBtn").hidden = !loggedIn;
+  g("userTag").hidden = !loggedIn;
+  g("myReqBtn").hidden = !loggedIn || isAdmin;
+  g("reviewBtn").hidden = !isAdmin;
+  g("histBtn").hidden = !isAdmin;
+  g("membersBtn").hidden = !isAdmin;
+
+  if (loggedIn) {
+    const uname = myProfile?.username || (currentUser.email || "").split("@")[0];
+    g("userTag").textContent = isAdmin ? `관리자: ${uname}` : `${uname} 님`;
   }
+  g("pendingCount").textContent = requests.length;
+
+  const n = unseenCount();
+  const badge = g("myReqCount");
+  badge.textContent = n;
+  badge.hidden = n === 0;
+
+  g("addBtn").textContent = isAdmin ? "+ 자산 등록" : "+ 자산 등록 요청";
+
+  const notice = g("userNotice");
+  if (isAdmin) notice.hidden = true;
+  else if (loggedIn) { notice.hidden = false; notice.innerHTML = "등록·수정·삭제는 <b>요청</b>으로 접수되며, 관리자 승인 후 반영됩니다. '내 신청'에서 처리 결과를 확인하세요."; }
+  else { notice.hidden = false; notice.innerHTML = "자산 조회는 누구나 가능합니다. 등록·수정·삭제를 <b>요청</b>하려면 로그인하세요."; }
 }
 
 // ===== 통계 =====
@@ -263,13 +341,11 @@ function renderStats() {
   const totalCost = assets.reduce((s, a) => s + (a.acquireCost || 0), 0);
   const addedCount = overlay.filter((o) => o.kind === "added").length;
   const catCount = new Set(assets.map((a) => a.category).filter(Boolean)).size;
-
   document.getElementById("stats").innerHTML = `
     <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">전체 자산</div></div>
     <div class="stat-card"><div class="num">${(totalCost / 100000000).toFixed(1)}억</div><div class="label">총 취득금액</div></div>
     <div class="stat-card"><div class="num">${catCount}</div><div class="label">자산 분류</div></div>
-    <div class="stat-card"><div class="num">${addedCount}</div><div class="label">직접 등록</div></div>
-  `;
+    <div class="stat-card"><div class="num">${addedCount}</div><div class="label">직접 등록</div></div>`;
 }
 
 // ===== 필터 =====
@@ -277,17 +353,14 @@ function fillSelect(id, values, allLabel) {
   const sel = document.getElementById(id);
   const prev = sel.value;
   const opts = [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "ko"));
-  sel.innerHTML = `<option value="">${allLabel}</option>` +
-    opts.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  sel.innerHTML = `<option value="">${allLabel}</option>` + opts.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
   if (opts.includes(prev)) sel.value = prev;
 }
-
 function initFilters() {
   fillSelect("categoryFilter", assets.map((a) => a.category), "전체 분류");
   fillSelect("deptFilter", assets.map((a) => a.dept), "전체");
   fillSelect("statusFilter", assets.map((a) => a.status), "전체");
 }
-
 function applyFilter() {
   const kw = document.getElementById("searchInput").value.trim().toLowerCase();
   const cat = document.getElementById("categoryFilter").value;
@@ -296,7 +369,6 @@ function applyFilter() {
   const minCost = Number(document.getElementById("minCost").value) || 0;
   const maxCostRaw = document.getElementById("maxCost").value;
   const maxCost = maxCostRaw === "" ? Infinity : Number(maxCostRaw);
-
   filtered = assets.filter((a) => {
     if (cat && a.category !== cat) return false;
     if (dept && a.dept !== dept) return false;
@@ -304,55 +376,40 @@ function applyFilter() {
     const cost = a.acquireCost || 0;
     if (cost < minCost || cost > maxCost) return false;
     if (!kw) return true;
-    const hay = [
-      a.assetName, a.assetNumber, a.location, a.manager,
-      a.dept, a.org, a.maker, a.model, a.spec, a.category,
-    ].join(" ").toLowerCase();
+    const hay = [a.assetName, a.assetNumber, a.location, a.manager, a.dept, a.org, a.maker, a.model, a.spec, a.category].join(" ").toLowerCase();
     return hay.includes(kw);
   });
-
   sortFiltered();
   currentPage = 1;
   render();
 }
-
-// ===== 정렬 =====
 function sortFiltered() {
   const { key, dir } = sortState;
   if (!key) return;
   filtered.sort((a, b) => {
-    let va = a[key] ?? "";
-    let vb = b[key] ?? "";
+    let va = a[key] ?? "", vb = b[key] ?? "";
     const na = parseFloat(va), nb = parseFloat(vb);
-    const bothNum = va !== "" && vb !== "" && !isNaN(na) && !isNaN(nb) &&
-      String(va).trim() === String(na) && String(vb).trim() === String(nb);
+    const bothNum = va !== "" && vb !== "" && !isNaN(na) && !isNaN(nb) && String(va).trim() === String(na) && String(vb).trim() === String(nb);
     const cmp = bothNum ? na - nb : String(va).localeCompare(String(vb), "ko");
     return cmp * dir;
   });
 }
-
 function setSort(key) {
   if (sortState.key === key) sortState.dir *= -1;
   else sortState = { key, dir: 1 };
   document.querySelectorAll(".asset-table th.sortable").forEach((th) => {
     const arrow = th.querySelector(".sort-arrow");
-    if (th.dataset.key === key) {
-      arrow.textContent = sortState.dir === 1 ? "▲" : "▼";
-      th.classList.add("sorted");
-    } else {
-      arrow.textContent = "";
-      th.classList.remove("sorted");
-    }
+    if (th.dataset.key === key) { arrow.textContent = sortState.dir === 1 ? "▲" : "▼"; th.classList.add("sorted"); }
+    else { arrow.textContent = ""; th.classList.remove("sorted"); }
   });
   applyFilter();
 }
 
-// ===== 렌더링 =====
+// ===== 목록 렌더 =====
 function render() {
   const tbody = document.getElementById("assetTbody");
   const emptyMsg = document.getElementById("emptyMsg");
   document.getElementById("resultCount").textContent = `총 ${filtered.length.toLocaleString()}건`;
-
   if (filtered.length === 0) {
     tbody.innerHTML = "";
     emptyMsg.hidden = false;
@@ -360,19 +417,16 @@ function render() {
     return;
   }
   emptyMsg.hidden = true;
-
   const pending = pendingTargetSet();
   const start = (currentPage - 1) * PER_PAGE;
   const pageItems = filtered.slice(start, start + PER_PAGE);
-
-  tbody.innerHTML = pageItems
-    .map((a) => {
-      let tag = "";
-      if (a._added) tag = `<span class="tag tag-added">직접</span>`;
-      else if (a._edited) tag = `<span class="tag tag-edited">수정</span>`;
-      if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
-      const thumb = a.imageUrl ? `<img class="thumb" src="${a.imageUrl}" alt="" loading="lazy" />` : "";
-      return `
+  tbody.innerHTML = pageItems.map((a) => {
+    let tag = "";
+    if (a._added) tag = `<span class="tag tag-added">직접</span>`;
+    else if (a._edited) tag = `<span class="tag tag-edited">수정</span>`;
+    if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
+    const thumb = a.imageUrl ? `<img class="thumb" src="${a.imageUrl}" alt="" loading="lazy" />` : "";
+    return `
     <tr>
       <td class="cell-name" title="${esc(a.assetName)}"><div class="name-wrap">${thumb}<span>${esc(a.assetName)} ${tag}</span></div></td>
       <td class="cell-num">${esc(a.assetNumber)}</td>
@@ -388,82 +442,69 @@ function render() {
         <button class="btn-mini btn-del" data-id="${esc(a.id)}">${isAdmin ? "삭제" : "삭제요청"}</button>
       </td>
     </tr>`;
-    })
-    .join("");
-
+  }).join("");
   renderPagination();
 }
-
 function renderPagination() {
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const nav = document.getElementById("pagination");
   if (totalPages <= 1) { nav.innerHTML = ""; return; }
-
   let html = `<button data-page="${currentPage - 1}" ${currentPage === 1 ? "disabled" : ""}>‹</button>`;
   const range = [1];
   for (let p = currentPage - 2; p <= currentPage + 2; p++) if (p > 1 && p < totalPages) range.push(p);
   if (totalPages > 1) range.push(totalPages);
-  const uniq = [...new Set(range)].sort((a, b) => a - b);
-
-  let prev = 0;
-  uniq.forEach((p) => {
-    if (p - prev > 1) html += `<span style="padding:0 4px;color:#9ca3af;">…</span>`;
+  [...new Set(range)].sort((a, b) => a - b).forEach((p, i, arr) => {
+    if (i > 0 && p - arr[i - 1] > 1) html += `<span style="padding:0 4px;color:#9ca3af;">…</span>`;
     html += `<button data-page="${p}" class="${p === currentPage ? "active" : ""}">${p}</button>`;
-    prev = p;
   });
   html += `<button data-page="${currentPage + 1}" ${currentPage === totalPages ? "disabled" : ""}>›</button>`;
   nav.innerHTML = html;
 }
 
-// ===== 상세 모달 =====
+// ===== 상세 =====
 function openDetail(id) {
   const a = findAsset(id);
   if (!a) return;
   detailCurrentId = id;
-
   const photo = a.imageUrl
     ? `<div class="detail-photo"><img src="${a.imageUrl}" alt="물품 사진" /></div>`
     : `<div class="detail-photo no-photo">등록된 사진 없음</div>`;
-
   const rows = [
-    ["자산명", a.assetName],
-    ["자산번호", a.assetNumber],
-    ["자산구분", a.category],
-    ["모델명", a.model],
-    ["규격", a.spec],
-    ["제작회사", a.maker],
-    ["단가", a.unitPrice ? won(a.unitPrice) : ""],
-    ["수량", a.qty],
-    ["취득금액", a.acquireCost ? won(a.acquireCost) : ""],
-    ["취득일자", a.acquireDate],
-    ["보관 위치", a.location],
-    ["관리 기관", a.org],
-    ["운영 부서", a.dept],
-    ["담당자", a.manager],
-    ["등재일", a.regDate],
-    ["상태", a.status],
-    ["비고", a.note],
+    ["자산명", a.assetName], ["자산번호", a.assetNumber], ["자산구분", a.category],
+    ["모델명", a.model], ["규격", a.spec], ["제작회사", a.maker],
+    ["단가", a.unitPrice ? won(a.unitPrice) : ""], ["수량", a.qty],
+    ["취득금액", a.acquireCost ? won(a.acquireCost) : ""], ["취득일자", a.acquireDate],
+    ["보관 위치", a.location], ["관리 기관", a.org], ["운영 부서", a.dept],
+    ["담당자", a.manager], ["등재일", a.regDate], ["상태", a.status], ["비고", a.note],
   ];
-
   document.getElementById("detailTitle").textContent = a.assetName || "자산 상세 정보";
-  document.getElementById("detailBody").innerHTML =
-    photo +
-    `<dl class="detail-grid">` +
-    rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") +
-    `</dl>`;
+  document.getElementById("detailBody").innerHTML = photo +
+    `<dl class="detail-grid">` + rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") + `</dl>`;
+  document.getElementById("detailDownloadBtn").hidden = !a.imageUrl;
   document.getElementById("detailEditBtn").textContent = isAdmin ? "수정" : "수정 요청";
   document.getElementById("detailDeleteBtn").textContent = isAdmin ? "삭제" : "삭제 요청";
   show("detailOverlay");
 }
+function downloadPhoto() {
+  const a = findAsset(detailCurrentId);
+  if (!a || !a.imageUrl) return;
+  const safe = (s) => String(s || "").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
+  const link = document.createElement("a");
+  link.href = a.imageUrl;
+  link.download = `${safe(a.assetName) || "asset"}_${safe(a.assetNumber)}.jpg`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
 
 // ===== 등록/수정 폼 =====
 function openForm(id) {
+  if (!requireLogin()) return;
+  editingRequestId = null;
   const form = document.getElementById("assetForm");
   form.reset();
   document.getElementById("formError").hidden = true;
   currentPhoto = "";
-
-  // 요청 정보 입력란은 비관리자에게만 표시
   document.querySelectorAll(".request-only").forEach((el) => (el.style.display = isAdmin ? "none" : ""));
 
   if (id) {
@@ -471,42 +512,31 @@ function openForm(id) {
     if (!a) return;
     document.getElementById("formTitle").textContent = isAdmin ? "자산 수정" : "자산 수정 요청";
     document.getElementById("formSaveBtn").textContent = isAdmin ? "저장" : "수정 요청";
+    fillForm(a);
     document.getElementById("f-id").value = a.id;
-    document.getElementById("f-assetName").value = a.assetName || "";
-    document.getElementById("f-assetNumber").value = a.assetNumber || "";
-    document.getElementById("f-category").value = a.category || "";
-    document.getElementById("f-status").value = a.status || "취득";
-    document.getElementById("f-location").value = a.location || "";
-    document.getElementById("f-manager").value = a.manager || "";
-    document.getElementById("f-dept").value = a.dept || "";
-    document.getElementById("f-model").value = a.model || "";
-    document.getElementById("f-spec").value = a.spec || "";
-    document.getElementById("f-maker").value = a.maker || "";
-    document.getElementById("f-acquireCost").value = a.acquireCost || "";
-    document.getElementById("f-note").value = a.note || "";
     currentPhoto = a.imageUrl || "";
   } else {
     document.getElementById("formTitle").textContent = isAdmin ? "자산 등록" : "자산 등록 요청";
     document.getElementById("formSaveBtn").textContent = isAdmin ? "등록" : "등록 요청";
     document.getElementById("f-id").value = "";
   }
-
   renderPhotoPreview();
   show("formOverlay");
 }
-
+function fillForm(a) {
+  const set = (k, v) => (document.getElementById("f-" + k).value = v ?? "");
+  set("assetName", a.assetName); set("assetNumber", a.assetNumber); set("category", a.category);
+  document.getElementById("f-status").value = a.status || "취득";
+  set("location", a.location); set("manager", a.manager); set("dept", a.dept);
+  set("model", a.model); set("spec", a.spec); set("maker", a.maker);
+  set("acquireCost", a.acquireCost || ""); set("note", a.note);
+}
 function renderPhotoPreview() {
   const box = document.getElementById("photoPreview");
   const removeBtn = document.getElementById("removePhotoBtn");
-  if (currentPhoto) {
-    box.innerHTML = `<img src="${currentPhoto}" alt="미리보기" />`;
-    removeBtn.hidden = false;
-  } else {
-    box.innerHTML = `<span class="photo-placeholder">사진 없음</span>`;
-    removeBtn.hidden = true;
-  }
+  if (currentPhoto) { box.innerHTML = `<img src="${currentPhoto}" alt="미리보기" />`; removeBtn.hidden = false; }
+  else { box.innerHTML = `<span class="photo-placeholder">사진 없음</span>`; removeBtn.hidden = true; }
 }
-
 function handlePhotoUpload(file) {
   if (!file) return;
   if (!file.type.startsWith("image/")) {
@@ -520,14 +550,9 @@ function handlePhotoUpload(file) {
     img.onload = () => {
       const MAX = 800;
       let { width, height } = img;
-      if (width > MAX || height > MAX) {
-        const r = Math.min(MAX / width, MAX / height);
-        width = Math.round(width * r);
-        height = Math.round(height * r);
-      }
+      if (width > MAX || height > MAX) { const r = Math.min(MAX / width, MAX / height); width = Math.round(width * r); height = Math.round(height * r); }
       const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = width; canvas.height = height;
       canvas.getContext("2d").drawImage(img, 0, 0, width, height);
       currentPhoto = canvas.toDataURL("image/jpeg", 0.7);
       renderPhotoPreview();
@@ -536,64 +561,41 @@ function handlePhotoUpload(file) {
   };
   reader.readAsDataURL(file);
 }
-
 function showFormError(msg) {
   const el = document.getElementById("formError");
-  el.textContent = msg;
-  el.hidden = false;
+  el.textContent = msg; el.hidden = false;
 }
 
-// 폼 저장: 관리자=즉시 반영, 일반=요청 등록
 async function saveForm() {
   const id = document.getElementById("f-id").value;
   const get = (k) => document.getElementById("f-" + k).value.trim();
-
-  const assetName = get("assetName");
-  const assetNumber = get("assetNumber");
-  const location = get("location");
-  const manager = get("manager");
-
+  const assetName = get("assetName"), assetNumber = get("assetNumber"), location = get("location"), manager = get("manager");
   if (!assetName || !assetNumber || !location || !manager) {
     showFormError("필수 항목을 입력해주세요. (자산명, 자산번호, 위치, 담당자)");
     return;
   }
-
-  // 자산번호 중복 검사 (자기 자신 제외)
+  // 자산번호 중복 (편집중인 자산/요청 제외)
   const dup = assets.find((a) => a.assetNumber === assetNumber && String(a.id) !== String(id));
-  if (dup) {
-    showFormError("이미 등록된 자산번호입니다.");
-    return;
-  }
+  if (dup && !editingRequestId) { showFormError("이미 등록된 자산번호입니다."); return; }
 
   const fields = {
     assetName, assetNumber, location, manager,
-    category: get("category"),
-    status: get("status") || "취득",
-    dept: get("dept"),
-    model: get("model"),
-    spec: get("spec"),
-    maker: get("maker"),
-    acquireCost: Number(get("acquireCost")) || 0,
-    note: get("note"),
-    imageUrl: currentPhoto || "",
+    category: get("category"), status: get("status") || "취득", dept: get("dept"),
+    model: get("model"), spec: get("spec"), maker: get("maker"),
+    acquireCost: Number(get("acquireCost")) || 0, note: get("note"), imageUrl: currentPhoto || "",
   };
 
   const saveBtn = document.getElementById("formSaveBtn");
   saveBtn.disabled = true;
   try {
-    if (isAdmin) {
-      // 즉시 반영
+    if (editingRequestId) {
+      // 본인 대기중 요청 수정
+      await updateMyRequest(editingRequestId, { payload: fields, requester: get("requester"), note: get("reqnote") });
+    } else if (isAdmin) {
       if (!id) await applyCreate(fields);
       else await applyUpdate(id, fields);
     } else {
-      // 요청 등록
-      await submitRequest({
-        action: id ? "update" : "create",
-        target_id: id || null,
-        payload: fields,
-        requester: get("requester"),
-        note: get("reqnote"),
-      });
+      await submitRequest({ action: id ? "update" : "create", target_id: id || null, payload: fields, requester: get("requester"), note: get("reqnote") });
     }
   } catch (e) {
     console.error(e);
@@ -603,32 +605,28 @@ async function saveForm() {
   }
   saveBtn.disabled = false;
   hide("formOverlay");
-
-  if (isAdmin) { await sbLoadOverlay(); }
-  else { await sbLoadRequests(); alert("요청이 접수되었습니다. 관리자 승인 후 반영됩니다."); }
-  refresh();
+  const wasReqEdit = !!editingRequestId;
+  editingRequestId = null;
+  await reloadAll();
+  rerender();
+  if (wasReqEdit) { renderMyRequests(); }
+  else if (!isAdmin) alert("요청이 접수되었습니다. 관리자 승인 후 반영됩니다.");
 }
 
 // ===== 삭제 =====
 async function handleDelete(id) {
+  if (!requireLogin()) return;
   const a = findAsset(id);
   if (!a) return;
-
   if (isAdmin) {
     if (!confirm(`정말 이 자산을 삭제하시겠습니까?\n\n${a.assetName}`)) return;
-    try {
-      await applyDelete(id);
-    } catch (e) {
-      console.error(e);
-      alert("삭제에 실패했습니다. 네트워크 연결을 확인해주세요.");
-      return;
-    }
+    try { await applyDelete(id); }
+    catch (e) { console.error(e); alert("삭제에 실패했습니다."); return; }
     hide("detailOverlay");
-    await sbLoadOverlay();
-    refresh();
+    await reloadAll(); rerender();
   } else {
-    // 비관리자 → 삭제 요청 모달 열기 (신청자/사유 입력)
     delReqId = id;
+    delReqEditId = null;
     document.getElementById("dr-requester").value = "";
     document.getElementById("dr-note").value = "";
     document.getElementById("delReqTarget").innerHTML =
@@ -636,85 +634,44 @@ async function handleDelete(id) {
     show("delReqOverlay");
   }
 }
-
-let delReqId = null;
-
 async function submitDeleteRequest() {
-  const id = delReqId;
-  const a = findAsset(id);
-  if (!a) { hide("delReqOverlay"); return; }
   const btn = document.getElementById("delReqSubmit");
+  const requester = document.getElementById("dr-requester").value.trim();
+  const note = document.getElementById("dr-note").value.trim();
   btn.disabled = true;
   try {
-    await submitRequest({
-      action: "delete",
-      target_id: id,
-      payload: { assetName: a.assetName, assetNumber: a.assetNumber },
-      requester: document.getElementById("dr-requester").value.trim(),
-      note: document.getElementById("dr-note").value.trim(),
-    });
+    if (delReqEditId) {
+      await updateMyRequest(delReqEditId, { requester, note });
+    } else {
+      const a = findAsset(delReqId);
+      if (!a) { hide("delReqOverlay"); btn.disabled = false; return; }
+      await submitRequest({ action: "delete", target_id: delReqId, payload: { assetName: a.assetName, assetNumber: a.assetNumber }, requester, note });
+    }
   } catch (e) {
-    console.error(e);
-    btn.disabled = false;
-    alert("요청 전송에 실패했습니다. 네트워크 연결을 확인해주세요.");
-    return;
+    console.error(e); btn.disabled = false;
+    alert("요청 전송에 실패했습니다."); return;
   }
   btn.disabled = false;
   hide("delReqOverlay");
   hide("detailOverlay");
-  await sbLoadRequests();
-  alert("삭제 요청이 접수되었습니다. 관리자 승인 후 반영됩니다.");
-  refresh();
+  const wasEdit = !!delReqEditId;
+  delReqEditId = null;
+  await reloadAll(); rerender();
+  if (wasEdit) renderMyRequests();
+  else alert("삭제 요청이 접수되었습니다. 관리자 승인 후 반영됩니다.");
 }
 
-// ===== 이력(스냅샷) =====
-const SNAP_FIELDS = ["assetName", "assetNumber", "category", "status", "location",
-  "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
-const DATA_FIELDS = ["assetName", "assetNumber", "category", "status", "location",
-  "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
-
-function snapshotOf(a) {
-  if (!a) return null;
-  const o = {};
-  SNAP_FIELDS.forEach((k) => (o[k] = a[k] ?? ""));
-  return o;
-}
-function cleanFields(f) {
-  const o = {};
-  DATA_FIELDS.forEach((k) => { if (f[k] !== undefined) o[k] = f[k]; });
-  return o;
-}
-
-async function sbLoadHistory() {
-  if (!sb || !isAdmin) return;
-  const { data, error } = await sb
-    .from("history")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(500);
-  if (error) { console.error("이력 로드 오류:", error.message); return; }
-  history = data || [];
-}
-
+// ===== 이력 =====
 async function logHistory(entry) {
   if (!sb) return;
   try {
     await sb.from("history").insert({
-      asset_id: String(entry.asset_id),
-      asset_name: entry.asset_name || "",
-      action: entry.action,
-      before_snap: entry.before || null,
-      after_snap: entry.after || null,
-      requester: entry.requester || "",
-      note: entry.note || "",
-      approved_by: adminEmail || "",
+      asset_id: String(entry.asset_id), asset_name: entry.asset_name || "", action: entry.action,
+      before_snap: entry.before || null, after_snap: entry.after || null,
+      requester: entry.requester || "", note: entry.note || "", approved_by: (myProfile?.username || currentUser?.email || ""),
     });
-  } catch (e) {
-    console.error("이력 기록 실패:", e);
-  }
+  } catch (e) { console.error("이력 기록 실패:", e); }
 }
-
-// ===== 오버레이 직접 반영 (관리자) + 이력 기록 =====
 async function applyCreate(fields, meta = {}) {
   const id = "u" + Date.now() + Math.floor(Math.random() * 1000);
   const data = { ...cleanFields(fields), regDate: todayStr() };
@@ -722,26 +679,21 @@ async function applyCreate(fields, meta = {}) {
   if (error) throw error;
   await logHistory({ asset_id: id, asset_name: data.assetName, action: "create", before: null, after: snapshotOf(data), requester: meta.requester, note: meta.note });
 }
-
 async function applyUpdate(id, fields, meta = {}) {
   const current = findAsset(id);
   const before = snapshotOf(current);
   const clean = cleanFields(fields);
   if (String(id).startsWith("u")) {
     const existing = overlay.find((o) => String(o.id) === String(id))?.data || {};
-    const data = { ...existing, ...clean };
-    const { error } = await sb.from("assets").upsert({ id, kind: "added", data, updated_at: new Date().toISOString() });
+    const { error } = await sb.from("assets").upsert({ id, kind: "added", data: { ...existing, ...clean }, updated_at: new Date().toISOString() });
     if (error) throw error;
   } else {
     const existing = overlay.find((o) => String(o.id) === String(id) && o.kind === "override")?.data || {};
-    const data = { ...existing, ...clean };
-    const { error } = await sb.from("assets").upsert({ id: String(id), kind: "override", data, updated_at: new Date().toISOString() });
+    const { error } = await sb.from("assets").upsert({ id: String(id), kind: "override", data: { ...existing, ...clean }, updated_at: new Date().toISOString() });
     if (error) throw error;
   }
-  const after = snapshotOf({ ...current, ...clean });
-  await logHistory({ asset_id: id, asset_name: (current && current.assetName) || clean.assetName, action: "update", before, after, requester: meta.requester, note: meta.note });
+  await logHistory({ asset_id: id, asset_name: (current && current.assetName) || clean.assetName, action: "update", before, after: snapshotOf({ ...current, ...clean }), requester: meta.requester, note: meta.note });
 }
-
 async function applyDelete(id, meta = {}) {
   const current = findAsset(id);
   const before = snapshotOf(current);
@@ -754,114 +706,148 @@ async function applyDelete(id, meta = {}) {
   }
   await logHistory({ asset_id: id, asset_name: current && current.assetName, action: "delete", before, after: null, requester: meta.requester, note: meta.note });
 }
-
-// 특정 스냅샷 상태로 강제 적용 (되돌리기용)
 async function applyState(assetId, snap) {
   const isAdded = String(assetId).startsWith("u");
   if (snap === null || snap === undefined) {
-    // 그 시점에 존재하지 않던 상태 → 삭제 처리
-    if (isAdded) {
-      const { error } = await sb.from("assets").delete().eq("id", assetId);
-      if (error) throw error;
-    } else {
-      const { error } = await sb.from("assets").upsert({ id: String(assetId), kind: "deleted", data: {}, updated_at: new Date().toISOString() });
-      if (error) throw error;
-    }
+    if (isAdded) { const { error } = await sb.from("assets").delete().eq("id", assetId); if (error) throw error; }
+    else { const { error } = await sb.from("assets").upsert({ id: String(assetId), kind: "deleted", data: {}, updated_at: new Date().toISOString() }); if (error) throw error; }
   } else {
-    const data = cleanFields(snap);
-    const { error } = await sb.from("assets").upsert({ id: String(assetId), kind: isAdded ? "added" : "override", data, updated_at: new Date().toISOString() });
+    const { error } = await sb.from("assets").upsert({ id: String(assetId), kind: isAdded ? "added" : "override", data: cleanFields(snap), updated_at: new Date().toISOString() });
     if (error) throw error;
   }
 }
-
-// 이력 한 줄을 골라 "그 변경 이전 상태"로 되돌림
 async function revertHistory(histId) {
   const h = history.find((x) => String(x.id) === String(histId));
   if (!h) return;
   if (!confirm(`이 변경을 취소하고 '이전 상태'로 되돌리시겠습니까?\n\n대상: ${h.asset_name || h.asset_id}`)) return;
-  const current = findAsset(h.asset_id);
-  const beforeNow = snapshotOf(current);
+  const beforeNow = snapshotOf(findAsset(h.asset_id));
   try {
     await applyState(h.asset_id, h.before_snap);
-    await logHistory({ asset_id: h.asset_id, asset_name: h.asset_name, action: "revert", before: beforeNow, after: h.before_snap, requester: "", note: "이전 상태로 되돌림" });
-  } catch (e) {
-    console.error(e);
-    alert("되돌리기에 실패했습니다.");
-    return;
-  }
-  await sbLoadOverlay();
-  await sbLoadHistory();
-  refresh();
-  renderHistory();
+    await logHistory({ asset_id: h.asset_id, asset_name: h.asset_name, action: "revert", before: beforeNow, after: h.before_snap, note: "이전 상태로 되돌림" });
+  } catch (e) { console.error(e); alert("되돌리기에 실패했습니다."); return; }
+  await reloadAll(); rerender(); renderHistory();
 }
-
-// 이력 기록 삭제 (기록만 지움 — 자산 상태는 바뀌지 않음)
 async function deleteHistory(histId) {
-  if (!confirm("이 기록을 삭제하시겠습니까?\n\n(기록만 지워지며 현재 자산 상태는 바뀌지 않습니다. 삭제 후에는 이 시점으로 되돌릴 수 없습니다.)")) return;
-  try {
-    const { error } = await sb.from("history").delete().eq("id", histId);
-    if (error) throw error;
-  } catch (e) {
-    console.error(e);
-    alert("기록 삭제에 실패했습니다.");
-    return;
-  }
-  await sbLoadHistory();
-  renderHistory();
+  if (!confirm("이 기록을 삭제하시겠습니까?\n\n(기록만 지워지며 현재 자산 상태는 바뀌지 않습니다. 삭제 후 이 시점으로 되돌릴 수 없습니다.)")) return;
+  try { const { error } = await sb.from("history").delete().eq("id", histId); if (error) throw error; }
+  catch (e) { console.error(e); alert("기록 삭제에 실패했습니다."); return; }
+  await sbLoadHistory(); renderHistory();
 }
 
-// ===== 변경 요청 (일반 사용자) =====
+// ===== 요청 (사용자) =====
 async function submitRequest(req) {
-  if (!sb) throw new Error("Supabase 미연결");
+  if (!sb || !currentUser) throw new Error("로그인 필요");
   const { error } = await sb.from("requests").insert({
-    action: req.action,
-    target_id: req.target_id,
-    payload: req.payload,
-    requester: req.requester || "",
-    note: req.note || "",
-    status: "pending",
+    action: req.action, target_id: req.target_id, payload: req.payload,
+    requester: req.requester || (myProfile?.username || ""), note: req.note || "",
+    status: "pending", user_id: currentUser.id,
   });
   if (error) throw error;
 }
-
-// ===== 승인 패널 (관리자) =====
-function openReview() {
-  renderReview();
-  show("reviewOverlay");
+async function updateMyRequest(reqId, patch) {
+  const { error } = await sb.from("requests").update(patch).eq("id", reqId);
+  if (error) throw error;
+}
+async function cancelMyRequest(reqId) {
+  if (!confirm("이 신청을 취소하시겠습니까?")) return;
+  try { const { error } = await sb.from("requests").delete().eq("id", reqId); if (error) throw error; }
+  catch (e) { console.error(e); alert("취소에 실패했습니다."); return; }
+  await reloadAll(); rerender(); renderMyRequests();
+}
+// 본인 대기중 요청 수정 열기
+function editMyRequest(reqId) {
+  const r = myRequests.find((x) => String(x.id) === String(reqId));
+  if (!r || r.status !== "pending") return;
+  if (r.action === "delete") {
+    delReqEditId = r.id; delReqId = r.target_id;
+    document.getElementById("dr-requester").value = r.requester || "";
+    document.getElementById("dr-note").value = r.note || "";
+    const p = r.payload || {};
+    document.getElementById("delReqTarget").innerHTML = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})<br><span class="del-note">삭제 요청 내용을 수정합니다.</span>`;
+    hide("myReqOverlay");
+    show("delReqOverlay");
+  } else {
+    editingRequestId = r.id;
+    const form = document.getElementById("assetForm");
+    form.reset();
+    document.getElementById("formError").hidden = true;
+    currentPhoto = (r.payload && r.payload.imageUrl) || "";
+    document.querySelectorAll(".request-only").forEach((el) => (el.style.display = ""));
+    document.getElementById("formTitle").textContent = r.action === "create" ? "등록 요청 수정" : "수정 요청 수정";
+    document.getElementById("formSaveBtn").textContent = "요청 수정";
+    fillForm(r.payload || {});
+    document.getElementById("f-id").value = r.target_id || "";
+    document.getElementById("f-requester").value = r.requester || "";
+    document.getElementById("f-reqnote").value = r.note || "";
+    renderPhotoPreview();
+    hide("myReqOverlay");
+    show("formOverlay");
+  }
 }
 
-function renderReview() {
-  const body = document.getElementById("reviewBody");
-  if (requests.length === 0) {
-    body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`;
-    return;
-  }
+// ===== 내 신청 내역 패널 =====
+function reqStatusBadge(s) {
+  if (s === "approved") return `<span class="badge badge-normal">승인됨</span>`;
+  if (s === "rejected") return `<span class="badge badge-warn">반려됨</span>`;
+  return `<span class="badge badge-gray">대기중</span>`;
+}
+function openMyRequests() {
+  renderMyRequests();
+  markNotifSeen();
+  updateUI();
+  show("myReqOverlay");
+}
+function renderMyRequests() {
+  const body = document.getElementById("myReqBody");
+  if (myRequests.length === 0) { body.innerHTML = `<div class="empty-msg">신청 내역이 없습니다.</div>`; return; }
   const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청" };
   const actionCls = { create: "req-create", update: "req-update", delete: "req-delete" };
+  body.innerHTML = myRequests.map((r) => {
+    const p = r.payload || {};
+    const decided = r.status !== "pending";
+    const meta = [
+      `신청: ${fmtTime(r.created_at)}`,
+      decided && r.decided_at && `처리: ${fmtTime(r.decided_at)}`,
+      r.note && `사유: ${esc(r.note)}`,
+    ].filter(Boolean).join(" · ");
+    const actions = !decided
+      ? `<button class="btn btn-secondary btn-sm" data-editreq="${r.id}">수정</button>
+         <button class="btn btn-danger btn-sm" data-cancelreq="${r.id}">취소</button>`
+      : "";
+    return `
+      <div class="req-card">
+        <div class="req-top">
+          <span class="req-badge ${actionCls[r.action]}">${actionLabel[r.action]}</span>
+          ${reqStatusBadge(r.status)}
+          <span class="req-meta">${meta}</span>
+        </div>
+        <div class="req-summary"><b>${esc(p.assetName || "")}</b>${p.assetNumber ? ` (${esc(p.assetNumber)})` : ""}${p.location ? ` · 위치: ${esc(p.location)}` : ""}</div>
+        ${actions ? `<div class="req-actions">${actions}</div>` : ""}
+      </div>`;
+  }).join("");
+}
 
-  body.innerHTML = requests
-    .map((r) => {
-      const p = r.payload || {};
-      let summary = "";
-      if (r.action === "delete") {
-        summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})`;
-      } else {
-        summary = `
-          <div class="req-fields">
+// ===== 승인 대기 (관리자) =====
+function openReview() { renderReview(); show("reviewOverlay"); }
+function renderReview() {
+  const body = document.getElementById("reviewBody");
+  if (requests.length === 0) { body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`; return; }
+  const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청" };
+  const actionCls = { create: "req-create", update: "req-update", delete: "req-delete" };
+  body.innerHTML = requests.map((r) => {
+    const p = r.payload || {};
+    let summary = r.action === "delete"
+      ? `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})`
+      : `<div class="req-fields">
             <span><b>${esc(p.assetName || "")}</b></span>
             <span>자산번호: ${esc(p.assetNumber || "-")}</span>
             <span>위치: ${esc(p.location || "-")}</span>
             <span>담당자: ${esc(p.manager || "-")}</span>
             <span>상태: ${esc(p.status || "-")}</span>
             ${p.dept ? `<span>부서: ${esc(p.dept)}</span>` : ""}
-          </div>`;
-      }
-      const meta = [
-        `요청일시: ${fmtTime(r.created_at)}`,
-        r.requester && `신청자: ${esc(r.requester)}`,
-        r.note && `사유: ${esc(r.note)}`,
-      ].filter(Boolean).join(" · ");
-      return `
+         </div>`;
+    const meta = [`요청일시: ${fmtTime(r.created_at)}`, r.requester && `신청자: ${esc(r.requester)}`, r.note && `사유: ${esc(r.note)}`].filter(Boolean).join(" · ");
+    return `
       <div class="req-card">
         <div class="req-top">
           <span class="req-badge ${actionCls[r.action]}">${actionLabel[r.action]}</span>
@@ -873,10 +859,8 @@ function renderReview() {
           <button class="btn btn-danger btn-sm" data-reject="${r.id}">반려</button>
         </div>
       </div>`;
-    })
-    .join("");
+  }).join("");
 }
-
 async function approveRequest(reqId) {
   const r = requests.find((x) => String(x.id) === String(reqId));
   if (!r) return;
@@ -885,55 +869,22 @@ async function approveRequest(reqId) {
     if (r.action === "create") await applyCreate(r.payload, meta);
     else if (r.action === "update") await applyUpdate(r.target_id, r.payload, meta);
     else if (r.action === "delete") await applyDelete(r.target_id, meta);
-    const { error } = await sb.from("requests").update({ status: "approved" }).eq("id", reqId);
+    const { error } = await sb.from("requests").update({ status: "approved", decided_at: new Date().toISOString() }).eq("id", reqId);
     if (error) throw error;
-  } catch (e) {
-    console.error(e);
-    alert("승인 처리에 실패했습니다.");
-    return;
-  }
-  await sbLoadOverlay();
-  await sbLoadRequests();
-  await sbLoadHistory();
-  refresh();
-  renderReview();
+  } catch (e) { console.error(e); alert("승인 처리에 실패했습니다."); return; }
+  await reloadAll(); rerender(); renderReview();
 }
-
 async function rejectRequest(reqId) {
   try {
-    const { error } = await sb.from("requests").update({ status: "rejected" }).eq("id", reqId);
+    const { error } = await sb.from("requests").update({ status: "rejected", decided_at: new Date().toISOString() }).eq("id", reqId);
     if (error) throw error;
-  } catch (e) {
-    console.error(e);
-    alert("반려 처리에 실패했습니다.");
-    return;
-  }
-  await sbLoadRequests();
-  refresh();
-  renderReview();
+  } catch (e) { console.error(e); alert("반려 처리에 실패했습니다."); return; }
+  await reloadAll(); rerender(); renderReview();
 }
 
-// ===== 결재/변경 이력 패널 =====
-function fmtTime(iso) {
-  if (!iso) return "-";
-  try {
-    const d = new Date(iso);
-    const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-  } catch { return iso; }
-}
-
-function shortVal(v) {
-  v = v === "" || v === null || v === undefined ? "(없음)" : String(v);
-  return v.length > 28 ? v.slice(0, 28) + "…" : v;
-}
-
-const HIST_LABELS = {
-  assetName: "자산명", assetNumber: "자산번호", category: "분류", status: "상태",
-  location: "위치", manager: "담당자", dept: "부서", model: "모델", spec: "규격",
-  maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진",
-};
-
+// ===== 결재/변경 이력 (관리자) =====
+function shortVal(v) { v = v === "" || v === null || v === undefined ? "(없음)" : String(v); return v.length > 28 ? v.slice(0, 28) + "…" : v; }
+const HIST_LABELS = { assetName: "자산명", assetNumber: "자산번호", category: "분류", status: "상태", location: "위치", manager: "담당자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
 function histSummary(h) {
   if (h.action === "delete") return `자산이 <b>삭제</b>되었습니다.`;
   const b = h.before_snap, a = h.after_snap;
@@ -943,42 +894,27 @@ function histSummary(h) {
   const changes = [];
   Object.keys(HIST_LABELS).forEach((k) => {
     const bv = b[k] ?? "", av = a[k] ?? "";
-    if (String(bv) !== String(av)) {
-      if (k === "imageUrl") changes.push(`${HIST_LABELS[k]} 변경`);
-      else changes.push(`${HIST_LABELS[k]}: ${esc(shortVal(bv))} → ${esc(shortVal(av))}`);
-    }
+    if (String(bv) !== String(av)) changes.push(k === "imageUrl" ? `${HIST_LABELS[k]} 변경` : `${HIST_LABELS[k]}: ${esc(shortVal(bv))} → ${esc(shortVal(av))}`);
   });
   return changes.length ? changes.join("<br>") : "변경 없음";
 }
-
 async function openHistory() {
   await sbLoadHistory();
   document.getElementById("histSearch").value = "";
   renderHistory();
   show("histOverlay");
 }
-
 function renderHistory() {
   const body = document.getElementById("histBody");
   const kw = document.getElementById("histSearch").value.trim().toLowerCase();
   let rows = history;
   if (kw) rows = rows.filter((h) => `${h.asset_name} ${h.asset_id}`.toLowerCase().includes(kw));
-
-  if (rows.length === 0) {
-    body.innerHTML = `<div class="empty-msg">기록이 없습니다.</div>`;
-    return;
-  }
+  if (rows.length === 0) { body.innerHTML = `<div class="empty-msg">기록이 없습니다.</div>`; return; }
   const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림" };
   const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert" };
-
-  body.innerHTML = rows
-    .map((h) => {
-      const meta = [
-        h.approved_by && `결재자: ${esc(h.approved_by)}`,
-        h.requester && `신청자: ${esc(h.requester)}`,
-        h.note && esc(h.note),
-      ].filter(Boolean).join(" · ");
-      return `
+  body.innerHTML = rows.map((h) => {
+    const meta = [h.approved_by && `결재자: ${esc(h.approved_by)}`, h.requester && `신청자: ${esc(h.requester)}`, h.note && esc(h.note)].filter(Boolean).join(" · ");
+    return `
       <div class="req-card">
         <div class="req-top">
           <span class="req-badge ${actCls[h.action] || "badge-gray"}">${actLabel[h.action] || h.action}</span>
@@ -991,31 +927,43 @@ function renderHistory() {
           <button class="btn btn-danger btn-sm" data-delhist="${h.id}">기록 삭제</button>
         </div>
       </div>`;
-    })
-    .join("");
+  }).join("");
+}
+
+// ===== 회원 관리 (관리자) =====
+async function openMembers() {
+  await sbLoadMembers();
+  renderMembers();
+  show("membersOverlay");
+}
+function renderMembers() {
+  const body = document.getElementById("membersBody");
+  if (members.length === 0) { body.innerHTML = `<div class="empty-msg">회원이 없습니다.</div>`; return; }
+  body.innerHTML = `
+    <table class="member-table">
+      <thead><tr><th>아이디</th><th>이메일</th><th>권한</th><th>가입일</th></tr></thead>
+      <tbody>
+        ${members.map((m) => `
+          <tr>
+            <td>${esc(m.username || "-")}</td>
+            <td class="cell-num">${esc(m.email || "-")}</td>
+            <td>${m.role === "admin" ? `<span class="badge badge-normal">관리자</span>` : `<span class="badge badge-gray">사용자</span>`}</td>
+            <td>${fmtTime(m.created_at)}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+    <p class="member-count">총 ${members.length}명</p>`;
 }
 
 // ===== 엑셀 내보내기 =====
 function exportExcel() {
   if (filtered.length === 0) { alert("내보낼 자산이 없습니다."); return; }
   const rows = filtered.map((a) => ({
-    "자산명": a.assetName || "",
-    "자산번호": a.assetNumber || "",
-    "자산구분": a.category || "",
-    "모델명": a.model || "",
-    "규격": a.spec || "",
-    "제작회사": a.maker || "",
-    "단가": a.unitPrice || 0,
-    "수량": a.qty || 0,
-    "취득금액": a.acquireCost || 0,
-    "취득일자": a.acquireDate || "",
-    "보관 위치": a.location || "",
-    "관리 기관": a.org || "",
-    "운영 부서": a.dept || "",
-    "담당자": a.manager || "",
-    "등재일": a.regDate || "",
-    "상태": a.status || "",
-    "비고": a.note || "",
+    "자산명": a.assetName || "", "자산번호": a.assetNumber || "", "자산구분": a.category || "",
+    "모델명": a.model || "", "규격": a.spec || "", "제작회사": a.maker || "",
+    "단가": a.unitPrice || 0, "수량": a.qty || 0, "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "",
+    "보관 위치": a.location || "", "관리 기관": a.org || "", "운영 부서": a.dept || "",
+    "담당자": a.manager || "", "등재일": a.regDate || "", "상태": a.status || "", "비고": a.note || "",
     "구분": a._added ? "직접등록" : a._edited ? "수정됨" : "엑셀원본",
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -1024,35 +972,21 @@ function exportExcel() {
   XLSX.writeFile(wb, `자산목록_${todayStr()}.xlsx`);
 }
 
-// ===== 이벤트 바인딩 =====
+// ===== 이벤트 =====
 document.getElementById("searchInput").addEventListener("input", applyFilter);
 document.getElementById("categoryFilter").addEventListener("change", applyFilter);
-document.getElementById("clearBtn").addEventListener("click", () => {
-  document.getElementById("searchInput").value = "";
-  applyFilter();
-});
-
-document.getElementById("advToggle").addEventListener("click", () => {
-  const p = document.getElementById("advPanel");
-  p.hidden = !p.hidden;
-});
-["deptFilter", "statusFilter"].forEach((id) =>
-  document.getElementById(id).addEventListener("change", applyFilter));
-["minCost", "maxCost"].forEach((id) =>
-  document.getElementById(id).addEventListener("input", applyFilter));
+document.getElementById("clearBtn").addEventListener("click", () => { document.getElementById("searchInput").value = ""; applyFilter(); });
+document.getElementById("advToggle").addEventListener("click", () => { const p = document.getElementById("advPanel"); p.hidden = !p.hidden; });
+["deptFilter", "statusFilter"].forEach((id) => document.getElementById(id).addEventListener("change", applyFilter));
+["minCost", "maxCost"].forEach((id) => document.getElementById(id).addEventListener("input", applyFilter));
 document.getElementById("advReset").addEventListener("click", () => {
-  ["deptFilter", "statusFilter", "minCost", "maxCost", "categoryFilter"].forEach(
-    (id) => (document.getElementById(id).value = ""));
+  ["deptFilter", "statusFilter", "minCost", "maxCost", "categoryFilter"].forEach((id) => (document.getElementById(id).value = ""));
   applyFilter();
 });
-
-document.querySelectorAll(".asset-table th.sortable").forEach((th) =>
-  th.addEventListener("click", () => setSort(th.dataset.key)));
-
+document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEventListener("click", () => setSort(th.dataset.key)));
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
 document.getElementById("addBtn").addEventListener("click", () => openForm(null));
 
-// 테이블 행 버튼
 document.getElementById("assetTbody").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-id]");
   if (!btn) return;
@@ -1061,8 +995,6 @@ document.getElementById("assetTbody").addEventListener("click", (e) => {
   else if (btn.classList.contains("btn-edit")) openForm(id);
   else if (btn.classList.contains("btn-del")) handleDelete(id);
 });
-
-// 페이지네이션
 document.getElementById("pagination").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-page]");
   if (!btn || btn.disabled) return;
@@ -1071,36 +1003,39 @@ document.getElementById("pagination").addEventListener("click", (e) => {
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
-// 상세 모달 버튼
-document.getElementById("detailEditBtn").addEventListener("click", () => {
-  hide("detailOverlay");
-  openForm(detailCurrentId);
-});
+document.getElementById("detailEditBtn").addEventListener("click", () => { hide("detailOverlay"); openForm(detailCurrentId); });
 document.getElementById("detailDeleteBtn").addEventListener("click", () => handleDelete(detailCurrentId));
+document.getElementById("detailDownloadBtn").addEventListener("click", downloadPhoto);
 
-// 폼
 document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files[0]));
-document.getElementById("removePhotoBtn").addEventListener("click", () => {
-  currentPhoto = "";
-  document.getElementById("f-image").value = "";
-  renderPhotoPreview();
-});
+document.getElementById("removePhotoBtn").addEventListener("click", () => { currentPhoto = ""; document.getElementById("f-image").value = ""; renderPhotoPreview(); });
 document.getElementById("formSaveBtn").addEventListener("click", saveForm);
 document.getElementById("assetForm").addEventListener("submit", (e) => { e.preventDefault(); saveForm(); });
 
-// 로그인
-document.getElementById("loginBtn").addEventListener("click", () => {
-  document.getElementById("loginError").hidden = true;
-  show("loginOverlay");
-});
+document.getElementById("delReqSubmit").addEventListener("click", submitDeleteRequest);
+document.getElementById("delReqForm").addEventListener("submit", (e) => { e.preventDefault(); submitDeleteRequest(); });
+
+// 인증
+document.getElementById("loginBtn").addEventListener("click", () => openAuth("login"));
+document.getElementById("signupBtn").addEventListener("click", () => openAuth("signup"));
 document.getElementById("logoutBtn").addEventListener("click", logout);
-document.getElementById("loginSubmit").addEventListener("click", login);
-document.getElementById("loginForm").addEventListener("submit", (e) => { e.preventDefault(); login(); });
+document.getElementById("authSubmit").addEventListener("click", authSubmit);
+document.getElementById("authForm").addEventListener("submit", (e) => { e.preventDefault(); authSubmit(); });
+document.getElementById("authSwitch").addEventListener("click", () => { authMode = authMode === "login" ? "signup" : "login"; document.getElementById("authError").hidden = true; document.getElementById("authInfo").hidden = true; applyAuthMode(); });
 document.getElementById("forgotBtn").addEventListener("click", forgotPassword);
 document.getElementById("pwSubmit").addEventListener("click", updatePassword);
 document.getElementById("pwForm").addEventListener("submit", (e) => { e.preventDefault(); updatePassword(); });
 
-// 승인 패널
+// 내 신청
+document.getElementById("myReqBtn").addEventListener("click", openMyRequests);
+document.getElementById("myReqBody").addEventListener("click", (e) => {
+  const ed = e.target.closest("button[data-editreq]");
+  const cancel = e.target.closest("button[data-cancelreq]");
+  if (ed) editMyRequest(ed.dataset.editreq);
+  else if (cancel) cancelMyRequest(cancel.dataset.cancelreq);
+});
+
+// 승인 대기
 document.getElementById("reviewBtn").addEventListener("click", openReview);
 document.getElementById("reviewBody").addEventListener("click", (e) => {
   const ap = e.target.closest("button[data-approve]");
@@ -1109,7 +1044,7 @@ document.getElementById("reviewBody").addEventListener("click", (e) => {
   else if (rj) rejectRequest(rj.dataset.reject);
 });
 
-// 결재/변경 이력 패널
+// 이력
 document.getElementById("histBtn").addEventListener("click", openHistory);
 document.getElementById("histSearch").addEventListener("input", renderHistory);
 document.getElementById("histBody").addEventListener("click", (e) => {
@@ -1119,19 +1054,14 @@ document.getElementById("histBody").addEventListener("click", (e) => {
   else if (dl) deleteHistory(dl.dataset.delhist);
 });
 
-// 삭제 요청 모달
-document.getElementById("delReqSubmit").addEventListener("click", submitDeleteRequest);
-document.getElementById("delReqForm").addEventListener("submit", (e) => { e.preventDefault(); submitDeleteRequest(); });
+// 회원 관리
+document.getElementById("membersBtn").addEventListener("click", openMembers);
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "loginOverlay", "reviewOverlay", "histOverlay", "delReqOverlay"];
-document.querySelectorAll("[data-close]").forEach((btn) =>
-  btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
-document.querySelectorAll(".modal-overlay").forEach((ov) =>
-  ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") ALL_MODALS.forEach(hide);
-});
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay"];
+document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
+document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") ALL_MODALS.forEach(hide); });
 
 // 시작
 loadData();
