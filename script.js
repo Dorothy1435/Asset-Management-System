@@ -1,15 +1,15 @@
 // ===== 자산관리 시스템 =====
 // 베이스: assets.json (엑셀 원본, 읽기 전용)
-// 사용자 레이어: localStorage (직접 등록 / 수정 / 삭제)
+// 직접 등록분: Supabase (모든 사용자 공유, 실시간 동기화)
+// 엑셀 원본의 수정/삭제: localStorage (이 브라우저 한정)
 
 const LS = {
-  added: "assetmgr_added", // 사용자가 직접 등록한 자산 [{...}]
   overrides: "assetmgr_overrides", // 베이스 자산 수정 내용 { "<id>": {...} }
   deleted: "assetmgr_deleted", // 삭제된 베이스 자산 id 목록 ["<id>"]
 };
 
 let baseAssets = []; // assets.json 원본
-let userAdded = []; // localStorage 직접 등록
+let userAdded = []; // Supabase 직접 등록 (공유)
 let overrides = {}; // localStorage 수정
 let deleted = []; // localStorage 삭제
 
@@ -42,17 +42,59 @@ function statusBadge(status) {
   return `<span class="badge ${cls}">${val(s)}</span>`;
 }
 
-// ===== localStorage =====
-function loadUserData() {
+// ===== Supabase (직접 등록분 공유 저장) =====
+const SUPABASE_URL = "https://pmjwwvgcmaywbatryibc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_dOgVVneeoU9xeZlRWY7zFg_FdRE_PVp";
+const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+
+// 직접 등록 자산을 Supabase에서 로드
+async function sbLoadAdded() {
+  if (!sb) return;
+  const { data, error } = await sb
+    .from("assets")
+    .select("id, data, updated_at")
+    .order("updated_at", { ascending: false });
+  if (error) { console.error("Supabase 로드 오류:", error.message); return; }
+  userAdded = (data || []).map((r) => ({ ...r.data, id: r.id }));
+}
+
+// 등록/수정 (upsert)
+async function sbUpsert(asset) {
+  if (!sb) throw new Error("Supabase 미연결");
+  const { id, _added, _edited, ...data } = asset;
+  const { error } = await sb
+    .from("assets")
+    .upsert({ id, data, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+// 삭제
+async function sbDelete(id) {
+  if (!sb) throw new Error("Supabase 미연결");
+  const { error } = await sb.from("assets").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// 실시간 동기화 (다른 사용자의 변경 자동 반영)
+function sbSubscribe() {
+  if (!sb) return;
+  sb.channel("assets-realtime")
+    .on("postgres_changes", { event: "*", schema: "public", table: "assets" }, async () => {
+      await sbLoadAdded();
+      refresh();
+    })
+    .subscribe();
+}
+
+// ===== localStorage (엑셀 원본 수정/삭제는 로컬 유지) =====
+function loadLocalData() {
   try {
-    userAdded = JSON.parse(localStorage.getItem(LS.added) || "[]");
     overrides = JSON.parse(localStorage.getItem(LS.overrides) || "{}");
     deleted = JSON.parse(localStorage.getItem(LS.deleted) || "[]");
   } catch {
-    userAdded = []; overrides = {}; deleted = [];
+    overrides = {}; deleted = [];
   }
 }
-function saveAdded() { localStorage.setItem(LS.added, JSON.stringify(userAdded)); }
 function saveOverrides() { localStorage.setItem(LS.overrides, JSON.stringify(overrides)); }
 function saveDeleted() { localStorage.setItem(LS.deleted, JSON.stringify(deleted)); }
 
@@ -78,12 +120,14 @@ async function loadData() {
     document.getElementById("assetTbody").innerHTML =
       `<tr><td colspan="9" style="padding:40px;text-align:center;color:#c2410c;">엑셀 데이터를 불러오지 못했습니다.</td></tr>`;
   }
-  loadUserData();
+  loadLocalData();
+  await sbLoadAdded();
   buildAssets();
   filtered = assets;
   initCategoryFilter();
   renderStats();
   render();
+  sbSubscribe();
 }
 
 function refresh() {
@@ -384,7 +428,7 @@ function showFormError(msg) {
 }
 
 // 저장 (등록 또는 수정)
-function saveForm() {
+async function saveForm() {
   const id = document.getElementById("f-id").value;
   const get = (k) => document.getElementById("f-" + k).value.trim();
 
@@ -421,32 +465,36 @@ function saveForm() {
     imageUrl: currentPhoto || "",
   };
 
+  const saveBtn = document.getElementById("formSaveBtn");
+  saveBtn.disabled = true;
   try {
     if (!id) {
-      // 신규 등록
+      // 신규 등록 → Supabase (공유)
       const newAsset = {
         id: "u" + Date.now() + Math.floor(Math.random() * 1000),
         ...fields,
         regDate: todayStr(),
       };
-      userAdded.unshift(newAsset);
-      saveAdded();
+      await sbUpsert(newAsset);
     } else if (String(id).startsWith("u")) {
-      // 직접 등록 자산 수정
-      const idx = userAdded.findIndex((a) => String(a.id) === String(id));
-      if (idx >= 0) userAdded[idx] = { ...userAdded[idx], ...fields };
-      saveAdded();
+      // 직접 등록 자산 수정 → Supabase (공유)
+      const existing = userAdded.find((a) => String(a.id) === String(id)) || {};
+      await sbUpsert({ ...existing, ...fields, id });
     } else {
-      // 베이스(엑셀) 자산 수정 → override 저장
+      // 베이스(엑셀) 자산 수정 → 로컬 저장
       overrides[String(id)] = { ...(overrides[String(id)] || {}), ...fields };
       saveOverrides();
     }
   } catch (e) {
-    showFormError("저장 용량이 초과되었습니다. 사진 크기를 줄여주세요.");
+    console.error(e);
+    showFormError("저장에 실패했습니다. 네트워크 연결을 확인하고 다시 시도해주세요.");
+    saveBtn.disabled = false;
     return;
   }
+  saveBtn.disabled = false;
 
   hide("formOverlay");
+  if (!id || String(id).startsWith("u")) await sbLoadAdded();
   refresh();
 }
 
@@ -457,15 +505,23 @@ function todayStr() {
 }
 
 // ===== 삭제 =====
-function deleteAsset(id) {
+async function deleteAsset(id) {
   const a = findAsset(id);
   if (!a) return;
   if (!confirm(`정말 이 자산을 삭제하시겠습니까?\n\n${a.assetName}`)) return;
 
   if (String(id).startsWith("u")) {
-    userAdded = userAdded.filter((x) => String(x.id) !== String(id));
-    saveAdded();
+    // 직접 등록 자산 → Supabase에서 삭제 (공유)
+    try {
+      await sbDelete(id);
+    } catch (e) {
+      console.error(e);
+      alert("삭제에 실패했습니다. 네트워크 연결을 확인해주세요.");
+      return;
+    }
+    await sbLoadAdded();
   } else {
+    // 엑셀 원본 → 로컬 삭제
     if (!deleted.includes(String(id))) deleted.push(String(id));
     delete overrides[String(id)];
     saveDeleted();
