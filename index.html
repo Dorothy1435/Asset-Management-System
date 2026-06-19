@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>자산관리 시스템</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <h1>자산관리 시스템</h1>
+      <p class="subtitle">글로컬대학사업본부 전체 자산 목록</p>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 통계 요약 -->
+    <section class="stats" id="stats"></section>
+
+    <!-- 검색 영역 -->
+    <section class="toolbar">
+      <div class="search-box">
+        <input
+          type="text"
+          id="searchInput"
+          placeholder="자산명, 자산번호, 위치, 담당자, 부서, 제작사 검색..."
+          autocomplete="off"
+        />
+        <button id="clearBtn" class="btn-clear" title="검색어 지우기">✕</button>
+      </div>
+      <select id="categoryFilter" class="filter-select">
+        <option value="">전체 분류</option>
+      </select>
+      <span class="result-count" id="resultCount"></span>
+    </section>
+
+    <!-- 자산 목록 테이블 -->
+    <section class="table-wrap">
+      <table class="asset-table">
+        <thead>
+          <tr>
+            <th>자산명</th>
+            <th>자산번호</th>
+            <th>분류</th>
+            <th>위치</th>
+            <th>담당자</th>
+            <th>부서</th>
+            <th>상태</th>
+            <th>등재일</th>
+            <th>관리</th>
+          </tr>
+        </thead>
+        <tbody id="assetTbody"></tbody>
+      </table>
+      <div id="emptyMsg" class="empty-msg" hidden>검색 결과가 없습니다.</div>
+    </section>
+
+    <!-- 페이지네이션 -->
+    <nav class="pagination" id="pagination"></nav>
+  </main>
+
+  <!-- 상세 모달 -->
+  <div class="modal-overlay" id="modalOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="modalTitle">자산 상세 정보</h2>
+        <button class="modal-close" id="modalClose">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="modalCloseBtn">목록으로 돌아가기</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <p>© 글로컬대학사업본부 자산관리 시스템</p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
