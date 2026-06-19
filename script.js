@@ -12,6 +12,7 @@ const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE
 let baseAssets = []; // assets.json 원본
 let overlay = []; // Supabase assets 테이블 rows [{id, kind, data}]
 let requests = []; // Supabase requests 테이블 (pending)
+let history = []; // Supabase history 테이블 (결재/변경 이력)
 let assets = []; // 병합 결과 (화면 데이터)
 let filtered = [];
 let currentPage = 1;
@@ -194,13 +195,10 @@ async function forgotPassword() {
     errEl.hidden = false;
     return;
   }
-  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-  if (error) {
-    errEl.textContent = "메일 전송 실패: " + error.message;
-    errEl.hidden = false;
-    return;
-  }
-  infoEl.textContent = "재설정 메일을 보냈습니다. 메일의 링크를 열면 새 비밀번호를 설정할 수 있습니다.";
+  // 보안: 입력한 이메일이 실제 등록 계정인지 화면에 드러내지 않는다.
+  // (Supabase는 등록된 계정에만 실제로 메일을 발송한다)
+  await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+  infoEl.textContent = "입력하신 주소가 등록된 관리자 계정이면 재설정 메일이 발송됩니다. 메일함을 확인해주세요.";
   infoEl.hidden = false;
 }
 
@@ -234,6 +232,7 @@ function updateAdminUI() {
   const logoutBtn = document.getElementById("logoutBtn");
   const adminTag = document.getElementById("adminTag");
   const reviewBtn = document.getElementById("reviewBtn");
+  const histBtn = document.getElementById("histBtn");
   const notice = document.getElementById("userNotice");
   const addBtn = document.getElementById("addBtn");
 
@@ -243,6 +242,7 @@ function updateAdminUI() {
     adminTag.hidden = false;
     adminTag.textContent = `관리자: ${adminEmail}`;
     reviewBtn.hidden = false;
+    histBtn.hidden = false;
     document.getElementById("pendingCount").textContent = requests.length;
     notice.hidden = true;
     addBtn.textContent = "+ 자산 등록";
@@ -251,6 +251,7 @@ function updateAdminUI() {
     logoutBtn.hidden = true;
     adminTag.hidden = true;
     reviewBtn.hidden = true;
+    histBtn.hidden = true;
     notice.hidden = false;
     addBtn.textContent = "+ 자산 등록 요청";
   }
@@ -588,7 +589,7 @@ async function saveForm() {
       await submitRequest({
         action: id ? "update" : "create",
         target_id: id || null,
-        payload: id ? { ...fields, id } : fields,
+        payload: fields,
         requester: get("requester"),
         note: get("reqnote"),
       });
@@ -647,29 +648,84 @@ async function handleDelete(id) {
   }
 }
 
-// ===== 오버레이 직접 반영 (관리자) =====
-async function applyCreate(fields) {
-  const id = "u" + Date.now() + Math.floor(Math.random() * 1000);
-  const data = { ...fields, regDate: todayStr() };
-  const { error } = await sb.from("assets").upsert({ id, kind: "added", data, updated_at: new Date().toISOString() });
-  if (error) throw error;
+// ===== 이력(스냅샷) =====
+const SNAP_FIELDS = ["assetName", "assetNumber", "category", "status", "location",
+  "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
+const DATA_FIELDS = ["assetName", "assetNumber", "category", "status", "location",
+  "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
+
+function snapshotOf(a) {
+  if (!a) return null;
+  const o = {};
+  SNAP_FIELDS.forEach((k) => (o[k] = a[k] ?? ""));
+  return o;
+}
+function cleanFields(f) {
+  const o = {};
+  DATA_FIELDS.forEach((k) => { if (f[k] !== undefined) o[k] = f[k]; });
+  return o;
 }
 
-async function applyUpdate(id, fields) {
+async function sbLoadHistory() {
+  if (!sb || !isAdmin) return;
+  const { data, error } = await sb
+    .from("history")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) { console.error("이력 로드 오류:", error.message); return; }
+  history = data || [];
+}
+
+async function logHistory(entry) {
+  if (!sb) return;
+  try {
+    await sb.from("history").insert({
+      asset_id: String(entry.asset_id),
+      asset_name: entry.asset_name || "",
+      action: entry.action,
+      before_snap: entry.before || null,
+      after_snap: entry.after || null,
+      requester: entry.requester || "",
+      note: entry.note || "",
+      approved_by: adminEmail || "",
+    });
+  } catch (e) {
+    console.error("이력 기록 실패:", e);
+  }
+}
+
+// ===== 오버레이 직접 반영 (관리자) + 이력 기록 =====
+async function applyCreate(fields, meta = {}) {
+  const id = "u" + Date.now() + Math.floor(Math.random() * 1000);
+  const data = { ...cleanFields(fields), regDate: todayStr() };
+  const { error } = await sb.from("assets").upsert({ id, kind: "added", data, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  await logHistory({ asset_id: id, asset_name: data.assetName, action: "create", before: null, after: snapshotOf(data), requester: meta.requester, note: meta.note });
+}
+
+async function applyUpdate(id, fields, meta = {}) {
+  const current = findAsset(id);
+  const before = snapshotOf(current);
+  const clean = cleanFields(fields);
   if (String(id).startsWith("u")) {
     const existing = overlay.find((o) => String(o.id) === String(id))?.data || {};
-    const data = { ...existing, ...fields };
+    const data = { ...existing, ...clean };
     const { error } = await sb.from("assets").upsert({ id, kind: "added", data, updated_at: new Date().toISOString() });
     if (error) throw error;
   } else {
     const existing = overlay.find((o) => String(o.id) === String(id) && o.kind === "override")?.data || {};
-    const data = { ...existing, ...fields };
+    const data = { ...existing, ...clean };
     const { error } = await sb.from("assets").upsert({ id: String(id), kind: "override", data, updated_at: new Date().toISOString() });
     if (error) throw error;
   }
+  const after = snapshotOf({ ...current, ...clean });
+  await logHistory({ asset_id: id, asset_name: (current && current.assetName) || clean.assetName, action: "update", before, after, requester: meta.requester, note: meta.note });
 }
 
-async function applyDelete(id) {
+async function applyDelete(id, meta = {}) {
+  const current = findAsset(id);
+  const before = snapshotOf(current);
   if (String(id).startsWith("u")) {
     const { error } = await sb.from("assets").delete().eq("id", id);
     if (error) throw error;
@@ -677,6 +733,47 @@ async function applyDelete(id) {
     const { error } = await sb.from("assets").upsert({ id: String(id), kind: "deleted", data: {}, updated_at: new Date().toISOString() });
     if (error) throw error;
   }
+  await logHistory({ asset_id: id, asset_name: current && current.assetName, action: "delete", before, after: null, requester: meta.requester, note: meta.note });
+}
+
+// 특정 스냅샷 상태로 강제 적용 (되돌리기용)
+async function applyState(assetId, snap) {
+  const isAdded = String(assetId).startsWith("u");
+  if (snap === null || snap === undefined) {
+    // 그 시점에 존재하지 않던 상태 → 삭제 처리
+    if (isAdded) {
+      const { error } = await sb.from("assets").delete().eq("id", assetId);
+      if (error) throw error;
+    } else {
+      const { error } = await sb.from("assets").upsert({ id: String(assetId), kind: "deleted", data: {}, updated_at: new Date().toISOString() });
+      if (error) throw error;
+    }
+  } else {
+    const data = cleanFields(snap);
+    const { error } = await sb.from("assets").upsert({ id: String(assetId), kind: isAdded ? "added" : "override", data, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  }
+}
+
+// 이력 한 줄을 골라 "그 변경 이전 상태"로 되돌림
+async function revertHistory(histId) {
+  const h = history.find((x) => String(x.id) === String(histId));
+  if (!h) return;
+  if (!confirm(`이 변경을 취소하고 '이전 상태'로 되돌리시겠습니까?\n\n대상: ${h.asset_name || h.asset_id}`)) return;
+  const current = findAsset(h.asset_id);
+  const beforeNow = snapshotOf(current);
+  try {
+    await applyState(h.asset_id, h.before_snap);
+    await logHistory({ asset_id: h.asset_id, asset_name: h.asset_name, action: "revert", before: beforeNow, after: h.before_snap, requester: "", note: "이전 상태로 되돌림" });
+  } catch (e) {
+    console.error(e);
+    alert("되돌리기에 실패했습니다.");
+    return;
+  }
+  await sbLoadOverlay();
+  await sbLoadHistory();
+  refresh();
+  renderHistory();
 }
 
 // ===== 변경 요청 (일반 사용자) =====
@@ -725,8 +822,11 @@ function renderReview() {
             ${p.dept ? `<span>부서: ${esc(p.dept)}</span>` : ""}
           </div>`;
       }
-      const meta = [r.requester && `요청자: ${esc(r.requester)}`, r.note && `사유: ${esc(r.note)}`]
-        .filter(Boolean).join(" · ");
+      const meta = [
+        `요청일시: ${fmtTime(r.created_at)}`,
+        r.requester && `요청자: ${esc(r.requester)}`,
+        r.note && `사유: ${esc(r.note)}`,
+      ].filter(Boolean).join(" · ");
       return `
       <div class="req-card">
         <div class="req-top">
@@ -746,10 +846,11 @@ function renderReview() {
 async function approveRequest(reqId) {
   const r = requests.find((x) => String(x.id) === String(reqId));
   if (!r) return;
+  const meta = { requester: r.requester, note: r.note };
   try {
-    if (r.action === "create") await applyCreate(r.payload);
-    else if (r.action === "update") await applyUpdate(r.target_id, r.payload);
-    else if (r.action === "delete") await applyDelete(r.target_id);
+    if (r.action === "create") await applyCreate(r.payload, meta);
+    else if (r.action === "update") await applyUpdate(r.target_id, r.payload, meta);
+    else if (r.action === "delete") await applyDelete(r.target_id, meta);
     const { error } = await sb.from("requests").update({ status: "approved" }).eq("id", reqId);
     if (error) throw error;
   } catch (e) {
@@ -759,6 +860,7 @@ async function approveRequest(reqId) {
   }
   await sbLoadOverlay();
   await sbLoadRequests();
+  await sbLoadHistory();
   refresh();
   renderReview();
 }
@@ -775,6 +877,87 @@ async function rejectRequest(reqId) {
   await sbLoadRequests();
   refresh();
   renderReview();
+}
+
+// ===== 결재/변경 이력 패널 =====
+function fmtTime(iso) {
+  if (!iso) return "-";
+  try {
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch { return iso; }
+}
+
+function shortVal(v) {
+  v = v === "" || v === null || v === undefined ? "(없음)" : String(v);
+  return v.length > 28 ? v.slice(0, 28) + "…" : v;
+}
+
+const HIST_LABELS = {
+  assetName: "자산명", assetNumber: "자산번호", category: "분류", status: "상태",
+  location: "위치", manager: "담당자", dept: "부서", model: "모델", spec: "규격",
+  maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진",
+};
+
+function histSummary(h) {
+  if (h.action === "delete") return `자산이 <b>삭제</b>되었습니다.`;
+  const b = h.before_snap, a = h.after_snap;
+  if (h.action === "create") return `신규 <b>등록</b>: ${esc((a && a.assetName) || "")}`;
+  if (!a) return `삭제 처리`;
+  if (!b) return esc(a.assetName || "");
+  const changes = [];
+  Object.keys(HIST_LABELS).forEach((k) => {
+    const bv = b[k] ?? "", av = a[k] ?? "";
+    if (String(bv) !== String(av)) {
+      if (k === "imageUrl") changes.push(`${HIST_LABELS[k]} 변경`);
+      else changes.push(`${HIST_LABELS[k]}: ${esc(shortVal(bv))} → ${esc(shortVal(av))}`);
+    }
+  });
+  return changes.length ? changes.join("<br>") : "변경 없음";
+}
+
+async function openHistory() {
+  await sbLoadHistory();
+  document.getElementById("histSearch").value = "";
+  renderHistory();
+  show("histOverlay");
+}
+
+function renderHistory() {
+  const body = document.getElementById("histBody");
+  const kw = document.getElementById("histSearch").value.trim().toLowerCase();
+  let rows = history;
+  if (kw) rows = rows.filter((h) => `${h.asset_name} ${h.asset_id}`.toLowerCase().includes(kw));
+
+  if (rows.length === 0) {
+    body.innerHTML = `<div class="empty-msg">기록이 없습니다.</div>`;
+    return;
+  }
+  const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림" };
+  const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert" };
+
+  body.innerHTML = rows
+    .map((h) => {
+      const meta = [
+        h.approved_by && `결재자: ${esc(h.approved_by)}`,
+        h.requester && `요청자: ${esc(h.requester)}`,
+        h.note && esc(h.note),
+      ].filter(Boolean).join(" · ");
+      return `
+      <div class="req-card">
+        <div class="req-top">
+          <span class="req-badge ${actCls[h.action] || "badge-gray"}">${actLabel[h.action] || h.action}</span>
+          <span class="req-meta">${fmtTime(h.created_at)} · <b>${esc(h.asset_name || h.asset_id)}</b></span>
+        </div>
+        <div class="req-summary">${histSummary(h)}</div>
+        ${meta ? `<div class="req-meta" style="margin-bottom:8px;">${meta}</div>` : ""}
+        <div class="req-actions">
+          <button class="btn btn-secondary btn-sm" data-revert="${h.id}">이전 상태로 되돌리기</button>
+        </div>
+      </div>`;
+    })
+    .join("");
 }
 
 // ===== 엑셀 내보내기 =====
@@ -891,15 +1074,22 @@ document.getElementById("reviewBody").addEventListener("click", (e) => {
   else if (rj) rejectRequest(rj.dataset.reject);
 });
 
+// 결재/변경 이력 패널
+document.getElementById("histBtn").addEventListener("click", openHistory);
+document.getElementById("histSearch").addEventListener("input", renderHistory);
+document.getElementById("histBody").addEventListener("click", (e) => {
+  const rv = e.target.closest("button[data-revert]");
+  if (rv) revertHistory(rv.dataset.revert);
+});
+
 // 모달 닫기
+const ALL_MODALS = ["detailOverlay", "formOverlay", "loginOverlay", "reviewOverlay", "histOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) =>
-  btn.addEventListener("click", () => {
-    ["detailOverlay", "formOverlay", "loginOverlay", "reviewOverlay"].forEach(hide);
-  }));
+  btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
 document.querySelectorAll(".modal-overlay").forEach((ov) =>
   ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") ["detailOverlay", "formOverlay", "loginOverlay", "reviewOverlay"].forEach(hide);
+  if (e.key === "Escape") ALL_MODALS.forEach(hide);
 });
 
 // 시작

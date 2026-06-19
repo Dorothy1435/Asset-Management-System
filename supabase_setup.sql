@@ -51,6 +51,25 @@ create policy "req_insert_pending" on public.requests for insert with check (sta
 create policy "req_update_admin" on public.requests for update to authenticated using (true) with check (true);
 create policy "req_delete_admin" on public.requests for delete to authenticated using (true);
 
--- 6) 실시간 동기화
+-- 6) 결재/변경 이력 테이블 (스냅샷 기반, 되돌리기용)
+create table if not exists public.history (
+  id uuid primary key default gen_random_uuid(),
+  asset_id text,
+  asset_name text default '',
+  action text not null,              -- create | update | delete | revert
+  before_snap jsonb,                 -- 변경 전 상태 (null이면 그 시점에 없던 자산)
+  after_snap jsonb,                  -- 변경 후 상태 (null이면 삭제됨)
+  requester text default '',
+  note text default '',
+  approved_by text default '',
+  created_at timestamptz not null default now()
+);
+alter table public.history enable row level security;
+drop policy if exists "hist_select_admin" on public.history;
+drop policy if exists "hist_insert_admin" on public.history;
+create policy "hist_select_admin" on public.history for select to authenticated using (true);
+create policy "hist_insert_admin" on public.history for insert to authenticated with check (true);
+
+-- 7) 실시간 동기화
 alter publication supabase_realtime add table public.assets;
 alter publication supabase_realtime add table public.requests;

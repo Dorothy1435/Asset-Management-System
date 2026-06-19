@@ -17,6 +17,7 @@
         <button class="btn btn-secondary" id="reviewBtn" hidden>
           승인 대기 <span class="count-badge" id="pendingCount">0</span>
         </button>
+        <button class="btn btn-secondary" id="histBtn" hidden>결재 내역</button>
         <button class="btn btn-primary" id="addBtn">+ 자산 등록</button>
         <span class="admin-tag" id="adminTag" hidden></span>
         <button class="btn btn-secondary" id="loginBtn">관리자 로그인</button>
@@ -261,6 +262,23 @@
         <button class="modal-close" data-close>✕</button>
       </div>
       <div class="modal-body" id="reviewBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close>닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 결재/변경 이력 모달 (관리자) -->
+  <div class="modal-overlay" id="histOverlay" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>결재 / 변경 이력</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="histSearch" class="hist-search" placeholder="자산명 또는 자산번호로 검색..." autocomplete="off" />
+        <div id="histBody"></div>
+      </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-close>닫기</button>
       </div>
