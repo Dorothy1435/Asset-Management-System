@@ -191,7 +191,7 @@
 
           <!-- 요청 정보 (비관리자 전용) -->
           <div class="form-row request-only">
-            <label>요청자 이름</label>
+            <label>신청자 이름</label>
             <input type="text" id="f-requester" placeholder="승인 검토용 (선택)" />
           </div>
           <div class="form-row request-only">
@@ -203,6 +203,31 @@
       </form>
       <div class="modal-footer">
         <button class="btn btn-primary" id="formSaveBtn">등록</button>
+        <button class="btn btn-secondary" data-close>취소</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 삭제 요청 모달 (비관리자) -->
+  <div class="modal-overlay" id="delReqOverlay" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>삭제 요청</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <form id="delReqForm" class="modal-body">
+        <p class="del-target" id="delReqTarget"></p>
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>신청자 이름</label>
+          <input type="text" id="dr-requester" placeholder="승인 검토용 (선택)" />
+        </div>
+        <div class="form-row">
+          <label>삭제 사유</label>
+          <input type="text" id="dr-note" placeholder="예: 파손, 불용 처리 등 (선택)" />
+        </div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="delReqSubmit">삭제 요청</button>
         <button class="btn btn-secondary" data-close>취소</button>
       </div>
     </div>

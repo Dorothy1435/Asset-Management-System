@@ -67,8 +67,10 @@ create table if not exists public.history (
 alter table public.history enable row level security;
 drop policy if exists "hist_select_admin" on public.history;
 drop policy if exists "hist_insert_admin" on public.history;
+drop policy if exists "hist_delete_admin" on public.history;
 create policy "hist_select_admin" on public.history for select to authenticated using (true);
 create policy "hist_insert_admin" on public.history for insert to authenticated with check (true);
+create policy "hist_delete_admin" on public.history for delete to authenticated using (true);
 
 -- 7) 실시간 동기화
 alter publication supabase_realtime add table public.assets;

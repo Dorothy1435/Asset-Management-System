@@ -371,9 +371,10 @@ function render() {
       if (a._added) tag = `<span class="tag tag-added">직접</span>`;
       else if (a._edited) tag = `<span class="tag tag-edited">수정</span>`;
       if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
+      const thumb = a.imageUrl ? `<img class="thumb" src="${a.imageUrl}" alt="" loading="lazy" />` : "";
       return `
     <tr>
-      <td class="cell-name" title="${esc(a.assetName)}">${esc(a.assetName)} ${tag}</td>
+      <td class="cell-name" title="${esc(a.assetName)}"><div class="name-wrap">${thumb}<span>${esc(a.assetName)} ${tag}</span></div></td>
       <td class="cell-num">${esc(a.assetNumber)}</td>
       <td>${esc(val(a.category))}</td>
       <td class="cell-loc" title="${esc(a.location)}">${esc(val(a.location))}</td>
@@ -626,26 +627,44 @@ async function handleDelete(id) {
     await sbLoadOverlay();
     refresh();
   } else {
-    if (!confirm(`이 자산의 삭제를 요청하시겠습니까?\n\n${a.assetName}\n\n관리자 승인 후 삭제됩니다.`)) return;
-    const requester = prompt("요청자 이름(선택):", "") ?? "";
-    try {
-      await submitRequest({
-        action: "delete",
-        target_id: id,
-        payload: { assetName: a.assetName, assetNumber: a.assetNumber },
-        requester,
-        note: "",
-      });
-    } catch (e) {
-      console.error(e);
-      alert("요청 전송에 실패했습니다. 네트워크 연결을 확인해주세요.");
-      return;
-    }
-    hide("detailOverlay");
-    await sbLoadRequests();
-    alert("삭제 요청이 접수되었습니다. 관리자 승인 후 반영됩니다.");
-    refresh();
+    // 비관리자 → 삭제 요청 모달 열기 (신청자/사유 입력)
+    delReqId = id;
+    document.getElementById("dr-requester").value = "";
+    document.getElementById("dr-note").value = "";
+    document.getElementById("delReqTarget").innerHTML =
+      `<b>${esc(a.assetName)}</b> (${esc(a.assetNumber)})<br><span class="del-note">관리자 승인 후 삭제됩니다.</span>`;
+    show("delReqOverlay");
   }
+}
+
+let delReqId = null;
+
+async function submitDeleteRequest() {
+  const id = delReqId;
+  const a = findAsset(id);
+  if (!a) { hide("delReqOverlay"); return; }
+  const btn = document.getElementById("delReqSubmit");
+  btn.disabled = true;
+  try {
+    await submitRequest({
+      action: "delete",
+      target_id: id,
+      payload: { assetName: a.assetName, assetNumber: a.assetNumber },
+      requester: document.getElementById("dr-requester").value.trim(),
+      note: document.getElementById("dr-note").value.trim(),
+    });
+  } catch (e) {
+    console.error(e);
+    btn.disabled = false;
+    alert("요청 전송에 실패했습니다. 네트워크 연결을 확인해주세요.");
+    return;
+  }
+  btn.disabled = false;
+  hide("delReqOverlay");
+  hide("detailOverlay");
+  await sbLoadRequests();
+  alert("삭제 요청이 접수되었습니다. 관리자 승인 후 반영됩니다.");
+  refresh();
 }
 
 // ===== 이력(스냅샷) =====
@@ -776,6 +795,21 @@ async function revertHistory(histId) {
   renderHistory();
 }
 
+// 이력 기록 삭제 (기록만 지움 — 자산 상태는 바뀌지 않음)
+async function deleteHistory(histId) {
+  if (!confirm("이 기록을 삭제하시겠습니까?\n\n(기록만 지워지며 현재 자산 상태는 바뀌지 않습니다. 삭제 후에는 이 시점으로 되돌릴 수 없습니다.)")) return;
+  try {
+    const { error } = await sb.from("history").delete().eq("id", histId);
+    if (error) throw error;
+  } catch (e) {
+    console.error(e);
+    alert("기록 삭제에 실패했습니다.");
+    return;
+  }
+  await sbLoadHistory();
+  renderHistory();
+}
+
 // ===== 변경 요청 (일반 사용자) =====
 async function submitRequest(req) {
   if (!sb) throw new Error("Supabase 미연결");
@@ -824,7 +858,7 @@ function renderReview() {
       }
       const meta = [
         `요청일시: ${fmtTime(r.created_at)}`,
-        r.requester && `요청자: ${esc(r.requester)}`,
+        r.requester && `신청자: ${esc(r.requester)}`,
         r.note && `사유: ${esc(r.note)}`,
       ].filter(Boolean).join(" · ");
       return `
@@ -941,7 +975,7 @@ function renderHistory() {
     .map((h) => {
       const meta = [
         h.approved_by && `결재자: ${esc(h.approved_by)}`,
-        h.requester && `요청자: ${esc(h.requester)}`,
+        h.requester && `신청자: ${esc(h.requester)}`,
         h.note && esc(h.note),
       ].filter(Boolean).join(" · ");
       return `
@@ -954,6 +988,7 @@ function renderHistory() {
         ${meta ? `<div class="req-meta" style="margin-bottom:8px;">${meta}</div>` : ""}
         <div class="req-actions">
           <button class="btn btn-secondary btn-sm" data-revert="${h.id}">이전 상태로 되돌리기</button>
+          <button class="btn btn-danger btn-sm" data-delhist="${h.id}">기록 삭제</button>
         </div>
       </div>`;
     })
@@ -1079,11 +1114,17 @@ document.getElementById("histBtn").addEventListener("click", openHistory);
 document.getElementById("histSearch").addEventListener("input", renderHistory);
 document.getElementById("histBody").addEventListener("click", (e) => {
   const rv = e.target.closest("button[data-revert]");
+  const dl = e.target.closest("button[data-delhist]");
   if (rv) revertHistory(rv.dataset.revert);
+  else if (dl) deleteHistory(dl.dataset.delhist);
 });
 
+// 삭제 요청 모달
+document.getElementById("delReqSubmit").addEventListener("click", submitDeleteRequest);
+document.getElementById("delReqForm").addEventListener("submit", (e) => { e.preventDefault(); submitDeleteRequest(); });
+
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "loginOverlay", "reviewOverlay", "histOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "loginOverlay", "reviewOverlay", "histOverlay", "delReqOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) =>
   btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
 document.querySelectorAll(".modal-overlay").forEach((ov) =>
