@@ -241,8 +241,16 @@ async function authSubmit() {
         hide("authOverlay");
         alert("가입이 완료되었습니다. 환영합니다!");
       } else {
-        infoEl.textContent = "가입 요청이 접수되었습니다. 이메일 인증이 필요한 설정이면 메일을 확인하세요.";
-        infoEl.hidden = false;
+        // 자동 승인(이메일 인증 OFF)이면 세션이 바로 생기지만,
+        // 혹시 세션이 없으면 곧바로 로그인 시도
+        const { error: e2 } = await sb.auth.signInWithPassword({ email, password: pw });
+        if (e2) {
+          infoEl.textContent = "가입은 되었습니다. 로그인 화면에서 로그인해 주세요.";
+          infoEl.hidden = false;
+        } else {
+          hide("authOverlay");
+          alert("가입이 완료되었습니다. 환영합니다!");
+        }
       }
     } else {
       const email = idToEmail(idVal, false);
