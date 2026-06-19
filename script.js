@@ -18,6 +18,8 @@ let filtered = [];
 let currentPage = 1;
 const PER_PAGE = 20;
 
+let sortState = { key: null, dir: 1 }; // dir: 1 오름, -1 내림
+
 let currentPhoto = ""; // 폼에서 편집 중인 사진(base64)
 
 // ===== 유틸 =====
@@ -106,23 +108,38 @@ function renderStats() {
   `;
 }
 
-// ===== 분류 필터 =====
-function initCategoryFilter() {
-  const cats = [...new Set(assets.map((a) => a.category).filter(Boolean))].sort();
-  const sel = document.getElementById("categoryFilter");
+// ===== 필터 드롭다운 채우기 =====
+function fillSelect(id, values, allLabel) {
+  const sel = document.getElementById(id);
   const prev = sel.value;
-  sel.innerHTML = `<option value="">전체 분류</option>` +
-    cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
-  if (cats.includes(prev)) sel.value = prev;
+  const opts = [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "ko"));
+  sel.innerHTML = `<option value="">${allLabel}</option>` +
+    opts.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  if (opts.includes(prev)) sel.value = prev;
+}
+
+function initCategoryFilter() {
+  fillSelect("categoryFilter", assets.map((a) => a.category), "전체 분류");
+  fillSelect("deptFilter", assets.map((a) => a.dept), "전체");
+  fillSelect("statusFilter", assets.map((a) => a.status), "전체");
 }
 
 // ===== 검색/필터 =====
 function applyFilter() {
   const kw = document.getElementById("searchInput").value.trim().toLowerCase();
   const cat = document.getElementById("categoryFilter").value;
+  const dept = document.getElementById("deptFilter").value;
+  const status = document.getElementById("statusFilter").value;
+  const minCost = Number(document.getElementById("minCost").value) || 0;
+  const maxCostRaw = document.getElementById("maxCost").value;
+  const maxCost = maxCostRaw === "" ? Infinity : Number(maxCostRaw);
 
   filtered = assets.filter((a) => {
     if (cat && a.category !== cat) return false;
+    if (dept && a.dept !== dept) return false;
+    if (status && a.status !== status) return false;
+    const cost = a.acquireCost || 0;
+    if (cost < minCost || cost > maxCost) return false;
     if (!kw) return true;
     const hay = [
       a.assetName, a.assetNumber, a.location, a.manager,
@@ -131,8 +148,43 @@ function applyFilter() {
     return hay.includes(kw);
   });
 
+  sortFiltered();
   currentPage = 1;
   render();
+}
+
+// ===== 정렬 =====
+function sortFiltered() {
+  const { key, dir } = sortState;
+  if (!key) return;
+  filtered.sort((a, b) => {
+    let va = a[key] ?? "";
+    let vb = b[key] ?? "";
+    const na = parseFloat(va), nb = parseFloat(vb);
+    const bothNum = va !== "" && vb !== "" && !isNaN(na) && !isNaN(nb) &&
+      String(va).trim() === String(na) && String(vb).trim() === String(nb);
+    let cmp;
+    if (bothNum) cmp = na - nb;
+    else cmp = String(va).localeCompare(String(vb), "ko");
+    return cmp * dir;
+  });
+}
+
+function setSort(key) {
+  if (sortState.key === key) sortState.dir *= -1;
+  else sortState = { key, dir: 1 };
+  // 헤더 화살표 갱신
+  document.querySelectorAll(".asset-table th.sortable").forEach((th) => {
+    const arrow = th.querySelector(".sort-arrow");
+    if (th.dataset.key === key) {
+      arrow.textContent = sortState.dir === 1 ? "▲" : "▼";
+      th.classList.add("sorted");
+    } else {
+      arrow.textContent = "";
+      th.classList.remove("sorted");
+    }
+  });
+  applyFilter();
 }
 
 // ===== 렌더링 =====
@@ -423,6 +475,39 @@ function deleteAsset(id) {
   refresh();
 }
 
+// ===== 엑셀 내보내기 =====
+function exportExcel() {
+  if (filtered.length === 0) {
+    alert("내보낼 자산이 없습니다.");
+    return;
+  }
+  const rows = filtered.map((a) => ({
+    "자산명": a.assetName || "",
+    "자산번호": a.assetNumber || "",
+    "자산구분": a.category || "",
+    "모델명": a.model || "",
+    "규격": a.spec || "",
+    "제작회사": a.maker || "",
+    "단가": a.unitPrice || 0,
+    "수량": a.qty || 0,
+    "취득금액": a.acquireCost || 0,
+    "취득일자": a.acquireDate || "",
+    "보관 위치": a.location || "",
+    "관리 기관": a.org || "",
+    "운영 부서": a.dept || "",
+    "담당자": a.manager || "",
+    "등재일": a.regDate || "",
+    "상태": a.status || "",
+    "비고": a.note || "",
+    "구분": a._added ? "직접등록" : a._edited ? "수정됨" : "엑셀원본",
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "자산목록");
+  XLSX.writeFile(wb, `자산목록_${todayStr()}.xlsx`);
+}
+
 // ===== 모달 표시 헬퍼 =====
 function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
@@ -434,6 +519,32 @@ document.getElementById("clearBtn").addEventListener("click", () => {
   document.getElementById("searchInput").value = "";
   applyFilter();
 });
+
+// 상세 필터
+document.getElementById("advToggle").addEventListener("click", () => {
+  const p = document.getElementById("advPanel");
+  p.hidden = !p.hidden;
+});
+["deptFilter", "statusFilter"].forEach((id) =>
+  document.getElementById(id).addEventListener("change", applyFilter)
+);
+["minCost", "maxCost"].forEach((id) =>
+  document.getElementById(id).addEventListener("input", applyFilter)
+);
+document.getElementById("advReset").addEventListener("click", () => {
+  ["deptFilter", "statusFilter", "minCost", "maxCost", "categoryFilter"].forEach(
+    (id) => (document.getElementById(id).value = "")
+  );
+  applyFilter();
+});
+
+// 정렬 (헤더 클릭)
+document.querySelectorAll(".asset-table th.sortable").forEach((th) =>
+  th.addEventListener("click", () => setSort(th.dataset.key))
+);
+
+// 엑셀 내보내기
+document.getElementById("exportBtn").addEventListener("click", exportExcel);
 
 // 등록 버튼
 document.getElementById("addBtn").addEventListener("click", () => openForm(null));

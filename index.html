@@ -35,7 +35,30 @@
       <select id="categoryFilter" class="filter-select">
         <option value="">전체 분류</option>
       </select>
+      <button class="btn btn-secondary" id="advToggle">상세 필터</button>
+      <button class="btn btn-secondary" id="exportBtn">📥 엑셀 다운로드</button>
       <span class="result-count" id="resultCount"></span>
+    </section>
+
+    <!-- 상세 필터 패널 -->
+    <section class="adv-panel" id="advPanel" hidden>
+      <div class="adv-field">
+        <label>운영 부서</label>
+        <select id="deptFilter"><option value="">전체</option></select>
+      </div>
+      <div class="adv-field">
+        <label>상태</label>
+        <select id="statusFilter"><option value="">전체</option></select>
+      </div>
+      <div class="adv-field">
+        <label>취득금액(원)</label>
+        <div class="range-row">
+          <input type="number" id="minCost" placeholder="최소" min="0" />
+          <span>~</span>
+          <input type="number" id="maxCost" placeholder="최대" min="0" />
+        </div>
+      </div>
+      <button class="btn btn-secondary" id="advReset">필터 초기화</button>
     </section>
 
     <!-- 자산 목록 테이블 -->
@@ -43,14 +66,14 @@
       <table class="asset-table">
         <thead>
           <tr>
-            <th>자산명</th>
-            <th>자산번호</th>
-            <th>분류</th>
-            <th>위치</th>
-            <th>담당자</th>
-            <th>부서</th>
-            <th>상태</th>
-            <th>등재일</th>
+            <th class="sortable" data-key="assetName">자산명 <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="assetNumber">자산번호 <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="category">분류 <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="location">위치 <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="manager">담당자 <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="dept">부서 <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="status">상태 <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="regDate">등재일 <span class="sort-arrow"></span></th>
             <th>관리</th>
           </tr>
         </thead>
@@ -165,6 +188,7 @@
     <p>© 글로컬대학사업본부 자산관리 시스템 · 직접 등록 데이터는 이 브라우저에 저장됩니다</p>
   </footer>
 
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

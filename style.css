@@ -135,6 +135,40 @@ body {
   white-space: nowrap;
 }
 
+/* 상세 필터 패널 */
+.adv-panel {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.adv-field { display: flex; flex-direction: column; gap: 5px; }
+.adv-field label { font-size: 12px; font-weight: 600; color: var(--text-light); }
+.adv-field select,
+.adv-field input {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+}
+.range-row { display: flex; align-items: center; gap: 8px; }
+.range-row input { width: 110px; }
+
+/* 정렬 헤더 */
+.asset-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.asset-table th.sortable:hover { color: var(--primary); }
+.asset-table th.sorted { color: var(--primary); }
+.sort-arrow { font-size: 10px; }
+
 /* 테이블 */
 .table-wrap {
   background: #fff;
