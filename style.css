@@ -521,10 +521,91 @@ body {
   font-size: 14px;
 }
 
+/* 헤더 액션 영역 */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.admin-tag {
+  font-size: 12px;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.count-badge {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  background: #dc2626;
+  color: #fff;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* 안내 배너 */
+.notice {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+/* 요청중 태그 */
+.tag-pending { background: #fee2e2; color: #b91c1c; }
+
+/* 모달 크기 변형 */
+.modal-narrow { max-width: 380px; }
+.modal-wide { max-width: 720px; }
+
+/* 승인 패널 - 요청 카드 */
+.req-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.req-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.req-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 6px;
+}
+.req-create { background: #dcfce7; color: #15803d; }
+.req-update { background: #dbeafe; color: #1e40af; }
+.req-delete { background: #fee2e2; color: #b91c1c; }
+.req-meta { font-size: 12px; color: var(--text-light); }
+.req-summary { font-size: 14px; margin-bottom: 10px; }
+.req-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 13px;
+  color: var(--text);
+}
+.req-actions { display: flex; gap: 8px; }
+.btn-sm { padding: 5px 14px; font-size: 13px; }
+
 /* 반응형 */
 @media (max-width: 640px) {
   .container { padding: 16px; }
   .header-inner { flex-direction: column; align-items: flex-start; }
+  .header-actions { width: 100%; }
   .toolbar { flex-direction: column; align-items: stretch; }
   .detail-grid { grid-template-columns: 100px 1fr; }
   .form-grid { grid-template-columns: 1fr; }

@@ -1,26 +1,27 @@
 // ===== 자산관리 시스템 =====
-// 베이스: assets.json (엑셀 원본, 읽기 전용)
-// 직접 등록분: Supabase (모든 사용자 공유, 실시간 동기화)
-// 엑셀 원본의 수정/삭제: localStorage (이 브라우저 한정)
+// 베이스: assets.json (엑셀 원본, 읽기 전용 파일)
+// 공유 오버레이: Supabase assets 테이블 (등록/수정/삭제 결과, 승인된 것만)
+//   kind = 'added'(직접등록) | 'override'(엑셀자산 수정) | 'deleted'(엑셀자산 삭제)
+// 변경 요청: Supabase requests 테이블 (일반 사용자가 요청 → 관리자 승인 시 오버레이에 반영)
+// 관리자: Supabase Auth 로그인 (로그인해야 승인/직접반영 가능)
 
-const LS = {
-  overrides: "assetmgr_overrides", // 베이스 자산 수정 내용 { "<id>": {...} }
-  deleted: "assetmgr_deleted", // 삭제된 베이스 자산 id 목록 ["<id>"]
-};
+const SUPABASE_URL = "https://pmjwwvgcmaywbatryibc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_dOgVVneeoU9xeZlRWY7zFg_FdRE_PVp";
+const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 let baseAssets = []; // assets.json 원본
-let userAdded = []; // Supabase 직접 등록 (공유)
-let overrides = {}; // localStorage 수정
-let deleted = []; // localStorage 삭제
-
+let overlay = []; // Supabase assets 테이블 rows [{id, kind, data}]
+let requests = []; // Supabase requests 테이블 (pending)
 let assets = []; // 병합 결과 (화면 데이터)
 let filtered = [];
 let currentPage = 1;
 const PER_PAGE = 20;
 
-let sortState = { key: null, dir: 1 }; // dir: 1 오름, -1 내림
-
-let currentPhoto = ""; // 폼에서 편집 중인 사진(base64)
+let sortState = { key: null, dir: 1 };
+let currentPhoto = "";
+let isAdmin = false;
+let adminEmail = "";
+let detailCurrentId = null;
 
 // ===== 유틸 =====
 const won = (n) => (n ? Number(n).toLocaleString("ko-KR") + "원" : "-");
@@ -42,75 +43,59 @@ function statusBadge(status) {
   return `<span class="badge ${cls}">${val(s)}</span>`;
 }
 
-// ===== Supabase (직접 등록분 공유 저장) =====
-const SUPABASE_URL = "https://pmjwwvgcmaywbatryibc.supabase.co";
-const SUPABASE_KEY = "sb_publishable_dOgVVneeoU9xeZlRWY7zFg_FdRE_PVp";
-const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+function todayStr() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
-// 직접 등록 자산을 Supabase에서 로드
-async function sbLoadAdded() {
+function show(id) { document.getElementById(id).hidden = false; }
+function hide(id) { document.getElementById(id).hidden = true; }
+
+const findAsset = (id) => assets.find((x) => String(x.id) === String(id));
+
+// ===== Supabase: 데이터 로드 =====
+async function sbLoadOverlay() {
+  if (!sb) return;
+  const { data, error } = await sb.from("assets").select("id, kind, data, updated_at");
+  if (error) { console.error("오버레이 로드 오류:", error.message); return; }
+  overlay = data || [];
+}
+
+async function sbLoadRequests() {
   if (!sb) return;
   const { data, error } = await sb
-    .from("assets")
-    .select("id, data, updated_at")
-    .order("updated_at", { ascending: false });
-  if (error) { console.error("Supabase 로드 오류:", error.message); return; }
-  userAdded = (data || []).map((r) => ({ ...r.data, id: r.id }));
+    .from("requests")
+    .select("*")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true });
+  if (error) { console.error("요청 로드 오류:", error.message); return; }
+  requests = data || [];
 }
 
-// 등록/수정 (upsert)
-async function sbUpsert(asset) {
-  if (!sb) throw new Error("Supabase 미연결");
-  const { id, _added, _edited, ...data } = asset;
-  const { error } = await sb
-    .from("assets")
-    .upsert({ id, data, updated_at: new Date().toISOString() });
-  if (error) throw error;
-}
-
-// 삭제
-async function sbDelete(id) {
-  if (!sb) throw new Error("Supabase 미연결");
-  const { error } = await sb.from("assets").delete().eq("id", id);
-  if (error) throw error;
-}
-
-// 실시간 동기화 (다른 사용자의 변경 자동 반영)
-function sbSubscribe() {
-  if (!sb) return;
-  sb.channel("assets-realtime")
-    .on("postgres_changes", { event: "*", schema: "public", table: "assets" }, async () => {
-      await sbLoadAdded();
-      refresh();
-    })
-    .subscribe();
-}
-
-// ===== localStorage (엑셀 원본 수정/삭제는 로컬 유지) =====
-function loadLocalData() {
-  try {
-    overrides = JSON.parse(localStorage.getItem(LS.overrides) || "{}");
-    deleted = JSON.parse(localStorage.getItem(LS.deleted) || "[]");
-  } catch {
-    overrides = {}; deleted = [];
-  }
-}
-function saveOverrides() { localStorage.setItem(LS.overrides, JSON.stringify(overrides)); }
-function saveDeleted() { localStorage.setItem(LS.deleted, JSON.stringify(deleted)); }
-
-// 베이스 + 사용자 레이어 병합
+// 베이스 + 오버레이 병합
 function buildAssets() {
+  const addedRows = overlay.filter((o) => o.kind === "added");
+  const overrideMap = {};
+  overlay.filter((o) => o.kind === "override").forEach((o) => (overrideMap[String(o.id)] = o.data));
+  const deletedSet = new Set(overlay.filter((o) => o.kind === "deleted").map((o) => String(o.id)));
+
   const base = baseAssets
-    .filter((a) => !deleted.includes(String(a.id)))
+    .filter((a) => !deletedSet.has(String(a.id)))
     .map((a) => {
-      const ov = overrides[String(a.id)];
+      const ov = overrideMap[String(a.id)];
       return ov ? { ...a, ...ov, _edited: true } : a;
     });
-  const added = userAdded.map((a) => ({ ...a, _added: true }));
+  const added = addedRows.map((o) => ({ ...o.data, id: o.id, _added: true }));
   assets = [...added, ...base];
 }
 
-// ===== 데이터 로드 =====
+// 대기중인 요청 대상 id 집합 (목록에 "요청중" 표시용)
+function pendingTargetSet() {
+  return new Set(requests.filter((r) => r.target_id).map((r) => String(r.target_id)));
+}
+
+// ===== 초기 로드 =====
 async function loadData() {
   try {
     const res = await fetch("assets.json");
@@ -120,28 +105,115 @@ async function loadData() {
     document.getElementById("assetTbody").innerHTML =
       `<tr><td colspan="9" style="padding:40px;text-align:center;color:#c2410c;">엑셀 데이터를 불러오지 못했습니다.</td></tr>`;
   }
-  loadLocalData();
-  await sbLoadAdded();
+  await initAuth();
+  await sbLoadOverlay();
+  await sbLoadRequests();
   buildAssets();
   filtered = assets;
-  initCategoryFilter();
+  initFilters();
   renderStats();
+  updateAdminUI();
   render();
   sbSubscribe();
 }
 
 function refresh() {
   buildAssets();
-  initCategoryFilter();
+  initFilters();
   renderStats();
-  applyFilter(); // 현재 검색/필터 유지하며 다시 렌더
+  updateAdminUI();
+  applyFilter();
+}
+
+// 실시간 동기화
+function sbSubscribe() {
+  if (!sb) return;
+  sb.channel("realtime-all")
+    .on("postgres_changes", { event: "*", schema: "public", table: "assets" }, async () => {
+      await sbLoadOverlay();
+      refresh();
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "requests" }, async () => {
+      await sbLoadRequests();
+      refresh();
+      if (!document.getElementById("reviewOverlay").hidden) renderReview();
+    })
+    .subscribe();
+}
+
+// ===== 인증 =====
+async function initAuth() {
+  if (!sb) return;
+  const { data } = await sb.auth.getSession();
+  setAdmin(data.session);
+  sb.auth.onAuthStateChange((_event, session) => {
+    setAdmin(session);
+    refresh();
+  });
+}
+
+function setAdmin(session) {
+  isAdmin = !!session;
+  adminEmail = session?.user?.email || "";
+}
+
+async function login() {
+  const email = document.getElementById("loginEmail").value.trim();
+  const password = document.getElementById("loginPassword").value;
+  const errEl = document.getElementById("loginError");
+  errEl.hidden = true;
+  const btn = document.getElementById("loginSubmit");
+  btn.disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  btn.disabled = false;
+  if (error) {
+    errEl.textContent = "로그인 실패: 이메일 또는 비밀번호를 확인하세요.";
+    errEl.hidden = false;
+    return;
+  }
+  hide("loginOverlay");
+  await sbLoadRequests();
+  refresh();
+}
+
+async function logout() {
+  await sb.auth.signOut();
+  refresh();
+}
+
+// 관리자 여부에 따라 UI 갱신
+function updateAdminUI() {
+  const loginBtn = document.getElementById("loginBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const adminTag = document.getElementById("adminTag");
+  const reviewBtn = document.getElementById("reviewBtn");
+  const notice = document.getElementById("userNotice");
+  const addBtn = document.getElementById("addBtn");
+
+  if (isAdmin) {
+    loginBtn.hidden = true;
+    logoutBtn.hidden = false;
+    adminTag.hidden = false;
+    adminTag.textContent = `관리자: ${adminEmail}`;
+    reviewBtn.hidden = false;
+    document.getElementById("pendingCount").textContent = requests.length;
+    notice.hidden = true;
+    addBtn.textContent = "+ 자산 등록";
+  } else {
+    loginBtn.hidden = false;
+    logoutBtn.hidden = true;
+    adminTag.hidden = true;
+    reviewBtn.hidden = true;
+    notice.hidden = false;
+    addBtn.textContent = "+ 자산 등록 요청";
+  }
 }
 
 // ===== 통계 =====
 function renderStats() {
   const total = assets.length;
   const totalCost = assets.reduce((s, a) => s + (a.acquireCost || 0), 0);
-  const addedCount = userAdded.length;
+  const addedCount = overlay.filter((o) => o.kind === "added").length;
   const catCount = new Set(assets.map((a) => a.category).filter(Boolean)).size;
 
   document.getElementById("stats").innerHTML = `
@@ -152,7 +224,7 @@ function renderStats() {
   `;
 }
 
-// ===== 필터 드롭다운 채우기 =====
+// ===== 필터 =====
 function fillSelect(id, values, allLabel) {
   const sel = document.getElementById(id);
   const prev = sel.value;
@@ -162,13 +234,12 @@ function fillSelect(id, values, allLabel) {
   if (opts.includes(prev)) sel.value = prev;
 }
 
-function initCategoryFilter() {
+function initFilters() {
   fillSelect("categoryFilter", assets.map((a) => a.category), "전체 분류");
   fillSelect("deptFilter", assets.map((a) => a.dept), "전체");
   fillSelect("statusFilter", assets.map((a) => a.status), "전체");
 }
 
-// ===== 검색/필터 =====
 function applyFilter() {
   const kw = document.getElementById("searchInput").value.trim().toLowerCase();
   const cat = document.getElementById("categoryFilter").value;
@@ -207,9 +278,7 @@ function sortFiltered() {
     const na = parseFloat(va), nb = parseFloat(vb);
     const bothNum = va !== "" && vb !== "" && !isNaN(na) && !isNaN(nb) &&
       String(va).trim() === String(na) && String(vb).trim() === String(nb);
-    let cmp;
-    if (bothNum) cmp = na - nb;
-    else cmp = String(va).localeCompare(String(vb), "ko");
+    const cmp = bothNum ? na - nb : String(va).localeCompare(String(vb), "ko");
     return cmp * dir;
   });
 }
@@ -217,7 +286,6 @@ function sortFiltered() {
 function setSort(key) {
   if (sortState.key === key) sortState.dir *= -1;
   else sortState = { key, dir: 1 };
-  // 헤더 화살표 갱신
   document.querySelectorAll(".asset-table th.sortable").forEach((th) => {
     const arrow = th.querySelector(".sort-arrow");
     if (th.dataset.key === key) {
@@ -245,6 +313,7 @@ function render() {
   }
   emptyMsg.hidden = true;
 
+  const pending = pendingTargetSet();
   const start = (currentPage - 1) * PER_PAGE;
   const pageItems = filtered.slice(start, start + PER_PAGE);
 
@@ -253,6 +322,7 @@ function render() {
       let tag = "";
       if (a._added) tag = `<span class="tag tag-added">직접</span>`;
       else if (a._edited) tag = `<span class="tag tag-edited">수정</span>`;
+      if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
       return `
     <tr>
       <td class="cell-name" title="${esc(a.assetName)}">${esc(a.assetName)} ${tag}</td>
@@ -265,8 +335,8 @@ function render() {
       <td>${esc(val(a.regDate))}</td>
       <td class="cell-actions">
         <button class="btn-mini btn-view" data-id="${esc(a.id)}">상세</button>
-        <button class="btn-mini btn-edit" data-id="${esc(a.id)}">수정</button>
-        <button class="btn-mini btn-del" data-id="${esc(a.id)}">삭제</button>
+        <button class="btn-mini btn-edit" data-id="${esc(a.id)}">${isAdmin ? "수정" : "수정요청"}</button>
+        <button class="btn-mini btn-del" data-id="${esc(a.id)}">${isAdmin ? "삭제" : "삭제요청"}</button>
       </td>
     </tr>`;
     })
@@ -296,12 +366,7 @@ function renderPagination() {
   nav.innerHTML = html;
 }
 
-// ===== 조회 헬퍼 =====
-const findAsset = (id) => assets.find((x) => String(x.id) === String(id));
-
 // ===== 상세 모달 =====
-let detailCurrentId = null;
-
 function openDetail(id) {
   const a = findAsset(id);
   if (!a) return;
@@ -337,6 +402,8 @@ function openDetail(id) {
     `<dl class="detail-grid">` +
     rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") +
     `</dl>`;
+  document.getElementById("detailEditBtn").textContent = isAdmin ? "수정" : "수정 요청";
+  document.getElementById("detailDeleteBtn").textContent = isAdmin ? "삭제" : "삭제 요청";
   show("detailOverlay");
 }
 
@@ -347,12 +414,14 @@ function openForm(id) {
   document.getElementById("formError").hidden = true;
   currentPhoto = "";
 
+  // 요청 정보 입력란은 비관리자에게만 표시
+  document.querySelectorAll(".request-only").forEach((el) => (el.style.display = isAdmin ? "none" : ""));
+
   if (id) {
-    // 수정 모드
     const a = findAsset(id);
     if (!a) return;
-    document.getElementById("formTitle").textContent = "자산 수정";
-    document.getElementById("formSaveBtn").textContent = "저장";
+    document.getElementById("formTitle").textContent = isAdmin ? "자산 수정" : "자산 수정 요청";
+    document.getElementById("formSaveBtn").textContent = isAdmin ? "저장" : "수정 요청";
     document.getElementById("f-id").value = a.id;
     document.getElementById("f-assetName").value = a.assetName || "";
     document.getElementById("f-assetNumber").value = a.assetNumber || "";
@@ -368,9 +437,8 @@ function openForm(id) {
     document.getElementById("f-note").value = a.note || "";
     currentPhoto = a.imageUrl || "";
   } else {
-    // 등록 모드
-    document.getElementById("formTitle").textContent = "자산 등록";
-    document.getElementById("formSaveBtn").textContent = "등록";
+    document.getElementById("formTitle").textContent = isAdmin ? "자산 등록" : "자산 등록 요청";
+    document.getElementById("formSaveBtn").textContent = isAdmin ? "등록" : "등록 요청";
     document.getElementById("f-id").value = "";
   }
 
@@ -390,7 +458,6 @@ function renderPhotoPreview() {
   }
 }
 
-// 사진 업로드 → 이미지 검증 → 리사이즈 → base64
 function handlePhotoUpload(file) {
   if (!file) return;
   if (!file.type.startsWith("image/")) {
@@ -427,7 +494,7 @@ function showFormError(msg) {
   el.hidden = false;
 }
 
-// 저장 (등록 또는 수정)
+// 폼 저장: 관리자=즉시 반영, 일반=요청 등록
 async function saveForm() {
   const id = document.getElementById("f-id").value;
   const get = (k) => document.getElementById("f-" + k).value.trim();
@@ -437,16 +504,13 @@ async function saveForm() {
   const location = get("location");
   const manager = get("manager");
 
-  // 필수값 검증
   if (!assetName || !assetNumber || !location || !manager) {
     showFormError("필수 항목을 입력해주세요. (자산명, 자산번호, 위치, 담당자)");
     return;
   }
 
   // 자산번호 중복 검사 (자기 자신 제외)
-  const dup = assets.find(
-    (a) => a.assetNumber === assetNumber && String(a.id) !== String(id)
-  );
+  const dup = assets.find((a) => a.assetNumber === assetNumber && String(a.id) !== String(id));
   if (dup) {
     showFormError("이미 등록된 자산번호입니다.");
     return;
@@ -468,22 +532,19 @@ async function saveForm() {
   const saveBtn = document.getElementById("formSaveBtn");
   saveBtn.disabled = true;
   try {
-    if (!id) {
-      // 신규 등록 → Supabase (공유)
-      const newAsset = {
-        id: "u" + Date.now() + Math.floor(Math.random() * 1000),
-        ...fields,
-        regDate: todayStr(),
-      };
-      await sbUpsert(newAsset);
-    } else if (String(id).startsWith("u")) {
-      // 직접 등록 자산 수정 → Supabase (공유)
-      const existing = userAdded.find((a) => String(a.id) === String(id)) || {};
-      await sbUpsert({ ...existing, ...fields, id });
+    if (isAdmin) {
+      // 즉시 반영
+      if (!id) await applyCreate(fields);
+      else await applyUpdate(id, fields);
     } else {
-      // 베이스(엑셀) 자산 수정 → 로컬 저장
-      overrides[String(id)] = { ...(overrides[String(id)] || {}), ...fields };
-      saveOverrides();
+      // 요청 등록
+      await submitRequest({
+        action: id ? "update" : "create",
+        target_id: id || null,
+        payload: id ? { ...fields, id } : fields,
+        requester: get("requester"),
+        note: get("reqnote"),
+      });
     }
   } catch (e) {
     console.error(e);
@@ -492,51 +553,186 @@ async function saveForm() {
     return;
   }
   saveBtn.disabled = false;
-
   hide("formOverlay");
-  if (!id || String(id).startsWith("u")) await sbLoadAdded();
+
+  if (isAdmin) { await sbLoadOverlay(); }
+  else { await sbLoadRequests(); alert("요청이 접수되었습니다. 관리자 승인 후 반영됩니다."); }
   refresh();
 }
 
-function todayStr() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
 // ===== 삭제 =====
-async function deleteAsset(id) {
+async function handleDelete(id) {
   const a = findAsset(id);
   if (!a) return;
-  if (!confirm(`정말 이 자산을 삭제하시겠습니까?\n\n${a.assetName}`)) return;
 
-  if (String(id).startsWith("u")) {
-    // 직접 등록 자산 → Supabase에서 삭제 (공유)
+  if (isAdmin) {
+    if (!confirm(`정말 이 자산을 삭제하시겠습니까?\n\n${a.assetName}`)) return;
     try {
-      await sbDelete(id);
+      await applyDelete(id);
     } catch (e) {
       console.error(e);
       alert("삭제에 실패했습니다. 네트워크 연결을 확인해주세요.");
       return;
     }
-    await sbLoadAdded();
+    hide("detailOverlay");
+    await sbLoadOverlay();
+    refresh();
   } else {
-    // 엑셀 원본 → 로컬 삭제
-    if (!deleted.includes(String(id))) deleted.push(String(id));
-    delete overrides[String(id)];
-    saveDeleted();
-    saveOverrides();
+    if (!confirm(`이 자산의 삭제를 요청하시겠습니까?\n\n${a.assetName}\n\n관리자 승인 후 삭제됩니다.`)) return;
+    const requester = prompt("요청자 이름(선택):", "") ?? "";
+    try {
+      await submitRequest({
+        action: "delete",
+        target_id: id,
+        payload: { assetName: a.assetName, assetNumber: a.assetNumber },
+        requester,
+        note: "",
+      });
+    } catch (e) {
+      console.error(e);
+      alert("요청 전송에 실패했습니다. 네트워크 연결을 확인해주세요.");
+      return;
+    }
+    hide("detailOverlay");
+    await sbLoadRequests();
+    alert("삭제 요청이 접수되었습니다. 관리자 승인 후 반영됩니다.");
+    refresh();
   }
-  hide("detailOverlay");
+}
+
+// ===== 오버레이 직접 반영 (관리자) =====
+async function applyCreate(fields) {
+  const id = "u" + Date.now() + Math.floor(Math.random() * 1000);
+  const data = { ...fields, regDate: todayStr() };
+  const { error } = await sb.from("assets").upsert({ id, kind: "added", data, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+async function applyUpdate(id, fields) {
+  if (String(id).startsWith("u")) {
+    const existing = overlay.find((o) => String(o.id) === String(id))?.data || {};
+    const data = { ...existing, ...fields };
+    const { error } = await sb.from("assets").upsert({ id, kind: "added", data, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  } else {
+    const existing = overlay.find((o) => String(o.id) === String(id) && o.kind === "override")?.data || {};
+    const data = { ...existing, ...fields };
+    const { error } = await sb.from("assets").upsert({ id: String(id), kind: "override", data, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  }
+}
+
+async function applyDelete(id) {
+  if (String(id).startsWith("u")) {
+    const { error } = await sb.from("assets").delete().eq("id", id);
+    if (error) throw error;
+  } else {
+    const { error } = await sb.from("assets").upsert({ id: String(id), kind: "deleted", data: {}, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  }
+}
+
+// ===== 변경 요청 (일반 사용자) =====
+async function submitRequest(req) {
+  if (!sb) throw new Error("Supabase 미연결");
+  const { error } = await sb.from("requests").insert({
+    action: req.action,
+    target_id: req.target_id,
+    payload: req.payload,
+    requester: req.requester || "",
+    note: req.note || "",
+    status: "pending",
+  });
+  if (error) throw error;
+}
+
+// ===== 승인 패널 (관리자) =====
+function openReview() {
+  renderReview();
+  show("reviewOverlay");
+}
+
+function renderReview() {
+  const body = document.getElementById("reviewBody");
+  if (requests.length === 0) {
+    body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`;
+    return;
+  }
+  const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청" };
+  const actionCls = { create: "req-create", update: "req-update", delete: "req-delete" };
+
+  body.innerHTML = requests
+    .map((r) => {
+      const p = r.payload || {};
+      let summary = "";
+      if (r.action === "delete") {
+        summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})`;
+      } else {
+        summary = `
+          <div class="req-fields">
+            <span><b>${esc(p.assetName || "")}</b></span>
+            <span>자산번호: ${esc(p.assetNumber || "-")}</span>
+            <span>위치: ${esc(p.location || "-")}</span>
+            <span>담당자: ${esc(p.manager || "-")}</span>
+            <span>상태: ${esc(p.status || "-")}</span>
+            ${p.dept ? `<span>부서: ${esc(p.dept)}</span>` : ""}
+          </div>`;
+      }
+      const meta = [r.requester && `요청자: ${esc(r.requester)}`, r.note && `사유: ${esc(r.note)}`]
+        .filter(Boolean).join(" · ");
+      return `
+      <div class="req-card">
+        <div class="req-top">
+          <span class="req-badge ${actionCls[r.action]}">${actionLabel[r.action]}</span>
+          ${meta ? `<span class="req-meta">${meta}</span>` : ""}
+        </div>
+        <div class="req-summary">${summary}</div>
+        <div class="req-actions">
+          <button class="btn btn-primary btn-sm" data-approve="${r.id}">승인</button>
+          <button class="btn btn-danger btn-sm" data-reject="${r.id}">반려</button>
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+async function approveRequest(reqId) {
+  const r = requests.find((x) => String(x.id) === String(reqId));
+  if (!r) return;
+  try {
+    if (r.action === "create") await applyCreate(r.payload);
+    else if (r.action === "update") await applyUpdate(r.target_id, r.payload);
+    else if (r.action === "delete") await applyDelete(r.target_id);
+    const { error } = await sb.from("requests").update({ status: "approved" }).eq("id", reqId);
+    if (error) throw error;
+  } catch (e) {
+    console.error(e);
+    alert("승인 처리에 실패했습니다.");
+    return;
+  }
+  await sbLoadOverlay();
+  await sbLoadRequests();
   refresh();
+  renderReview();
+}
+
+async function rejectRequest(reqId) {
+  try {
+    const { error } = await sb.from("requests").update({ status: "rejected" }).eq("id", reqId);
+    if (error) throw error;
+  } catch (e) {
+    console.error(e);
+    alert("반려 처리에 실패했습니다.");
+    return;
+  }
+  await sbLoadRequests();
+  refresh();
+  renderReview();
 }
 
 // ===== 엑셀 내보내기 =====
 function exportExcel() {
-  if (filtered.length === 0) {
-    alert("내보낼 자산이 없습니다.");
-    return;
-  }
+  if (filtered.length === 0) { alert("내보낼 자산이 없습니다."); return; }
   const rows = filtered.map((a) => ({
     "자산명": a.assetName || "",
     "자산번호": a.assetNumber || "",
@@ -557,16 +753,11 @@ function exportExcel() {
     "비고": a.note || "",
     "구분": a._added ? "직접등록" : a._edited ? "수정됨" : "엑셀원본",
   }));
-
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "자산목록");
   XLSX.writeFile(wb, `자산목록_${todayStr()}.xlsx`);
 }
-
-// ===== 모달 표시 헬퍼 =====
-function show(id) { document.getElementById(id).hidden = false; }
-function hide(id) { document.getElementById(id).hidden = true; }
 
 // ===== 이벤트 바인딩 =====
 document.getElementById("searchInput").addEventListener("input", applyFilter);
@@ -576,43 +767,34 @@ document.getElementById("clearBtn").addEventListener("click", () => {
   applyFilter();
 });
 
-// 상세 필터
 document.getElementById("advToggle").addEventListener("click", () => {
   const p = document.getElementById("advPanel");
   p.hidden = !p.hidden;
 });
 ["deptFilter", "statusFilter"].forEach((id) =>
-  document.getElementById(id).addEventListener("change", applyFilter)
-);
+  document.getElementById(id).addEventListener("change", applyFilter));
 ["minCost", "maxCost"].forEach((id) =>
-  document.getElementById(id).addEventListener("input", applyFilter)
-);
+  document.getElementById(id).addEventListener("input", applyFilter));
 document.getElementById("advReset").addEventListener("click", () => {
   ["deptFilter", "statusFilter", "minCost", "maxCost", "categoryFilter"].forEach(
-    (id) => (document.getElementById(id).value = "")
-  );
+    (id) => (document.getElementById(id).value = ""));
   applyFilter();
 });
 
-// 정렬 (헤더 클릭)
 document.querySelectorAll(".asset-table th.sortable").forEach((th) =>
-  th.addEventListener("click", () => setSort(th.dataset.key))
-);
+  th.addEventListener("click", () => setSort(th.dataset.key)));
 
-// 엑셀 내보내기
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
-
-// 등록 버튼
 document.getElementById("addBtn").addEventListener("click", () => openForm(null));
 
-// 테이블 행 버튼 (이벤트 위임)
+// 테이블 행 버튼
 document.getElementById("assetTbody").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-id]");
   if (!btn) return;
   const id = btn.dataset.id;
   if (btn.classList.contains("btn-view")) openDetail(id);
   else if (btn.classList.contains("btn-edit")) openForm(id);
-  else if (btn.classList.contains("btn-del")) deleteAsset(id);
+  else if (btn.classList.contains("btn-del")) handleDelete(id);
 });
 
 // 페이지네이션
@@ -629,9 +811,9 @@ document.getElementById("detailEditBtn").addEventListener("click", () => {
   hide("detailOverlay");
   openForm(detailCurrentId);
 });
-document.getElementById("detailDeleteBtn").addEventListener("click", () => deleteAsset(detailCurrentId));
+document.getElementById("detailDeleteBtn").addEventListener("click", () => handleDelete(detailCurrentId));
 
-// 폼 모달
+// 폼
 document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files[0]));
 document.getElementById("removePhotoBtn").addEventListener("click", () => {
   currentPhoto = "";
@@ -639,28 +821,35 @@ document.getElementById("removePhotoBtn").addEventListener("click", () => {
   renderPhotoPreview();
 });
 document.getElementById("formSaveBtn").addEventListener("click", saveForm);
-document.getElementById("assetForm").addEventListener("submit", (e) => {
-  e.preventDefault();
-  saveForm();
+document.getElementById("assetForm").addEventListener("submit", (e) => { e.preventDefault(); saveForm(); });
+
+// 로그인
+document.getElementById("loginBtn").addEventListener("click", () => {
+  document.getElementById("loginError").hidden = true;
+  show("loginOverlay");
+});
+document.getElementById("logoutBtn").addEventListener("click", logout);
+document.getElementById("loginSubmit").addEventListener("click", login);
+document.getElementById("loginForm").addEventListener("submit", (e) => { e.preventDefault(); login(); });
+
+// 승인 패널
+document.getElementById("reviewBtn").addEventListener("click", openReview);
+document.getElementById("reviewBody").addEventListener("click", (e) => {
+  const ap = e.target.closest("button[data-approve]");
+  const rj = e.target.closest("button[data-reject]");
+  if (ap) approveRequest(ap.dataset.approve);
+  else if (rj) rejectRequest(rj.dataset.reject);
 });
 
-// 모달 닫기 (data-close 버튼, 오버레이 클릭, ESC)
-document.querySelectorAll("[data-close]").forEach((btn) => {
+// 모달 닫기
+document.querySelectorAll("[data-close]").forEach((btn) =>
   btn.addEventListener("click", () => {
-    hide("detailOverlay");
-    hide("formOverlay");
-  });
-});
-document.querySelectorAll(".modal-overlay").forEach((ov) => {
-  ov.addEventListener("click", (e) => {
-    if (e.target === ov) ov.hidden = true;
-  });
-});
+    ["detailOverlay", "formOverlay", "loginOverlay", "reviewOverlay"].forEach(hide);
+  }));
+document.querySelectorAll(".modal-overlay").forEach((ov) =>
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    hide("detailOverlay");
-    hide("formOverlay");
-  }
+  if (e.key === "Escape") ["detailOverlay", "formOverlay", "loginOverlay", "reviewOverlay"].forEach(hide);
 });
 
 // 시작

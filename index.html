@@ -13,11 +13,24 @@
         <h1>자산관리 시스템</h1>
         <p class="subtitle">글로컬대학사업본부 전체 자산 목록</p>
       </div>
-      <button class="btn btn-primary" id="addBtn">+ 자산 등록</button>
+      <div class="header-actions">
+        <button class="btn btn-secondary" id="reviewBtn" hidden>
+          승인 대기 <span class="count-badge" id="pendingCount">0</span>
+        </button>
+        <button class="btn btn-primary" id="addBtn">+ 자산 등록</button>
+        <span class="admin-tag" id="adminTag" hidden></span>
+        <button class="btn btn-secondary" id="loginBtn">관리자 로그인</button>
+        <button class="btn btn-secondary" id="logoutBtn" hidden>로그아웃</button>
+      </div>
     </div>
   </header>
 
   <main class="container">
+    <!-- 안내 배너 -->
+    <div class="notice" id="userNotice">
+      등록·수정·삭제는 <b>요청</b>으로 접수되며, 관리자 승인 후 반영됩니다.
+    </div>
+
     <!-- 통계 요약 -->
     <section class="stats" id="stats"></section>
 
@@ -174,6 +187,16 @@
             </div>
             <button type="button" class="btn-link" id="removePhotoBtn" hidden>사진 제거</button>
           </div>
+
+          <!-- 요청 정보 (비관리자 전용) -->
+          <div class="form-row request-only">
+            <label>요청자 이름</label>
+            <input type="text" id="f-requester" placeholder="승인 검토용 (선택)" />
+          </div>
+          <div class="form-row request-only">
+            <label>요청 사유</label>
+            <input type="text" id="f-reqnote" placeholder="예: 위치 이전, 폐기 등 (선택)" />
+          </div>
         </div>
         <p class="form-error" id="formError" hidden></p>
       </form>
@@ -184,8 +207,47 @@
     </div>
   </div>
 
+  <!-- 관리자 로그인 모달 -->
+  <div class="modal-overlay" id="loginOverlay" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>관리자 로그인</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <form id="loginForm" class="modal-body">
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>이메일</label>
+          <input type="email" id="loginEmail" autocomplete="username" required />
+        </div>
+        <div class="form-row">
+          <label>비밀번호</label>
+          <input type="password" id="loginPassword" autocomplete="current-password" required />
+        </div>
+        <p class="form-error" id="loginError" hidden></p>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="loginSubmit">로그인</button>
+        <button class="btn btn-secondary" data-close>취소</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 승인 대기 패널 모달 (관리자) -->
+  <div class="modal-overlay" id="reviewOverlay" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>승인 대기 목록</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body" id="reviewBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close>닫기</button>
+      </div>
+    </div>
+  </div>
+
   <footer class="footer">
-    <p>© 글로컬대학사업본부 자산관리 시스템 · 직접 등록 데이터는 이 브라우저에 저장됩니다</p>
+    <p>© 글로컬대학사업본부 자산관리 시스템</p>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
