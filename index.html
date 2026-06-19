@@ -9,8 +9,11 @@
 <body>
   <header class="header">
     <div class="header-inner">
-      <h1>자산관리 시스템</h1>
-      <p class="subtitle">글로컬대학사업본부 전체 자산 목록</p>
+      <div>
+        <h1>자산관리 시스템</h1>
+        <p class="subtitle">글로컬대학사업본부 전체 자산 목록</p>
+      </div>
+      <button class="btn btn-primary" id="addBtn">+ 자산 등록</button>
     </div>
   </header>
 
@@ -61,21 +64,105 @@
   </main>
 
   <!-- 상세 모달 -->
-  <div class="modal-overlay" id="modalOverlay" hidden>
+  <div class="modal-overlay" id="detailOverlay" hidden>
     <div class="modal" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <h2 id="modalTitle">자산 상세 정보</h2>
-        <button class="modal-close" id="modalClose">✕</button>
+        <h2 id="detailTitle">자산 상세 정보</h2>
+        <button class="modal-close" data-close>✕</button>
       </div>
-      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-body" id="detailBody"></div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="modalCloseBtn">목록으로 돌아가기</button>
+        <button class="btn btn-primary" id="detailEditBtn">수정</button>
+        <button class="btn btn-danger" id="detailDeleteBtn">삭제</button>
+        <button class="btn btn-secondary" data-close>목록으로 돌아가기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 등록/수정 폼 모달 -->
+  <div class="modal-overlay" id="formOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="formTitle">자산 등록</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <form id="assetForm" class="modal-body">
+        <input type="hidden" id="f-id" />
+        <div class="form-grid">
+          <div class="form-row">
+            <label>자산명 <span class="req">*</span></label>
+            <input type="text" id="f-assetName" required />
+          </div>
+          <div class="form-row">
+            <label>자산번호 <span class="req">*</span></label>
+            <input type="text" id="f-assetNumber" required />
+          </div>
+          <div class="form-row">
+            <label>자산구분</label>
+            <input type="text" id="f-category" placeholder="예: 기계기구" />
+          </div>
+          <div class="form-row">
+            <label>상태</label>
+            <select id="f-status">
+              <option value="취득">취득</option>
+              <option value="사용중">사용중</option>
+              <option value="보관중">보관중</option>
+              <option value="불용">불용</option>
+              <option value="폐기">폐기</option>
+            </select>
+          </div>
+          <div class="form-row full">
+            <label>보관 위치 <span class="req">*</span></label>
+            <input type="text" id="f-location" required />
+          </div>
+          <div class="form-row">
+            <label>담당자(등록자) <span class="req">*</span></label>
+            <input type="text" id="f-manager" required />
+          </div>
+          <div class="form-row">
+            <label>운영 부서</label>
+            <input type="text" id="f-dept" />
+          </div>
+          <div class="form-row">
+            <label>모델명</label>
+            <input type="text" id="f-model" />
+          </div>
+          <div class="form-row">
+            <label>규격</label>
+            <input type="text" id="f-spec" />
+          </div>
+          <div class="form-row">
+            <label>제작회사</label>
+            <input type="text" id="f-maker" />
+          </div>
+          <div class="form-row">
+            <label>취득금액(원)</label>
+            <input type="number" id="f-acquireCost" min="0" />
+          </div>
+          <div class="form-row full">
+            <label>비고</label>
+            <textarea id="f-note" rows="2"></textarea>
+          </div>
+          <div class="form-row full">
+            <label>물품 사진</label>
+            <input type="file" id="f-image" accept="image/*" />
+            <div class="photo-preview" id="photoPreview">
+              <span class="photo-placeholder">사진 없음</span>
+            </div>
+            <button type="button" class="btn-link" id="removePhotoBtn" hidden>사진 제거</button>
+          </div>
+        </div>
+        <p class="form-error" id="formError" hidden></p>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="formSaveBtn">등록</button>
+        <button class="btn btn-secondary" data-close>취소</button>
       </div>
     </div>
   </div>
 
   <footer class="footer">
-    <p>© 글로컬대학사업본부 자산관리 시스템</p>
+    <p>© 글로컬대학사업본부 자산관리 시스템 · 직접 등록 데이터는 이 브라우저에 저장됩니다</p>
   </footer>
 
   <script src="script.js"></script>
