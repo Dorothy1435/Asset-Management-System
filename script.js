@@ -146,7 +146,8 @@ async function initAuth() {
   if (!sb) return;
   const { data } = await sb.auth.getSession();
   setAdmin(data.session);
-  sb.auth.onAuthStateChange((_event, session) => {
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === "PASSWORD_RECOVERY") show("pwOverlay");
     setAdmin(session);
     refresh();
   });
@@ -178,6 +179,52 @@ async function login() {
 
 async function logout() {
   await sb.auth.signOut();
+  refresh();
+}
+
+// 비밀번호 찾기: 입력된 이메일로 재설정 메일 발송
+async function forgotPassword() {
+  const email = document.getElementById("loginEmail").value.trim();
+  const errEl = document.getElementById("loginError");
+  const infoEl = document.getElementById("loginInfo");
+  errEl.hidden = true;
+  infoEl.hidden = true;
+  if (!email) {
+    errEl.textContent = "재설정 메일을 받을 이메일을 먼저 입력하세요.";
+    errEl.hidden = false;
+    return;
+  }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+  if (error) {
+    errEl.textContent = "메일 전송 실패: " + error.message;
+    errEl.hidden = false;
+    return;
+  }
+  infoEl.textContent = "재설정 메일을 보냈습니다. 메일의 링크를 열면 새 비밀번호를 설정할 수 있습니다.";
+  infoEl.hidden = false;
+}
+
+// 재설정 링크로 돌아온 뒤 새 비밀번호 적용
+async function updatePassword() {
+  const pw = document.getElementById("newPassword").value;
+  const errEl = document.getElementById("pwError");
+  errEl.hidden = true;
+  if (pw.length < 6) {
+    errEl.textContent = "비밀번호는 6자 이상이어야 합니다.";
+    errEl.hidden = false;
+    return;
+  }
+  const btn = document.getElementById("pwSubmit");
+  btn.disabled = true;
+  const { error } = await sb.auth.updateUser({ password: pw });
+  btn.disabled = false;
+  if (error) {
+    errEl.textContent = "변경 실패: " + error.message;
+    errEl.hidden = false;
+    return;
+  }
+  hide("pwOverlay");
+  alert("비밀번호가 변경되었습니다. 새 비밀번호로 로그인됩니다.");
   refresh();
 }
 
@@ -688,7 +735,7 @@ function renderReview() {
         </div>
         <div class="req-summary">${summary}</div>
         <div class="req-actions">
-          <button class="btn btn-primary btn-sm" data-approve="${r.id}">승인</button>
+          <button class="btn btn-primary btn-sm" data-approve="${r.id}">결재</button>
           <button class="btn btn-danger btn-sm" data-reject="${r.id}">반려</button>
         </div>
       </div>`;
@@ -831,6 +878,9 @@ document.getElementById("loginBtn").addEventListener("click", () => {
 document.getElementById("logoutBtn").addEventListener("click", logout);
 document.getElementById("loginSubmit").addEventListener("click", login);
 document.getElementById("loginForm").addEventListener("submit", (e) => { e.preventDefault(); login(); });
+document.getElementById("forgotBtn").addEventListener("click", forgotPassword);
+document.getElementById("pwSubmit").addEventListener("click", updatePassword);
+document.getElementById("pwForm").addEventListener("submit", (e) => { e.preventDefault(); updatePassword(); });
 
 // 승인 패널
 document.getElementById("reviewBtn").addEventListener("click", openReview);

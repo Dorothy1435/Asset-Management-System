@@ -468,6 +468,15 @@ body {
   border-radius: 6px;
   font-size: 13px;
 }
+.form-info {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  border-radius: 6px;
+  font-size: 13px;
+}
 .btn-link {
   background: none;
   border: none;

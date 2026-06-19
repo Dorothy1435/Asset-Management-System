@@ -224,10 +224,31 @@
           <input type="password" id="loginPassword" autocomplete="current-password" required />
         </div>
         <p class="form-error" id="loginError" hidden></p>
+        <p class="form-info" id="loginInfo" hidden></p>
+        <button type="button" class="btn-link" id="forgotBtn" style="margin-top:14px;">비밀번호를 잊으셨나요?</button>
       </form>
       <div class="modal-footer">
         <button class="btn btn-primary" id="loginSubmit">로그인</button>
         <button class="btn btn-secondary" data-close>취소</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 새 비밀번호 설정 모달 (이메일 재설정 링크 클릭 후) -->
+  <div class="modal-overlay" id="pwOverlay" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>새 비밀번호 설정</h2>
+      </div>
+      <form id="pwForm" class="modal-body">
+        <div class="form-row">
+          <label>새 비밀번호 (6자 이상)</label>
+          <input type="password" id="newPassword" autocomplete="new-password" minlength="6" required />
+        </div>
+        <p class="form-error" id="pwError" hidden></p>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="pwSubmit">비밀번호 변경</button>
       </div>
     </div>
   </div>
