@@ -8,6 +8,10 @@
 const SUPABASE_URL = "https://pmjwwvgcmaywbatryibc.supabase.co";
 const SUPABASE_KEY = "sb_publishable_dOgVVneeoU9xeZlRWY7zFg_FdRE_PVp";
 const DOMAIN = "inje.ac.kr";
+// 회원관리(권한 부여/회원 삭제)까지 가능한 '최고관리자' 이메일 목록.
+// 여기에 본인 이메일을 넣으면 SQL 없이도 바로 최고관리자가 됩니다. 예: ["admin@inje.ac.kr"]
+// (또는 Supabase에서 profiles.role 을 'superadmin' 으로 지정해도 됩니다.)
+const SUPER_ADMINS = ["bbui0284@inje.ac.kr"];
 const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 let baseAssets = [];
@@ -26,6 +30,7 @@ let currentPhoto = "";
 let currentUser = null;
 let myProfile = null;
 let isAdmin = false;
+let isSuperAdmin = false;
 let detailCurrentId = null;
 let delReqId = null;
 let delReqEditId = null;   // 본인 삭제요청 수정 중인 request id
@@ -191,10 +196,13 @@ async function applySession(session) {
   if (currentUser) {
     const { data } = await sb.from("profiles").select("*").eq("id", currentUser.id).maybeSingle();
     myProfile = data || null;
-    isAdmin = myProfile?.role === "admin";
+    const email = (currentUser.email || "").toLowerCase();
+    isSuperAdmin = myProfile?.role === "superadmin" || SUPER_ADMINS.map((e) => e.toLowerCase()).includes(email);
+    isAdmin = isSuperAdmin || myProfile?.role === "admin";
   } else {
     myProfile = null;
     isAdmin = false;
+    isSuperAdmin = false;
   }
 }
 
@@ -322,7 +330,7 @@ function updateUI() {
   g("myReqBtn").hidden = !loggedIn || isAdmin;
   g("reviewBtn").hidden = !isAdmin;
   g("histBtn").hidden = !isAdmin;
-  g("membersBtn").hidden = !isAdmin;
+  g("membersBtn").hidden = !isSuperAdmin;
 
   if (loggedIn) {
     const uname = myProfile?.username || (currentUser.email || "").split("@")[0];
@@ -503,6 +511,17 @@ function downloadPhoto() {
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+// ===== 사진 확대 (라이트박스) =====
+function openLightbox(src) {
+  if (!src) return;
+  document.getElementById("lightboxImg").src = src;
+  show("lightbox");
+}
+function closeLightbox() {
+  hide("lightbox");
+  document.getElementById("lightboxImg").src = "";
 }
 
 // ===== 등록/수정 폼 =====
@@ -762,6 +781,12 @@ async function cancelMyRequest(reqId) {
   catch (e) { console.error(e); alert("취소에 실패했습니다."); return; }
   await reloadAll(); rerender(); renderMyRequests();
 }
+async function deleteMyRequest(reqId) {
+  if (!confirm("이 신청 내역을 삭제하시겠습니까?")) return;
+  try { const { error } = await sb.from("requests").delete().eq("id", reqId); if (error) throw error; }
+  catch (e) { console.error(e); alert("삭제에 실패했습니다."); return; }
+  await sbLoadMyRequests(); rerender(); renderMyRequests();
+}
 // 본인 대기중 요청 수정 열기
 function editMyRequest(reqId) {
   const r = myRequests.find((x) => String(x.id) === String(reqId));
@@ -821,7 +846,7 @@ function renderMyRequests() {
     const actions = !decided
       ? `<button class="btn btn-secondary btn-sm" data-editreq="${r.id}">수정</button>
          <button class="btn btn-danger btn-sm" data-cancelreq="${r.id}">취소</button>`
-      : "";
+      : `<button class="btn btn-danger btn-sm" data-delreq="${r.id}">삭제</button>`;
     return `
       <div class="req-card">
         <div class="req-top">
@@ -944,23 +969,66 @@ async function openMembers() {
   renderMembers();
   show("membersOverlay");
 }
+function roleBadge(role) {
+  if (role === "superadmin") return `<span class="badge badge-normal">최고관리자</span>`;
+  if (role === "admin") return `<span class="badge badge-normal">관리자</span>`;
+  return `<span class="badge badge-gray">사용자</span>`;
+}
 function renderMembers() {
   const body = document.getElementById("membersBody");
   if (members.length === 0) { body.innerHTML = `<div class="empty-msg">회원이 없습니다.</div>`; return; }
+  const myId = currentUser?.id;
   body.innerHTML = `
     <table class="member-table">
-      <thead><tr><th>아이디</th><th>이메일</th><th>권한</th><th>가입일</th></tr></thead>
+      <thead><tr><th>아이디</th><th>이메일</th><th>권한</th><th>가입일</th><th>관리</th></tr></thead>
       <tbody>
-        ${members.map((m) => `
+        ${members.map((m) => {
+          const isSelf = String(m.id) === String(myId);
+          const isSuper = m.role === "superadmin";
+          let actions;
+          if (isSelf) actions = `<span class="member-self">본인</span>`;
+          else if (isSuper) actions = `<span class="member-self">최고관리자</span>`;
+          else {
+            const toggle = m.role === "admin"
+              ? `<button class="btn-mini btn-edit" data-role="user" data-id="${esc(m.id)}">사용자로 변경</button>`
+              : `<button class="btn-mini btn-view" data-role="admin" data-id="${esc(m.id)}">관리자로 지정</button>`;
+            actions = `${toggle} <button class="btn-mini btn-del" data-delmember="${esc(m.id)}">삭제</button>`;
+          }
+          return `
           <tr>
             <td>${esc(m.username || "-")}</td>
             <td class="cell-num">${esc(m.email || "-")}</td>
-            <td>${m.role === "admin" ? `<span class="badge badge-normal">관리자</span>` : `<span class="badge badge-gray">사용자</span>`}</td>
+            <td>${roleBadge(m.role)}</td>
             <td>${fmtTime(m.created_at)}</td>
-          </tr>`).join("")}
+            <td class="cell-actions">${actions}</td>
+          </tr>`;
+        }).join("")}
       </tbody>
     </table>
-    <p class="member-count">총 ${members.length}명</p>`;
+    <p class="member-count">총 ${members.length}명 · 관리자로 지정된 회원은 회원관리를 제외한 모든 관리 기능을 사용할 수 있습니다.</p>`;
+}
+async function setMemberRole(id, role) {
+  const m = members.find((x) => String(x.id) === String(id));
+  if (!m) return;
+  const label = role === "admin" ? "관리자로 지정" : "사용자로 변경";
+  if (!confirm(`${m.username || m.email} 님을 ${label}하시겠습니까?`)) return;
+  try {
+    const { error } = await sb.from("profiles").update({ role }).eq("id", id);
+    if (error) throw error;
+  } catch (e) { console.error(e); alert("권한 변경에 실패했습니다."); return; }
+  await sbLoadMembers();
+  renderMembers();
+}
+async function deleteMember(id) {
+  const m = members.find((x) => String(x.id) === String(id));
+  if (!m) return;
+  if (!confirm(`${m.username || m.email} 님을 삭제하시겠습니까?\n\n해당 회원의 권한과 프로필이 제거됩니다.`)) return;
+  try {
+    const { error } = await sb.from("profiles").delete().eq("id", id);
+    if (error) throw error;
+  } catch (e) { console.error(e); alert("회원 삭제에 실패했습니다."); return; }
+  await sbLoadMembers();
+  renderMembers();
 }
 
 // ===== 엑셀 내보내기 =====
@@ -996,6 +1064,8 @@ document.getElementById("exportBtn").addEventListener("click", exportExcel);
 document.getElementById("addBtn").addEventListener("click", () => openForm(null));
 
 document.getElementById("assetTbody").addEventListener("click", (e) => {
+  const thumb = e.target.closest("img.thumb");
+  if (thumb) { openLightbox(thumb.src); return; }
   const btn = e.target.closest("button[data-id]");
   if (!btn) return;
   const id = btn.dataset.id;
@@ -1014,6 +1084,11 @@ document.getElementById("pagination").addEventListener("click", (e) => {
 document.getElementById("detailEditBtn").addEventListener("click", () => { hide("detailOverlay"); openForm(detailCurrentId); });
 document.getElementById("detailDeleteBtn").addEventListener("click", () => handleDelete(detailCurrentId));
 document.getElementById("detailDownloadBtn").addEventListener("click", downloadPhoto);
+document.getElementById("detailBody").addEventListener("click", (e) => {
+  const img = e.target.closest(".detail-photo img");
+  if (img) openLightbox(img.src);
+});
+document.getElementById("lightbox").addEventListener("click", closeLightbox);
 
 document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files[0]));
 document.getElementById("removePhotoBtn").addEventListener("click", () => { currentPhoto = ""; document.getElementById("f-image").value = ""; renderPhotoPreview(); });
@@ -1039,8 +1114,10 @@ document.getElementById("myReqBtn").addEventListener("click", openMyRequests);
 document.getElementById("myReqBody").addEventListener("click", (e) => {
   const ed = e.target.closest("button[data-editreq]");
   const cancel = e.target.closest("button[data-cancelreq]");
+  const del = e.target.closest("button[data-delreq]");
   if (ed) editMyRequest(ed.dataset.editreq);
   else if (cancel) cancelMyRequest(cancel.dataset.cancelreq);
+  else if (del) deleteMyRequest(del.dataset.delreq);
 });
 
 // 승인 대기
@@ -1064,12 +1141,18 @@ document.getElementById("histBody").addEventListener("click", (e) => {
 
 // 회원 관리
 document.getElementById("membersBtn").addEventListener("click", openMembers);
+document.getElementById("membersBody").addEventListener("click", (e) => {
+  const roleBtn = e.target.closest("button[data-role]");
+  const delBtn = e.target.closest("button[data-delmember]");
+  if (roleBtn) setMemberRole(roleBtn.dataset.id, roleBtn.dataset.role);
+  else if (delBtn) deleteMember(delBtn.dataset.delmember);
+});
 
 // 모달 닫기
 const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") ALL_MODALS.forEach(hide); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });
 
 // 시작
 loadData();

@@ -219,6 +219,7 @@ body {
   border: 1px solid var(--border);
   flex-shrink: 0;
   background: #f3f4f6;
+  cursor: zoom-in;
 }
 .cell-loc {
   max-width: 200px;
@@ -537,7 +538,7 @@ body {
   background: #f9fafb;
   border: 1px solid var(--border);
 }
-.detail-photo img { max-width: 100%; max-height: 280px; object-fit: contain; }
+.detail-photo img { max-width: 100%; max-height: 280px; object-fit: contain; cursor: zoom-in; }
 .detail-photo.no-photo {
   height: 120px;
   color: var(--text-light);
@@ -683,6 +684,28 @@ body {
   font-size: 13px;
 }
 .member-count { margin-top: 12px; color: var(--text-light); font-size: 13px; }
+.member-self { color: var(--text-light); font-size: 12px; }
+
+/* 사진 확대 라이트박스 */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  cursor: zoom-out;
+  padding: 24px;
+}
+.lightbox[hidden] { display: none; }
+.lightbox img {
+  max-width: 95%;
+  max-height: 95%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
 .req-meta { font-size: 12px; color: var(--text-light); }
 .req-summary { font-size: 14px; margin-bottom: 10px; }
 .req-fields {

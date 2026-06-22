@@ -172,3 +172,25 @@ alter publication supabase_realtime add table public.profiles;
 -- I) 관리자 지정 — 본인 계정 이메일로 바꿔서 실행하세요!
 --    (사이트에서 그 아이디로 먼저 회원가입한 뒤 실행)
 -- update public.profiles set role = 'admin' where email = '아이디@inje.ac.kr';
+
+
+-- =====================================================================
+-- [회원관리 고도화] 최고관리자(superadmin) + 회원 권한부여/삭제 + 내 신청내역 삭제
+-- 이 블록을 SQL Editor에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+
+-- J) 관리자 판별 함수에 superadmin 포함 (admin / superadmin 모두 관리자 권한)
+--    role 종류: user(일반) | admin(관리자, 회원관리 제외) | superadmin(최고관리자, 회원관리 포함)
+create or replace function public.is_admin() returns boolean
+language sql security definer stable set search_path = public as $$
+  select exists(select 1 from public.profiles where id = auth.uid() and role in ('admin','superadmin'));
+$$;
+
+-- K) 본인 요청은 처리 상태(승인/반려)와 무관하게 본인이 삭제 가능 → '내 신청 내역' 삭제 허용
+drop policy if exists "req_delete_own" on public.requests;
+create policy "req_delete_own" on public.requests for delete to authenticated
+  using (user_id = auth.uid());
+
+-- L) 최고관리자 지정 — 본인 계정 이메일로 바꿔서 실행하세요!
+--    (회원관리(권한 부여/회원 삭제)는 최고관리자만 사용할 수 있습니다.)
+-- update public.profiles set role = 'superadmin' where email = '아이디@inje.ac.kr';

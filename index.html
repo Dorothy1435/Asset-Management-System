@@ -244,6 +244,7 @@
         <p class="form-error" id="authError" hidden></p>
         <p class="form-info" id="authInfo" hidden></p>
         <button type="button" class="btn-link" id="forgotBtn" style="margin-top:12px;">비밀번호를 잊으셨나요?</button>
+        <button type="submit" class="hidden-submit" tabindex="-1" aria-hidden="true"></button>
       </form>
       <div class="modal-footer" style="justify-content:space-between;">
         <button class="btn-link" id="authSwitch">회원가입으로 →</button>
@@ -321,6 +322,11 @@
       <div class="modal-body" id="membersBody"></div>
       <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
     </div>
+  </div>
+
+  <!-- 사진 확대 라이트박스 -->
+  <div class="lightbox" id="lightbox" hidden>
+    <img id="lightboxImg" src="" alt="확대 이미지" />
   </div>
 
   <footer class="footer">
