@@ -34,6 +34,7 @@ let myProfile = null;
 let isAdmin = false;
 let isSuperAdmin = false;
 let detailCurrentId = null;
+let inspectTargetId = null;
 let delReqId = null;
 let delReqEditId = null;   // 본인 삭제요청 수정 중인 request id
 let editingRequestId = null; // 본인 등록/수정요청 수정 중인 request id
@@ -70,6 +71,13 @@ function fmtTime(iso) {
 function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
 const findAsset = (id) => assets.find((x) => String(x.id) === String(id));
+const isImageData = (f) => /^data:image\//i.test(f || "");
+// 목록 '라벨' 칸: 이미지면 썸네일(클릭 시 확대), 그 외(PDF 등)는 다운로드 버튼
+function labelCell(a) {
+  if (!a.labelFile) return "-";
+  if (isImageData(a.labelFile)) return `<img class="thumb thumb-label" src="${a.labelFile}" alt="라벨" loading="lazy" title="클릭하면 크게 보기" />`;
+  return `<button class="btn-mini btn-label" data-id="${esc(a.id)}" title="${esc(a.labelFileName || "라벨 파일")}">⬇ 라벨</button>`;
+}
 
 // ===== 스냅샷 =====
 const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
@@ -455,7 +463,7 @@ function render() {
     <tr>
       <td class="cell-name" title="${esc(a.assetName)}"><div class="name-wrap">${thumb}<span>${esc(a.assetName)} ${tag}</span></div></td>
       <td class="cell-num">${esc(a.assetNumber)}</td>
-      <td>${a.labelFile ? `<button class="btn-mini btn-label" data-id="${esc(a.id)}" title="${esc(a.labelFileName || "라벨 파일")}">⬇ 라벨</button>` : "-"}</td>
+      <td>${labelCell(a)}</td>
       <td class="cell-loc" title="${esc(a.location)}">${esc(val(a.location))}</td>
       <td>${esc(val(a.manager))}</td>
       <td>${esc(val(a.dept))}</td>
@@ -494,6 +502,9 @@ function openDetail(id) {
   const photo = a.imageUrl
     ? `<div class="detail-photo"><img src="${a.imageUrl}" alt="물품 사진" /></div>`
     : `<div class="detail-photo no-photo">등록된 사진 없음</div>`;
+  const labelPhoto = isImageData(a.labelFile)
+    ? `<div class="detail-photo detail-label-photo"><span class="detail-photo-cap">라벨 사진</span><img src="${a.labelFile}" alt="라벨 사진" /></div>`
+    : "";
   const rows = [
     ["자산명", a.assetName], ["자산번호", a.assetNumber], ["라벨스티커", a.labelSticker],
     ["라벨 파일", a.labelFile ? (a.labelFileName || "첨부됨") : ""],
@@ -504,13 +515,34 @@ function openDetail(id) {
     ["담당자", a.manager], ["등재일", a.regDate], ["상태", a.status], ["비고", a.note],
   ];
   document.getElementById("detailTitle").textContent = a.assetName || "자산 상세 정보";
-  document.getElementById("detailBody").innerHTML = photo +
-    `<dl class="detail-grid">` + rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") + `</dl>`;
+  document.getElementById("detailBody").innerHTML = photo + labelPhoto +
+    `<dl class="detail-grid">` + rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") + `</dl>` +
+    renderInspectionLog(a);
   document.getElementById("detailDownloadBtn").hidden = !a.imageUrl;
   document.getElementById("detailLabelBtn").hidden = !a.labelFile;
+  document.getElementById("detailInspectBtn").textContent = isAdmin ? "검수 확인" : "검수 요청";
   document.getElementById("detailEditBtn").textContent = isAdmin ? "수정" : "수정 요청";
   document.getElementById("detailDeleteBtn").textContent = isAdmin ? "삭제" : "삭제 요청";
   show("detailOverlay");
+}
+// 검수 기록(로그) 렌더
+function renderInspectionLog(a) {
+  const list = Array.isArray(a.inspections) ? a.inspections : [];
+  let html = `<div class="insp-section"><h3 class="insp-title">검수 기록 <span class="insp-count">${list.length}</span></h3>`;
+  if (list.length === 0) {
+    html += `<div class="insp-empty">아직 검수 기록이 없습니다. ‘검수’ 버튼으로 분기별·회차별 검수를 확인하세요.</div>`;
+  } else {
+    html += `<table class="insp-table"><thead><tr><th>구분</th><th>검수일시</th><th>확인자</th>${isAdmin ? "<th></th>" : ""}</tr></thead><tbody>`;
+    html += list.slice().reverse().map((ins) => `
+      <tr>
+        <td><span class="insp-ok">✔</span> ${esc([ins.periodType, ins.period].filter(Boolean).join(" "))}</td>
+        <td>${fmtTime(ins.checkedAt)}</td>
+        <td>${esc(ins.inspector || "-")}</td>
+        ${isAdmin ? `<td><button class="btn-mini btn-del" data-delinsp="${esc(ins.id)}">삭제</button></td>` : ""}
+      </tr>`).join("");
+    html += `</tbody></table>`;
+  }
+  return html + `</div>`;
 }
 function downloadPhoto() {
   const a = findAsset(detailCurrentId);
@@ -747,6 +779,86 @@ async function submitDeleteRequest() {
   else alert("삭제 요청이 접수되었습니다. 관리자 승인 후 반영됩니다.");
 }
 
+// ===== 검수 확인 =====
+function openInspect(id) {
+  if (!requireLogin()) return;
+  const a = findAsset(id);
+  if (!a) return;
+  inspectTargetId = id;
+  document.getElementById("inspectError").hidden = true;
+  document.getElementById("insp-type").value = "분기";
+  document.getElementById("insp-period").value = "";
+  document.getElementById("insp-inspector").value = myProfile?.name || myProfile?.username || "";
+  document.getElementById("insp-checked").checked = true;
+  document.getElementById("inspectTarget").innerHTML = `<b>${esc(a.assetName)}</b> (${esc(a.assetNumber)})`;
+  document.getElementById("inspectTitle").textContent = isAdmin ? "검수 확인" : "검수 요청";
+  document.getElementById("inspectSubmit").textContent = isAdmin ? "검수 확인" : "검수 요청";
+  document.getElementById("inspectNote").hidden = isAdmin;
+  show("inspectOverlay");
+}
+async function submitInspect() {
+  const periodType = document.getElementById("insp-type").value;
+  const period = document.getElementById("insp-period").value.trim();
+  const inspector = document.getElementById("insp-inspector").value.trim();
+  const checked = document.getElementById("insp-checked").checked;
+  const errEl = document.getElementById("inspectError");
+  errEl.hidden = true;
+  if (!checked) { errEl.textContent = "‘검수 완료를 확인합니다’에 체크해주세요."; errEl.hidden = false; return; }
+  if (!period) { errEl.textContent = "검수 구분(분기/회차)을 입력해주세요. 예: 2026 1분기"; errEl.hidden = false; return; }
+  if (!inspector) { errEl.textContent = "검수 확인자 이름을 입력해주세요."; errEl.hidden = false; return; }
+  const a = findAsset(inspectTargetId);
+  if (!a) { hide("inspectOverlay"); return; }
+  const btn = document.getElementById("inspectSubmit");
+  btn.disabled = true;
+  try {
+    if (isAdmin) {
+      await applyInspect(inspectTargetId, { periodType, period, inspector });
+    } else {
+      await submitRequest({
+        action: "inspect", target_id: inspectTargetId,
+        payload: { periodType, period, inspector, assetName: a.assetName, assetNumber: a.assetNumber },
+        requester: inspector, note: `${periodType} ${period} 검수 확인`,
+      });
+    }
+  } catch (e) {
+    console.error(e); btn.disabled = false;
+    errEl.textContent = "처리에 실패했습니다. 잠시 후 다시 시도해주세요."; errEl.hidden = false; return;
+  }
+  btn.disabled = false;
+  hide("inspectOverlay");
+  await reloadAll(); rerender();
+  if (isAdmin) { openDetail(inspectTargetId); }
+  else { hide("detailOverlay"); alert("검수 요청이 접수되었습니다. 관리자 승인 후 기록에 반영됩니다."); }
+}
+// 검수 목록을 오버레이에 저장(기존 데이터 보존)
+async function writeInspections(id, list) {
+  const isAdded = String(id).startsWith("u");
+  const kind = isAdded ? "added" : "override";
+  const existing = overlay.find((o) => String(o.id) === String(id) && o.kind === kind)?.data || {};
+  const { error } = await sb.from("assets").upsert({ id: String(id), kind, data: { ...existing, inspections: list }, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+async function applyInspect(id, { periodType, period, inspector }, meta = {}) {
+  const current = findAsset(id);
+  if (!current) throw new Error("자산 없음");
+  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", checkedAt: new Date().toISOString() };
+  const list = Array.isArray(current.inspections) ? [...current.inspections, insp] : [insp];
+  await writeInspections(id, list);
+  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || inspector, note: `검수 확인 · ${[periodType, period].filter(Boolean).join(" ")} · 확인자: ${inspector}` });
+}
+async function removeInspection(assetId, inspId) {
+  const current = findAsset(assetId);
+  if (!current) return;
+  if (!confirm("이 검수 기록을 삭제하시겠습니까?")) return;
+  const target = (current.inspections || []).find((x) => String(x.id) === String(inspId));
+  const list = (current.inspections || []).filter((x) => String(x.id) !== String(inspId));
+  try {
+    await writeInspections(assetId, list);
+    await logHistory({ asset_id: assetId, asset_name: current.assetName, action: "inspect", before: null, after: null, note: `검수 기록 삭제 · ${target ? [target.periodType, target.period].filter(Boolean).join(" ") + " · " + (target.inspector || "") : ""}` });
+  } catch (e) { console.error(e); alert("삭제에 실패했습니다."); return; }
+  await reloadAll(); rerender(); openDetail(assetId);
+}
+
 // ===== 이력 =====
 async function logHistory(entry) {
   if (!sb) return;
@@ -805,6 +917,7 @@ async function applyState(assetId, snap) {
 async function revertHistory(histId) {
   const h = history.find((x) => String(x.id) === String(histId));
   if (!h) return;
+  if (h.action === "inspect") { alert("검수 기록은 되돌리기 대상이 아닙니다. 검수 기록 삭제는 상세 화면에서 가능합니다."); return; }
   if (!confirm(`이 변경을 취소하고 '이전 상태'로 되돌리시겠습니까?\n\n대상: ${h.asset_name || h.asset_id}`)) return;
   const beforeNow = snapshotOf(findAsset(h.asset_id));
   try {
@@ -895,8 +1008,8 @@ function openMyRequests() {
 function renderMyRequests() {
   const body = document.getElementById("myReqBody");
   if (myRequests.length === 0) { body.innerHTML = `<div class="empty-msg">신청 내역이 없습니다.</div>`; return; }
-  const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청" };
-  const actionCls = { create: "req-create", update: "req-update", delete: "req-delete" };
+  const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청", inspect: "검수 요청" };
+  const actionCls = { create: "req-create", update: "req-update", delete: "req-delete", inspect: "req-inspect" };
   body.innerHTML = myRequests.map((r) => {
     const p = r.payload || {};
     const decided = r.status !== "pending";
@@ -906,9 +1019,10 @@ function renderMyRequests() {
       r.note && `사유: ${esc(r.note)}`,
     ].filter(Boolean).join(" · ");
     const actions = !decided
-      ? `<button class="btn btn-secondary btn-sm" data-editreq="${r.id}">수정</button>
+      ? `${r.action !== "inspect" ? `<button class="btn btn-secondary btn-sm" data-editreq="${r.id}">수정</button>` : ""}
          <button class="btn btn-danger btn-sm" data-cancelreq="${r.id}">취소</button>`
       : `<button class="btn btn-danger btn-sm" data-delreq="${r.id}">삭제</button>`;
+    const extra = r.action === "inspect" && p.period ? ` · 검수: ${esc([p.periodType, p.period].filter(Boolean).join(" "))}` : (p.location ? ` · 위치: ${esc(p.location)}` : "");
     return `
       <div class="req-card">
         <div class="req-top">
@@ -916,7 +1030,7 @@ function renderMyRequests() {
           ${reqStatusBadge(r.status)}
           <span class="req-meta">${meta}</span>
         </div>
-        <div class="req-summary"><b>${esc(p.assetName || "")}</b>${p.assetNumber ? ` (${esc(p.assetNumber)})` : ""}${p.location ? ` · 위치: ${esc(p.location)}` : ""}</div>
+        <div class="req-summary"><b>${esc(p.assetName || "")}</b>${p.assetNumber ? ` (${esc(p.assetNumber)})` : ""}${extra}</div>
         ${actions ? `<div class="req-actions">${actions}</div>` : ""}
       </div>`;
   }).join("");
@@ -927,11 +1041,13 @@ function openReview() { renderReview(); show("reviewOverlay"); }
 function renderReview() {
   const body = document.getElementById("reviewBody");
   if (requests.length === 0) { body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`; return; }
-  const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청" };
-  const actionCls = { create: "req-create", update: "req-update", delete: "req-delete" };
+  const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청", inspect: "검수 요청" };
+  const actionCls = { create: "req-create", update: "req-update", delete: "req-delete", inspect: "req-inspect" };
   body.innerHTML = requests.map((r) => {
     const p = r.payload || {};
-    let summary = r.action === "delete"
+    let summary;
+    if (r.action === "inspect") summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")}) · 검수 구분: <b>${esc([p.periodType, p.period].filter(Boolean).join(" "))}</b> · 확인자: ${esc(p.inspector || "-")}`;
+    else summary = r.action === "delete"
       ? `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})`
       : `<div class="req-fields">
             <span><b>${esc(p.assetName || "")}</b></span>
@@ -964,6 +1080,7 @@ async function approveRequest(reqId) {
     if (r.action === "create") await applyCreate(r.payload, meta);
     else if (r.action === "update") await applyUpdate(r.target_id, r.payload, meta);
     else if (r.action === "delete") await applyDelete(r.target_id, meta);
+    else if (r.action === "inspect") await applyInspect(r.target_id, r.payload, meta);
     const { error } = await sb.from("requests").update({ status: "approved", decided_at: new Date().toISOString() }).eq("id", reqId);
     if (error) throw error;
   } catch (e) { console.error(e); alert("승인 처리에 실패했습니다."); return; }
@@ -981,6 +1098,7 @@ async function rejectRequest(reqId) {
 function shortVal(v) { v = v === "" || v === null || v === undefined ? "(없음)" : String(v); return v.length > 28 ? v.slice(0, 28) + "…" : v; }
 const HIST_LABELS = { assetName: "자산명", assetNumber: "자산번호", labelSticker: "라벨스티커", labelFile: "라벨 파일", status: "상태", location: "위치", manager: "담당자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
 function histSummary(h) {
+  if (h.action === "inspect") return `🔍 ${esc(h.note || "검수 확인")}`;
   if (h.action === "delete") return `자산이 <b>삭제</b>되었습니다.`;
   const b = h.before_snap, a = h.after_snap;
   if (h.action === "create") return `신규 <b>등록</b>: ${esc((a && a.assetName) || "")}`;
@@ -1005,10 +1123,11 @@ function renderHistory() {
   let rows = history;
   if (kw) rows = rows.filter((h) => `${h.asset_name} ${h.asset_id}`.toLowerCase().includes(kw));
   if (rows.length === 0) { body.innerHTML = `<div class="empty-msg">기록이 없습니다.</div>`; return; }
-  const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림" };
-  const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert" };
+  const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림", inspect: "검수" };
+  const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert", inspect: "req-inspect" };
   body.innerHTML = rows.map((h) => {
     const meta = [h.approved_by && `결재자: ${esc(h.approved_by)}`, h.requester && `신청자: ${esc(h.requester)}`, h.note && esc(h.note)].filter(Boolean).join(" · ");
+    const canRevert = h.action !== "inspect";
     return `
       <div class="req-card">
         <div class="req-top">
@@ -1018,7 +1137,7 @@ function renderHistory() {
         <div class="req-summary">${histSummary(h)}</div>
         ${meta ? `<div class="req-meta" style="margin-bottom:8px;">${meta}</div>` : ""}
         <div class="req-actions">
-          <button class="btn btn-secondary btn-sm" data-revert="${h.id}">이전 상태로 되돌리기</button>
+          ${canRevert ? `<button class="btn btn-secondary btn-sm" data-revert="${h.id}">이전 상태로 되돌리기</button>` : ""}
           <button class="btn btn-danger btn-sm" data-delhist="${h.id}">기록 삭제</button>
         </div>
       </div>`;
@@ -1149,10 +1268,15 @@ document.getElementById("detailEditBtn").addEventListener("click", () => { hide(
 document.getElementById("detailDeleteBtn").addEventListener("click", () => handleDelete(detailCurrentId));
 document.getElementById("detailDownloadBtn").addEventListener("click", downloadPhoto);
 document.getElementById("detailLabelBtn").addEventListener("click", () => downloadLabelFile(detailCurrentId));
+document.getElementById("detailInspectBtn").addEventListener("click", () => openInspect(detailCurrentId));
 document.getElementById("detailBody").addEventListener("click", (e) => {
   const img = e.target.closest(".detail-photo img");
-  if (img) openLightbox(img.src);
+  if (img) { openLightbox(img.src); return; }
+  const delInsp = e.target.closest("button[data-delinsp]");
+  if (delInsp) removeInspection(detailCurrentId, delInsp.dataset.delinsp);
 });
+document.getElementById("inspectSubmit").addEventListener("click", submitInspect);
+document.getElementById("inspectForm").addEventListener("submit", (e) => { e.preventDefault(); submitInspect(); });
 document.getElementById("lightbox").addEventListener("click", closeLightbox);
 
 document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files[0]));
@@ -1216,7 +1340,7 @@ document.getElementById("membersBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });

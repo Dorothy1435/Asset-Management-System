@@ -102,6 +102,7 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" id="detailLabelBtn" hidden>라벨 파일 다운로드</button>
         <button class="btn btn-secondary" id="detailDownloadBtn" hidden>사진 다운로드</button>
+        <button class="btn btn-inspect" id="detailInspectBtn">검수</button>
         <button class="btn btn-primary" id="detailEditBtn">수정</button>
         <button class="btn btn-danger" id="detailDeleteBtn">삭제</button>
         <button class="btn btn-secondary" data-close>목록으로 돌아가기</button>
@@ -335,6 +336,40 @@
       </div>
       <div class="modal-body" id="membersBody"></div>
       <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
+    </div>
+  </div>
+
+  <!-- 검수 확인 모달 -->
+  <div class="modal-overlay" id="inspectOverlay" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="inspectTitle">검수 확인</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <form id="inspectForm" class="modal-body">
+        <p class="del-target" id="inspectTarget"></p>
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>검수 구분</label>
+          <div class="insp-period">
+            <select id="insp-type">
+              <option value="분기">분기별</option>
+              <option value="회차">회차별</option>
+            </select>
+            <input type="text" id="insp-period" placeholder="예: 2026 1분기 / 3회차" />
+          </div>
+        </div>
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>검수 확인자</label>
+          <input type="text" id="insp-inspector" placeholder="검수자 이름" />
+        </div>
+        <label class="insp-check"><input type="checkbox" id="insp-checked" checked /> 검수 완료를 확인합니다 ✔</label>
+        <p class="form-error" id="inspectError" hidden></p>
+        <p class="form-info insp-note" id="inspectNote">검수는 관리자 승인 후 기록에 반영됩니다.</p>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="inspectSubmit">검수 확인</button>
+        <button class="btn btn-secondary" data-close>취소</button>
+      </div>
     </div>
   </div>
 

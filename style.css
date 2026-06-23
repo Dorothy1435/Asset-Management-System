@@ -540,6 +540,44 @@ body {
 .label-file-link { color: var(--primary); font-weight: 600; word-break: break-all; }
 .label-file-link:hover { text-decoration: underline; }
 .btn-label:hover { border-color: var(--primary); color: var(--primary); }
+.thumb-label { cursor: zoom-in; }
+
+/* 검수(Inspection) */
+.btn-inspect { background: #ecfeff; color: #0e7490; border: 1px solid #a5f3fc; }
+.btn-inspect:hover { background: #cffafe; }
+.req-inspect { background: #cffafe; color: #0e7490; }
+
+.insp-period { display: flex; gap: 8px; }
+.insp-period select { flex: 0 0 110px; }
+.insp-period input { flex: 1; }
+.insp-check {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; color: var(--text); cursor: pointer;
+  padding: 9px 11px; background: #ecfeff; border: 1px solid #a5f3fc; border-radius: 8px;
+}
+.insp-check input { width: 16px; height: 16px; }
+.insp-note { color: var(--text-light); font-size: 12.5px; margin-top: 10px; }
+
+.insp-section { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 16px; }
+.insp-title { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+.insp-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 20px; padding: 0 6px; border-radius: 10px;
+  background: #cffafe; color: #0e7490; font-size: 12px; font-weight: 700;
+}
+.insp-empty { color: var(--text-light); font-size: 13px; padding: 6px 0; }
+.insp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.insp-table th, .insp-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.insp-table th { background: #f8fafc; color: var(--text-light); font-weight: 600; }
+.insp-ok { color: #0e7490; font-weight: 800; }
+
+/* 라벨 사진 (상세) */
+.detail-label-photo { position: relative; margin-top: 12px; }
+.detail-photo-cap {
+  position: absolute; top: 8px; left: 8px; z-index: 1;
+  background: rgba(15,23,42,0.72); color: #fff; font-size: 11px;
+  padding: 2px 8px; border-radius: 4px;
+}
 
 /* 상세 사진 */
 .detail-photo {
