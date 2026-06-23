@@ -70,8 +70,8 @@ function hide(id) { document.getElementById(id).hidden = true; }
 const findAsset = (id) => assets.find((x) => String(x.id) === String(id));
 
 // ===== 스냅샷 =====
-const SNAP_FIELDS = ["assetName", "assetNumber", "category", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
-const DATA_FIELDS = ["assetName", "assetNumber", "category", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
+const SNAP_FIELDS = ["assetName", "assetNumber", "category", "labelSticker", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
+const DATA_FIELDS = ["assetName", "assetNumber", "category", "labelSticker", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
 function snapshotOf(a) {
   if (!a) return null;
   const o = {};
@@ -212,12 +212,15 @@ function idToEmail(input, forceDomain) {
   return v.includes("@") ? v : `${v}@${DOMAIN}`;
 }
 
+
 function openAuth(mode) {
   authMode = mode;
   document.getElementById("authError").hidden = true;
   document.getElementById("authInfo").hidden = true;
   document.getElementById("authId").value = "";
   document.getElementById("authPw").value = "";
+  document.getElementById("authName").value = "";
+  document.getElementById("authAffil").value = "";
   applyAuthMode();
   show("authOverlay");
 }
@@ -228,6 +231,7 @@ function applyAuthMode() {
   document.getElementById("authSwitch").textContent = isSignup ? "← 로그인으로" : "회원가입으로 →";
   document.getElementById("forgotBtn").style.display = isSignup ? "none" : "";
   document.getElementById("authPw").setAttribute("autocomplete", isSignup ? "new-password" : "current-password");
+  document.querySelectorAll(".signup-only").forEach((el) => (el.style.display = isSignup ? "" : "none"));
 }
 
 async function authSubmit() {
@@ -243,7 +247,13 @@ async function authSubmit() {
   try {
     if (authMode === "signup") {
       const email = idToEmail(idVal, true);
-      const { data, error } = await sb.auth.signUp({ email, password: pw });
+      const name = document.getElementById("authName").value.trim();
+      const affiliation = document.getElementById("authAffil").value.trim();
+      const username = email.split("@")[0];
+      const { data, error } = await sb.auth.signUp({
+        email, password: pw,
+        options: { data: { name, affiliation, username } },
+      });
       if (error) { errEl.textContent = "가입 실패: " + error.message; errEl.hidden = false; return; }
       if (data.session) {
         hide("authOverlay");
@@ -333,7 +343,7 @@ function updateUI() {
   g("membersBtn").hidden = !isSuperAdmin;
 
   if (loggedIn) {
-    const uname = myProfile?.username || (currentUser.email || "").split("@")[0];
+    const uname = myProfile?.name || myProfile?.username || (currentUser.email || "").split("@")[0];
     g("userTag").textContent = isAdmin ? `관리자: ${uname}` : `${uname} 님`;
   }
   g("pendingCount").textContent = requests.length;
@@ -486,7 +496,7 @@ function openDetail(id) {
     ? `<div class="detail-photo"><img src="${a.imageUrl}" alt="물품 사진" /></div>`
     : `<div class="detail-photo no-photo">등록된 사진 없음</div>`;
   const rows = [
-    ["자산명", a.assetName], ["자산번호", a.assetNumber], ["자산구분", a.category],
+    ["자산명", a.assetName], ["자산번호", a.assetNumber], ["자산구분", a.category], ["라벨스티커", a.labelSticker],
     ["모델명", a.model], ["규격", a.spec], ["제작회사", a.maker],
     ["단가", a.unitPrice ? won(a.unitPrice) : ""], ["수량", a.qty],
     ["취득금액", a.acquireCost ? won(a.acquireCost) : ""], ["취득일자", a.acquireDate],
@@ -552,7 +562,7 @@ function openForm(id) {
 }
 function fillForm(a) {
   const set = (k, v) => (document.getElementById("f-" + k).value = v ?? "");
-  set("assetName", a.assetName); set("assetNumber", a.assetNumber); set("category", a.category);
+  set("assetName", a.assetName); set("assetNumber", a.assetNumber); set("category", a.category); set("labelSticker", a.labelSticker);
   document.getElementById("f-status").value = a.status || "취득";
   set("location", a.location); set("manager", a.manager); set("dept", a.dept);
   set("model", a.model); set("spec", a.spec); set("maker", a.maker);
@@ -607,7 +617,7 @@ async function saveForm() {
 
   const fields = {
     assetName, assetNumber, location, manager,
-    category: get("category"), status: get("status") || "취득", dept: get("dept"),
+    category: get("category"), labelSticker: get("labelSticker"), status: get("status") || "취득", dept: get("dept"),
     model: get("model"), spec: get("spec"), maker: get("maker"),
     acquireCost: Number(get("acquireCost")) || 0, note: get("note"), imageUrl: currentPhoto || "",
   };
@@ -766,7 +776,7 @@ async function submitRequest(req) {
   if (!sb || !currentUser) throw new Error("로그인 필요");
   const { error } = await sb.from("requests").insert({
     action: req.action, target_id: req.target_id, payload: req.payload,
-    requester: req.requester || (myProfile?.username || ""), note: req.note || "",
+    requester: req.requester || (myProfile?.name || myProfile?.username || ""), note: req.note || "",
     status: "pending", user_id: currentUser.id,
   });
   if (error) throw error;
@@ -917,7 +927,7 @@ async function rejectRequest(reqId) {
 
 // ===== 결재/변경 이력 (관리자) =====
 function shortVal(v) { v = v === "" || v === null || v === undefined ? "(없음)" : String(v); return v.length > 28 ? v.slice(0, 28) + "…" : v; }
-const HIST_LABELS = { assetName: "자산명", assetNumber: "자산번호", category: "분류", status: "상태", location: "위치", manager: "담당자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
+const HIST_LABELS = { assetName: "자산명", assetNumber: "자산번호", category: "분류", labelSticker: "라벨스티커", status: "상태", location: "위치", manager: "담당자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
 function histSummary(h) {
   if (h.action === "delete") return `자산이 <b>삭제</b>되었습니다.`;
   const b = h.before_snap, a = h.after_snap;
@@ -980,7 +990,7 @@ function renderMembers() {
   const myId = currentUser?.id;
   body.innerHTML = `
     <table class="member-table">
-      <thead><tr><th>아이디</th><th>이메일</th><th>권한</th><th>가입일</th><th>관리</th></tr></thead>
+      <thead><tr><th>이름</th><th>소속</th><th>아이디</th><th>이메일</th><th>권한</th><th>가입일</th><th>관리</th></tr></thead>
       <tbody>
         ${members.map((m) => {
           const isSelf = String(m.id) === String(myId);
@@ -996,6 +1006,8 @@ function renderMembers() {
           }
           return `
           <tr>
+            <td>${esc(m.name || "-")}</td>
+            <td>${esc(m.affiliation || "-")}</td>
             <td>${esc(m.username || "-")}</td>
             <td class="cell-num">${esc(m.email || "-")}</td>
             <td>${roleBadge(m.role)}</td>
@@ -1035,7 +1047,7 @@ async function deleteMember(id) {
 function exportExcel() {
   if (filtered.length === 0) { alert("내보낼 자산이 없습니다."); return; }
   const rows = filtered.map((a) => ({
-    "자산명": a.assetName || "", "자산번호": a.assetNumber || "", "자산구분": a.category || "",
+    "자산명": a.assetName || "", "자산번호": a.assetNumber || "", "자산구분": a.category || "", "라벨스티커": a.labelSticker || "",
     "모델명": a.model || "", "규격": a.spec || "", "제작회사": a.maker || "",
     "단가": a.unitPrice || 0, "수량": a.qty || 0, "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "",
     "보관 위치": a.location || "", "관리 기관": a.org || "", "운영 부서": a.dept || "",

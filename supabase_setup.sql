@@ -194,3 +194,39 @@ create policy "req_delete_own" on public.requests for delete to authenticated
 -- L) 최고관리자 지정 — 본인 계정 이메일로 바꿔서 실행하세요!
 --    (회원관리(권한 부여/회원 삭제)는 최고관리자만 사용할 수 있습니다.)
 -- update public.profiles set role = 'superadmin' where email = '아이디@inje.ac.kr';
+
+
+-- =====================================================================
+-- [회원가입 항목 추가] 이름(name) + 소속(affiliation)
+-- 이 블록을 SQL Editor에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+
+-- M) profiles 에 이름/소속 컬럼 추가
+alter table public.profiles add column if not exists name text default '';
+alter table public.profiles add column if not exists affiliation text default '';
+
+-- N) 신규 가입 시 회원가입 폼에서 받은 이름/소속을 프로필에 자동 저장
+--    (signUp options.data 로 넘어온 값이 auth.users.raw_user_meta_data 에 담깁니다)
+create or replace function public.handle_new_user() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, email, username, name, affiliation)
+  values (
+    new.id,
+    new.email,
+    coalesce(nullif(new.raw_user_meta_data->>'username',''), split_part(new.email, '@', 1)),
+    coalesce(new.raw_user_meta_data->>'name', ''),
+    coalesce(new.raw_user_meta_data->>'affiliation', '')
+  )
+  on conflict (id) do update set
+    name = coalesce(nullif(excluded.name,''), public.profiles.name),
+    affiliation = coalesce(nullif(excluded.affiliation,''), public.profiles.affiliation);
+  return new;
+end; $$;
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- O) 이름/소속은 위 트리거(handle_new_user, SECURITY DEFINER)가 가입 시 서버에서 저장합니다.
+--    권한(role) 위변조 방지를 위해 일반 사용자에게 profiles 직접 수정 권한은 주지 않습니다.
+--    (회원관리에서 권한 변경은 기존 관리자 정책 profiles_admin_all 로만 가능)
