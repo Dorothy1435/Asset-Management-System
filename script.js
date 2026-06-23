@@ -27,6 +27,8 @@ const PER_PAGE = 20;
 
 let sortState = { key: null, dir: 1 };
 let currentPhoto = "";
+let currentLabelFile = "";
+let currentLabelFileName = "";
 let currentUser = null;
 let myProfile = null;
 let isAdmin = false;
@@ -70,8 +72,8 @@ function hide(id) { document.getElementById(id).hidden = true; }
 const findAsset = (id) => assets.find((x) => String(x.id) === String(id));
 
 // ===== 스냅샷 =====
-const SNAP_FIELDS = ["assetName", "assetNumber", "category", "labelSticker", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
-const DATA_FIELDS = ["assetName", "assetNumber", "category", "labelSticker", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
+const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
+const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
 function snapshotOf(a) {
   if (!a) return null;
   const o = {};
@@ -366,11 +368,11 @@ function renderStats() {
   const total = assets.length;
   const totalCost = assets.reduce((s, a) => s + (a.acquireCost || 0), 0);
   const addedCount = overlay.filter((o) => o.kind === "added").length;
-  const catCount = new Set(assets.map((a) => a.category).filter(Boolean)).size;
+  const labelCount = assets.filter((a) => a.labelFile).length;
   document.getElementById("stats").innerHTML = `
     <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">전체 자산</div></div>
     <div class="stat-card"><div class="num">${(totalCost / 100000000).toFixed(1)}억</div><div class="label">총 취득금액</div></div>
-    <div class="stat-card"><div class="num">${catCount}</div><div class="label">자산 분류</div></div>
+    <div class="stat-card"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
     <div class="stat-card"><div class="num">${addedCount}</div><div class="label">직접 등록</div></div>`;
 }
 
@@ -383,26 +385,23 @@ function fillSelect(id, values, allLabel) {
   if (opts.includes(prev)) sel.value = prev;
 }
 function initFilters() {
-  fillSelect("categoryFilter", assets.map((a) => a.category), "전체 분류");
   fillSelect("deptFilter", assets.map((a) => a.dept), "전체");
   fillSelect("statusFilter", assets.map((a) => a.status), "전체");
 }
 function applyFilter() {
   const kw = document.getElementById("searchInput").value.trim().toLowerCase();
-  const cat = document.getElementById("categoryFilter").value;
   const dept = document.getElementById("deptFilter").value;
   const status = document.getElementById("statusFilter").value;
   const minCost = Number(document.getElementById("minCost").value) || 0;
   const maxCostRaw = document.getElementById("maxCost").value;
   const maxCost = maxCostRaw === "" ? Infinity : Number(maxCostRaw);
   filtered = assets.filter((a) => {
-    if (cat && a.category !== cat) return false;
     if (dept && a.dept !== dept) return false;
     if (status && a.status !== status) return false;
     const cost = a.acquireCost || 0;
     if (cost < minCost || cost > maxCost) return false;
     if (!kw) return true;
-    const hay = [a.assetName, a.assetNumber, a.location, a.manager, a.dept, a.org, a.maker, a.model, a.spec, a.category].join(" ").toLowerCase();
+    const hay = [a.assetName, a.assetNumber, a.labelSticker, a.location, a.manager, a.dept, a.org, a.maker, a.model, a.spec].join(" ").toLowerCase();
     return hay.includes(kw);
   });
   sortFiltered();
@@ -456,7 +455,7 @@ function render() {
     <tr>
       <td class="cell-name" title="${esc(a.assetName)}"><div class="name-wrap">${thumb}<span>${esc(a.assetName)} ${tag}</span></div></td>
       <td class="cell-num">${esc(a.assetNumber)}</td>
-      <td>${esc(val(a.category))}</td>
+      <td>${a.labelFile ? `<button class="btn-mini btn-label" data-id="${esc(a.id)}" title="${esc(a.labelFileName || "라벨 파일")}">⬇ 라벨</button>` : "-"}</td>
       <td class="cell-loc" title="${esc(a.location)}">${esc(val(a.location))}</td>
       <td>${esc(val(a.manager))}</td>
       <td>${esc(val(a.dept))}</td>
@@ -496,7 +495,8 @@ function openDetail(id) {
     ? `<div class="detail-photo"><img src="${a.imageUrl}" alt="물품 사진" /></div>`
     : `<div class="detail-photo no-photo">등록된 사진 없음</div>`;
   const rows = [
-    ["자산명", a.assetName], ["자산번호", a.assetNumber], ["자산구분", a.category], ["라벨스티커", a.labelSticker],
+    ["자산명", a.assetName], ["자산번호", a.assetNumber], ["라벨스티커", a.labelSticker],
+    ["라벨 파일", a.labelFile ? (a.labelFileName || "첨부됨") : ""],
     ["모델명", a.model], ["규격", a.spec], ["제작회사", a.maker],
     ["단가", a.unitPrice ? won(a.unitPrice) : ""], ["수량", a.qty],
     ["취득금액", a.acquireCost ? won(a.acquireCost) : ""], ["취득일자", a.acquireDate],
@@ -507,6 +507,7 @@ function openDetail(id) {
   document.getElementById("detailBody").innerHTML = photo +
     `<dl class="detail-grid">` + rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") + `</dl>`;
   document.getElementById("detailDownloadBtn").hidden = !a.imageUrl;
+  document.getElementById("detailLabelBtn").hidden = !a.labelFile;
   document.getElementById("detailEditBtn").textContent = isAdmin ? "수정" : "수정 요청";
   document.getElementById("detailDeleteBtn").textContent = isAdmin ? "삭제" : "삭제 요청";
   show("detailOverlay");
@@ -518,6 +519,23 @@ function downloadPhoto() {
   const link = document.createElement("a");
   link.href = a.imageUrl;
   link.download = `${safe(a.assetName) || "asset"}_${safe(a.assetNumber)}.jpg`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+function downloadLabelFile(id) {
+  const a = findAsset(id != null ? id : detailCurrentId);
+  if (!a || !a.labelFile) return;
+  const safe = (s) => String(s || "").replace(/[\\/:*?"<>|]/g, "_").slice(0, 60);
+  let name = a.labelFileName || `${safe(a.assetName) || "asset"}_라벨`;
+  if (!/\.[a-z0-9]+$/i.test(name)) {
+    const m = /^data:([^;]+)/.exec(a.labelFile);
+    const ext = m && m[1] === "application/pdf" ? ".pdf" : m && m[1].startsWith("image/") ? "." + m[1].split("/")[1] : "";
+    name += ext;
+  }
+  const link = document.createElement("a");
+  link.href = a.labelFile;
+  link.download = safe(name);
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -542,6 +560,7 @@ function openForm(id) {
   form.reset();
   document.getElementById("formError").hidden = true;
   currentPhoto = "";
+  currentLabelFile = ""; currentLabelFileName = "";
   document.querySelectorAll(".request-only").forEach((el) => (el.style.display = isAdmin ? "none" : ""));
 
   if (id) {
@@ -552,17 +571,19 @@ function openForm(id) {
     fillForm(a);
     document.getElementById("f-id").value = a.id;
     currentPhoto = a.imageUrl || "";
+    currentLabelFile = a.labelFile || ""; currentLabelFileName = a.labelFileName || "";
   } else {
     document.getElementById("formTitle").textContent = isAdmin ? "자산 등록" : "자산 등록 요청";
     document.getElementById("formSaveBtn").textContent = isAdmin ? "등록" : "등록 요청";
     document.getElementById("f-id").value = "";
   }
   renderPhotoPreview();
+  renderLabelFileInfo();
   show("formOverlay");
 }
 function fillForm(a) {
   const set = (k, v) => (document.getElementById("f-" + k).value = v ?? "");
-  set("assetName", a.assetName); set("assetNumber", a.assetNumber); set("category", a.category); set("labelSticker", a.labelSticker);
+  set("assetName", a.assetName); set("assetNumber", a.assetNumber); set("labelSticker", a.labelSticker);
   document.getElementById("f-status").value = a.status || "취득";
   set("location", a.location); set("manager", a.manager); set("dept", a.dept);
   set("model", a.model); set("spec", a.spec); set("maker", a.maker);
@@ -573,6 +594,33 @@ function renderPhotoPreview() {
   const removeBtn = document.getElementById("removePhotoBtn");
   if (currentPhoto) { box.innerHTML = `<img src="${currentPhoto}" alt="미리보기" />`; removeBtn.hidden = false; }
   else { box.innerHTML = `<span class="photo-placeholder">사진 없음</span>`; removeBtn.hidden = true; }
+}
+function renderLabelFileInfo() {
+  const box = document.getElementById("labelFileInfo");
+  const removeBtn = document.getElementById("removeLabelFileBtn");
+  if (currentLabelFile) {
+    box.innerHTML = `<a href="${currentLabelFile}" download="${esc(currentLabelFileName || "라벨파일")}" class="label-file-link">📎 ${esc(currentLabelFileName || "라벨 파일")} (다운로드)</a>`;
+    removeBtn.hidden = false;
+  } else {
+    box.innerHTML = `<span class="photo-placeholder">파일 없음</span>`;
+    removeBtn.hidden = true;
+  }
+}
+function handleLabelFileUpload(file) {
+  if (!file) return;
+  const MAX_BYTES = 3 * 1024 * 1024; // 3MB
+  if (file.size > MAX_BYTES) {
+    showFormError("라벨 파일은 3MB 이하만 업로드할 수 있습니다.");
+    document.getElementById("f-labelFile").value = "";
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    currentLabelFile = e.target.result;       // data URL (base64)
+    currentLabelFileName = file.name;
+    renderLabelFileInfo();
+  };
+  reader.readAsDataURL(file);
 }
 function handlePhotoUpload(file) {
   if (!file) return;
@@ -617,7 +665,8 @@ async function saveForm() {
 
   const fields = {
     assetName, assetNumber, location, manager,
-    category: get("category"), labelSticker: get("labelSticker"), status: get("status") || "취득", dept: get("dept"),
+    labelSticker: get("labelSticker"), labelFile: currentLabelFile || "", labelFileName: currentLabelFile ? currentLabelFileName : "",
+    status: get("status") || "취득", dept: get("dept"),
     model: get("model"), spec: get("spec"), maker: get("maker"),
     acquireCost: Number(get("acquireCost")) || 0, note: get("note"), imageUrl: currentPhoto || "",
   };
@@ -815,6 +864,8 @@ function editMyRequest(reqId) {
     form.reset();
     document.getElementById("formError").hidden = true;
     currentPhoto = (r.payload && r.payload.imageUrl) || "";
+    currentLabelFile = (r.payload && r.payload.labelFile) || "";
+    currentLabelFileName = (r.payload && r.payload.labelFileName) || "";
     document.querySelectorAll(".request-only").forEach((el) => (el.style.display = ""));
     document.getElementById("formTitle").textContent = r.action === "create" ? "등록 요청 수정" : "수정 요청 수정";
     document.getElementById("formSaveBtn").textContent = "요청 수정";
@@ -823,6 +874,7 @@ function editMyRequest(reqId) {
     document.getElementById("f-requester").value = r.requester || "";
     document.getElementById("f-reqnote").value = r.note || "";
     renderPhotoPreview();
+    renderLabelFileInfo();
     hide("myReqOverlay");
     show("formOverlay");
   }
@@ -927,7 +979,7 @@ async function rejectRequest(reqId) {
 
 // ===== 결재/변경 이력 (관리자) =====
 function shortVal(v) { v = v === "" || v === null || v === undefined ? "(없음)" : String(v); return v.length > 28 ? v.slice(0, 28) + "…" : v; }
-const HIST_LABELS = { assetName: "자산명", assetNumber: "자산번호", category: "분류", labelSticker: "라벨스티커", status: "상태", location: "위치", manager: "담당자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
+const HIST_LABELS = { assetName: "자산명", assetNumber: "자산번호", labelSticker: "라벨스티커", labelFile: "라벨 파일", status: "상태", location: "위치", manager: "담당자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
 function histSummary(h) {
   if (h.action === "delete") return `자산이 <b>삭제</b>되었습니다.`;
   const b = h.before_snap, a = h.after_snap;
@@ -937,7 +989,7 @@ function histSummary(h) {
   const changes = [];
   Object.keys(HIST_LABELS).forEach((k) => {
     const bv = b[k] ?? "", av = a[k] ?? "";
-    if (String(bv) !== String(av)) changes.push(k === "imageUrl" ? `${HIST_LABELS[k]} 변경` : `${HIST_LABELS[k]}: ${esc(shortVal(bv))} → ${esc(shortVal(av))}`);
+    if (String(bv) !== String(av)) changes.push((k === "imageUrl" || k === "labelFile") ? `${HIST_LABELS[k]} 변경` : `${HIST_LABELS[k]}: ${esc(shortVal(bv))} → ${esc(shortVal(av))}`);
   });
   return changes.length ? changes.join("<br>") : "변경 없음";
 }
@@ -1047,7 +1099,7 @@ async function deleteMember(id) {
 function exportExcel() {
   if (filtered.length === 0) { alert("내보낼 자산이 없습니다."); return; }
   const rows = filtered.map((a) => ({
-    "자산명": a.assetName || "", "자산번호": a.assetNumber || "", "자산구분": a.category || "", "라벨스티커": a.labelSticker || "",
+    "자산명": a.assetName || "", "자산번호": a.assetNumber || "", "라벨스티커": a.labelSticker || "", "라벨파일": a.labelFile ? (a.labelFileName || "있음") : "",
     "모델명": a.model || "", "규격": a.spec || "", "제작회사": a.maker || "",
     "단가": a.unitPrice || 0, "수량": a.qty || 0, "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "",
     "보관 위치": a.location || "", "관리 기관": a.org || "", "운영 부서": a.dept || "",
@@ -1062,13 +1114,12 @@ function exportExcel() {
 
 // ===== 이벤트 =====
 document.getElementById("searchInput").addEventListener("input", applyFilter);
-document.getElementById("categoryFilter").addEventListener("change", applyFilter);
 document.getElementById("clearBtn").addEventListener("click", () => { document.getElementById("searchInput").value = ""; applyFilter(); });
 document.getElementById("advToggle").addEventListener("click", () => { const p = document.getElementById("advPanel"); p.hidden = !p.hidden; });
 ["deptFilter", "statusFilter"].forEach((id) => document.getElementById(id).addEventListener("change", applyFilter));
 ["minCost", "maxCost"].forEach((id) => document.getElementById(id).addEventListener("input", applyFilter));
 document.getElementById("advReset").addEventListener("click", () => {
-  ["deptFilter", "statusFilter", "minCost", "maxCost", "categoryFilter"].forEach((id) => (document.getElementById(id).value = ""));
+  ["deptFilter", "statusFilter", "minCost", "maxCost"].forEach((id) => (document.getElementById(id).value = ""));
   applyFilter();
 });
 document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEventListener("click", () => setSort(th.dataset.key)));
@@ -1081,7 +1132,8 @@ document.getElementById("assetTbody").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-id]");
   if (!btn) return;
   const id = btn.dataset.id;
-  if (btn.classList.contains("btn-view")) openDetail(id);
+  if (btn.classList.contains("btn-label")) downloadLabelFile(id);
+  else if (btn.classList.contains("btn-view")) openDetail(id);
   else if (btn.classList.contains("btn-edit")) openForm(id);
   else if (btn.classList.contains("btn-del")) handleDelete(id);
 });
@@ -1096,6 +1148,7 @@ document.getElementById("pagination").addEventListener("click", (e) => {
 document.getElementById("detailEditBtn").addEventListener("click", () => { hide("detailOverlay"); openForm(detailCurrentId); });
 document.getElementById("detailDeleteBtn").addEventListener("click", () => handleDelete(detailCurrentId));
 document.getElementById("detailDownloadBtn").addEventListener("click", downloadPhoto);
+document.getElementById("detailLabelBtn").addEventListener("click", () => downloadLabelFile(detailCurrentId));
 document.getElementById("detailBody").addEventListener("click", (e) => {
   const img = e.target.closest(".detail-photo img");
   if (img) openLightbox(img.src);
@@ -1104,6 +1157,8 @@ document.getElementById("lightbox").addEventListener("click", closeLightbox);
 
 document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files[0]));
 document.getElementById("removePhotoBtn").addEventListener("click", () => { currentPhoto = ""; document.getElementById("f-image").value = ""; renderPhotoPreview(); });
+document.getElementById("f-labelFile").addEventListener("change", (e) => handleLabelFileUpload(e.target.files[0]));
+document.getElementById("removeLabelFileBtn").addEventListener("click", () => { currentLabelFile = ""; currentLabelFileName = ""; document.getElementById("f-labelFile").value = ""; renderLabelFileInfo(); });
 document.getElementById("formSaveBtn").addEventListener("click", saveForm);
 document.getElementById("assetForm").addEventListener("submit", (e) => { e.preventDefault(); saveForm(); });
 

@@ -43,7 +43,6 @@
         <input type="text" id="searchInput" placeholder="자산명, 자산번호, 위치, 담당자, 부서, 제작사 검색..." autocomplete="off" />
         <button id="clearBtn" class="btn-clear" title="검색어 지우기">✕</button>
       </div>
-      <select id="categoryFilter" class="filter-select"><option value="">전체 분류</option></select>
       <button class="btn btn-secondary" id="advToggle">상세 필터</button>
       <button class="btn btn-secondary" id="exportBtn">📥 엑셀 다운로드</button>
       <span class="result-count" id="resultCount"></span>
@@ -75,7 +74,7 @@
           <tr>
             <th class="sortable" data-key="assetName">자산명 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="assetNumber">자산번호 <span class="sort-arrow"></span></th>
-            <th class="sortable" data-key="category">분류 <span class="sort-arrow"></span></th>
+            <th>라벨</th>
             <th class="sortable" data-key="location">위치 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="manager">담당자 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="dept">부서 <span class="sort-arrow"></span></th>
@@ -101,6 +100,7 @@
       </div>
       <div class="modal-body" id="detailBody"></div>
       <div class="modal-footer">
+        <button class="btn btn-secondary" id="detailLabelBtn" hidden>라벨 파일 다운로드</button>
         <button class="btn btn-secondary" id="detailDownloadBtn" hidden>사진 다운로드</button>
         <button class="btn btn-primary" id="detailEditBtn">수정</button>
         <button class="btn btn-danger" id="detailDeleteBtn">삭제</button>
@@ -128,12 +128,14 @@
             <input type="text" id="f-assetNumber" required />
           </div>
           <div class="form-row">
-            <label>자산구분</label>
-            <input type="text" id="f-category" placeholder="예: 기계기구" />
-          </div>
-          <div class="form-row">
             <label>라벨스티커</label>
             <input type="text" id="f-labelSticker" placeholder="예: A-001" />
+          </div>
+          <div class="form-row full">
+            <label>라벨 파일</label>
+            <input type="file" id="f-labelFile" accept=".pdf,image/*" />
+            <div class="label-file-info" id="labelFileInfo"><span class="photo-placeholder">파일 없음</span></div>
+            <button type="button" class="btn-link" id="removeLabelFileBtn" hidden>파일 제거</button>
           </div>
           <div class="form-row">
             <label>상태</label>
