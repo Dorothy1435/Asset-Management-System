@@ -520,6 +520,7 @@ function openDetail(id) {
     renderInspectionLog(a);
   document.getElementById("detailDownloadBtn").hidden = !a.imageUrl;
   document.getElementById("detailLabelBtn").hidden = !a.labelFile;
+  document.getElementById("detailLabelDelBtn").hidden = !(isAdmin && a.labelFile);
   document.getElementById("detailInspectBtn").textContent = isAdmin ? "검수 확인" : "검수 요청";
   document.getElementById("detailEditBtn").textContent = isAdmin ? "수정" : "수정 요청";
   document.getElementById("detailDeleteBtn").textContent = isAdmin ? "삭제" : "삭제 요청";
@@ -572,6 +573,18 @@ function downloadLabelFile(id) {
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+// 라벨 파일 삭제 (관리자) — 자산의 labelFile/labelFileName 을 비움
+async function deleteLabelFile(id) {
+  if (!isAdmin) return;
+  const a = findAsset(id != null ? id : detailCurrentId);
+  if (!a || !a.labelFile) return;
+  if (!confirm(`이 라벨 파일을 삭제하시겠습니까?\n\n${a.assetName}`)) return;
+  try {
+    await applyUpdate(a.id, { labelFile: "", labelFileName: "" }, { note: "라벨 파일 삭제" });
+  } catch (e) { console.error(e); alert("라벨 삭제에 실패했습니다."); return; }
+  await reloadAll(); rerender(); openDetail(a.id);
 }
 
 // ===== 사진 확대 (라이트박스) =====
@@ -668,10 +681,10 @@ function handleLabelFileUpload(file) {
     };
     reader.readAsDataURL(file);
   } else {
-    // PDF 등 이미지가 아닌 파일은 압축이 안 되므로 용량을 더 작게 제한
-    const MAX_RAW = 2 * 1024 * 1024; // 2MB
+    // PDF 등 이미지가 아닌 파일은 압축이 안 되므로 용량 제한
+    const MAX_RAW = 5 * 1024 * 1024; // 5MB
     if (file.size > MAX_RAW) {
-      showFormError("이미지가 아닌 라벨 파일(PDF 등)은 2MB 이하만 가능합니다. 사진으로 올리면 더 큰 파일도 자동 압축됩니다.");
+      showFormError("PDF 등 이미지가 아닌 라벨 파일은 5MB 이하만 가능합니다. (사진으로 올리면 더 큰 파일도 자동 압축됩니다.)");
       document.getElementById("f-labelFile").value = "";
       return;
     }
@@ -1303,6 +1316,7 @@ document.getElementById("detailEditBtn").addEventListener("click", () => { hide(
 document.getElementById("detailDeleteBtn").addEventListener("click", () => handleDelete(detailCurrentId));
 document.getElementById("detailDownloadBtn").addEventListener("click", downloadPhoto);
 document.getElementById("detailLabelBtn").addEventListener("click", () => downloadLabelFile(detailCurrentId));
+document.getElementById("detailLabelDelBtn").addEventListener("click", () => deleteLabelFile(detailCurrentId));
 document.getElementById("detailInspectBtn").addEventListener("click", () => openInspect(detailCurrentId));
 document.getElementById("detailBody").addEventListener("click", (e) => {
   const img = e.target.closest(".detail-photo img");
