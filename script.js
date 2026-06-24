@@ -39,6 +39,9 @@ let isAdmin = false;
 let isSuperAdmin = false;
 let detailCurrentId = null;
 let inspectTargetId = null;
+let posts = [];          // 게시판 글
+let postComments = [];   // 현재 보고 있는 글의 댓글
+let currentPostId = null;
 let delReqId = null;
 let delReqEditId = null;   // 본인 삭제요청 수정 중인 request id
 let editingRequestId = null; // 본인 등록/수정요청 수정 중인 request id
@@ -217,6 +220,16 @@ function sbSubscribe() {
       await sbLoadMyRequests(); await sbLoadRequests(); rerender();
       if (!document.getElementById("reviewOverlay").hidden) renderReview();
       if (!document.getElementById("myReqOverlay").hidden) renderMyRequests();
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, async () => {
+      if (!document.getElementById("boardOverlay").hidden) { await sbLoadPosts(); renderBoard(); }
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, async () => {
+      if (!document.getElementById("postViewOverlay").hidden && currentPostId) {
+        await sbLoadComments(currentPostId);
+        const p = posts.find((x) => String(x.id) === String(currentPostId));
+        if (p) renderPostView(p);
+      }
     })
     .subscribe();
 }
@@ -1314,6 +1327,154 @@ async function deleteMember(id) {
   renderMembers();
 }
 
+// ===== 건의 게시판 =====
+async function sbLoadPosts() {
+  if (!sb) { posts = []; return; }
+  const { data, error } = await sb.from("posts").select("*").order("created_at", { ascending: false });
+  if (error) { console.error("게시글 로드 오류:", error.message); posts = []; return; }
+  posts = data || [];
+}
+async function sbLoadComments(postId) {
+  if (!sb) { postComments = []; return; }
+  const { data, error } = await sb.from("comments").select("*").eq("post_id", postId).order("created_at", { ascending: true });
+  if (error) { console.error("댓글 로드 오류:", error.message); postComments = []; return; }
+  postComments = data || [];
+}
+async function openBoard() {
+  await sbLoadPosts();
+  renderBoard();
+  show("boardOverlay");
+}
+function renderBoard() {
+  const body = document.getElementById("boardBody");
+  if (posts.length === 0) { body.innerHTML = `<div class="empty-msg">아직 게시글이 없습니다. 첫 글을 남겨보세요.</div>`; return; }
+  const notices = posts.filter((p) => p.type === "notice");
+  const suggestions = posts.filter((p) => p.type !== "notice");
+  const card = (p) => {
+    const isNotice = p.type === "notice";
+    return `
+      <div class="post-card ${isNotice ? "post-notice" : ""}" data-post="${esc(p.id)}">
+        <div class="post-row">
+          <span class="post-badge ${isNotice ? "badge-notice" : "badge-suggest"}">${isNotice ? "공지" : "건의"}</span>
+          <span class="post-title">${esc(p.title || "(제목 없음)")}</span>
+          <span class="post-cmt">💬</span>
+        </div>
+        <div class="post-meta">${esc(p.author_name || "-")}${p.author_affiliation ? " · " + esc(p.author_affiliation) : ""} · ${fmtTime(p.created_at)}</div>
+      </div>`;
+  };
+  body.innerHTML = [...notices, ...suggestions].map(card).join("");
+}
+async function openPostView(id) {
+  const p = posts.find((x) => String(x.id) === String(id));
+  if (!p) return;
+  currentPostId = id;
+  await sbLoadComments(id);
+  renderPostView(p);
+  document.getElementById("commentInput").value = "";
+  document.getElementById("commentError").hidden = true;
+  document.getElementById("commentName").value = myProfile?.name || "";
+  document.getElementById("commentAffil").value = myProfile?.affiliation || "";
+  document.getElementById("commentWrite").style.display = currentUser ? "" : "none";
+  document.getElementById("commentLoginNote").hidden = !!currentUser;
+  show("postViewOverlay");
+}
+function renderPostView(p) {
+  const isNotice = p.type === "notice";
+  document.getElementById("postViewTitle").textContent = isNotice ? "공지사항" : "건의사항";
+  document.getElementById("postDeleteBtn").hidden = !isAdmin;
+  const head = `
+    <div class="post-view-head">
+      <span class="post-badge ${isNotice ? "badge-notice" : "badge-suggest"}">${isNotice ? "공지" : "건의"}</span>
+      <h3 class="post-view-h">${esc(p.title || "(제목 없음)")}</h3>
+      <div class="post-meta">${esc(p.author_name || "-")}${p.author_affiliation ? " · " + esc(p.author_affiliation) : ""} · ${fmtTime(p.created_at)}</div>
+    </div>
+    <div class="post-content">${esc(p.content || "").replace(/\n/g, "<br>")}</div>`;
+  const comments = postComments.map((c) => `
+    <div class="comment ${c.is_admin_reply ? "comment-admin" : ""}">
+      <div class="comment-meta">
+        <b>${esc(c.author_name || "익명")}</b>${c.author_affiliation ? ` <span class="comment-affil">(${esc(c.author_affiliation)})</span>` : ""}
+        ${c.is_admin_reply ? `<span class="comment-tag">관리자</span>` : ""}
+        <span class="comment-time">${fmtTime(c.created_at)}</span>
+        ${isAdmin ? `<button class="btn-mini btn-del" data-delcomment="${esc(c.id)}">삭제</button>` : ""}
+      </div>
+      <div class="comment-body">${esc(c.content || "").replace(/\n/g, "<br>")}</div>
+    </div>`).join("");
+  document.getElementById("postViewBody").innerHTML = head +
+    `<div class="comment-section"><h4 class="comment-h">댓글 <span class="insp-count">${postComments.length}</span></h4>` +
+    (postComments.length ? comments : `<div class="insp-empty">아직 댓글이 없습니다.</div>`) + `</div>`;
+}
+function openPostForm() {
+  if (!requireLogin()) return;
+  document.getElementById("postFormError").hidden = true;
+  document.getElementById("pf-title").value = "";
+  document.getElementById("pf-content").value = "";
+  document.getElementById("pf-name").value = myProfile?.name || "";
+  document.getElementById("pf-affil").value = myProfile?.affiliation || "";
+  document.getElementById("pf-type").value = "suggestion";
+  document.getElementById("pf-type-row").style.display = isSuperAdmin ? "" : "none"; // 공지사항은 최고관리자만
+  show("postFormOverlay");
+}
+async function submitPost() {
+  if (!requireLogin()) return;
+  const type = isSuperAdmin ? document.getElementById("pf-type").value : "suggestion";
+  const title = document.getElementById("pf-title").value.trim();
+  const content = document.getElementById("pf-content").value.trim();
+  const name = document.getElementById("pf-name").value.trim();
+  const affiliation = document.getElementById("pf-affil").value.trim();
+  const errEl = document.getElementById("postFormError");
+  errEl.hidden = true;
+  if (!name) { errEl.textContent = "이름을 입력해주세요."; errEl.hidden = false; return; }
+  if (!affiliation) { errEl.textContent = "소속을 입력해주세요."; errEl.hidden = false; return; }
+  if (!title) { errEl.textContent = "제목을 입력해주세요."; errEl.hidden = false; return; }
+  if (!content) { errEl.textContent = "내용을 입력해주세요."; errEl.hidden = false; return; }
+  const btn = document.getElementById("postFormSubmit");
+  btn.disabled = true;
+  try {
+    const { error } = await sb.from("posts").insert({ type, title, content, author_name: name, author_affiliation: affiliation, user_id: currentUser.id });
+    if (error) throw error;
+  } catch (e) { console.error(e); errEl.textContent = "등록 실패: " + (e.message || ""); errEl.hidden = false; btn.disabled = false; return; }
+  btn.disabled = false;
+  hide("postFormOverlay");
+  await sbLoadPosts(); renderBoard();
+}
+async function submitComment() {
+  if (!requireLogin()) return;
+  const name = document.getElementById("commentName").value.trim();
+  const affiliation = document.getElementById("commentAffil").value.trim();
+  const content = document.getElementById("commentInput").value.trim();
+  const errEl = document.getElementById("commentError");
+  errEl.hidden = true;
+  if (!name) { errEl.textContent = "이름을 입력해주세요."; errEl.hidden = false; return; }
+  if (!content) { errEl.textContent = "댓글 내용을 입력해주세요."; errEl.hidden = false; return; }
+  const btn = document.getElementById("commentSubmit");
+  btn.disabled = true;
+  try {
+    const { error } = await sb.from("comments").insert({ post_id: currentPostId, content, author_name: name, author_affiliation: affiliation, user_id: currentUser.id, is_admin_reply: isAdmin });
+    if (error) throw error;
+  } catch (e) { console.error(e); errEl.textContent = "댓글 등록 실패: " + (e.message || ""); errEl.hidden = false; btn.disabled = false; return; }
+  btn.disabled = false;
+  document.getElementById("commentInput").value = "";
+  await sbLoadComments(currentPostId);
+  renderPostView(posts.find((x) => String(x.id) === String(currentPostId)));
+}
+async function deleteComment(cid) {
+  if (!isAdmin) return;
+  if (!confirm("이 댓글을 삭제하시겠습니까?")) return;
+  try { const { error } = await sb.from("comments").delete().eq("id", cid); if (error) throw error; }
+  catch (e) { console.error(e); alert("댓글 삭제에 실패했습니다."); return; }
+  await sbLoadComments(currentPostId);
+  renderPostView(posts.find((x) => String(x.id) === String(currentPostId)));
+}
+async function deletePost(id) {
+  if (!isAdmin) return;
+  const pid = id || currentPostId;
+  if (!confirm("이 게시글을 삭제하시겠습니까?\n\n(달린 댓글도 함께 삭제됩니다.)")) return;
+  try { const { error } = await sb.from("posts").delete().eq("id", pid); if (error) throw error; }
+  catch (e) { console.error(e); alert("게시글 삭제에 실패했습니다."); return; }
+  hide("postViewOverlay");
+  await sbLoadPosts(); renderBoard();
+}
+
 // ===== 엑셀 내보내기 =====
 function exportExcel() {
   if (filtered.length === 0) { alert("내보낼 자산이 없습니다."); return; }
@@ -1440,8 +1601,26 @@ document.getElementById("membersBody").addEventListener("click", (e) => {
   else if (delBtn) deleteMember(delBtn.dataset.delmember);
 });
 
+// 건의 게시판
+document.getElementById("boardBtn").addEventListener("click", openBoard);
+document.getElementById("boardWriteBtn").addEventListener("click", openPostForm);
+document.getElementById("boardBody").addEventListener("click", (e) => {
+  const card = e.target.closest("[data-post]");
+  if (card) openPostView(card.dataset.post);
+});
+document.getElementById("postFormSubmit").addEventListener("click", submitPost);
+document.getElementById("postForm").addEventListener("submit", (e) => { e.preventDefault(); submitPost(); });
+document.getElementById("commentSubmit").addEventListener("click", submitComment);
+document.getElementById("postDeleteBtn").addEventListener("click", () => deletePost(currentPostId));
+document.getElementById("postViewBackBtn").addEventListener("click", () => hide("postViewOverlay"));
+document.getElementById("postFormCancelBtn").addEventListener("click", () => hide("postFormOverlay"));
+document.getElementById("postViewBody").addEventListener("click", (e) => {
+  const del = e.target.closest("button[data-delcomment]");
+  if (del) deleteComment(del.dataset.delcomment);
+});
+
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "boardOverlay", "postFormOverlay", "postViewOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });

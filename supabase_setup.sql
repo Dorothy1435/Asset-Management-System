@@ -247,3 +247,66 @@ $$;
 --    (조회/기록 추가는 기존대로 관리자 모두 가능. 되돌리기는 assets 쓰기로 동작하며 'revert'로 다시 이력에 남습니다.)
 drop policy if exists "hist_delete_admin" on public.history;
 create policy "hist_delete_super" on public.history for delete to authenticated using (public.is_superadmin());
+
+
+-- =====================================================================
+-- [건의 게시판] 건의사항 + 공지사항 게시판 + 댓글
+--  · 글쓰기: 로그인 사용자(이름·소속 입력) / 공지사항: 최고관리자만
+--  · 글 삭제 / 댓글 삭제: 관리자 / 댓글 작성: 로그인 사용자 누구나 / 조회: 누구나
+-- 이 블록을 SQL Editor에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+
+-- 최고관리자 판별 함수 (위에서 만들었지만 단독 실행 대비 재정의)
+create or replace function public.is_superadmin() returns boolean
+language sql security definer stable set search_path = public as $$
+  select exists(select 1 from public.profiles where id = auth.uid() and role = 'superadmin');
+$$;
+
+-- R) 게시글 테이블
+create table if not exists public.posts (
+  id uuid primary key default gen_random_uuid(),
+  type text not null default 'suggestion',     -- suggestion(건의) | notice(공지)
+  title text not null default '',
+  content text not null default '',
+  author_name text not null default '',
+  author_affiliation text not null default '',
+  user_id uuid,
+  created_at timestamptz not null default now()
+);
+
+-- S) 댓글 테이블 (글 삭제 시 함께 삭제)
+create table if not exists public.comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.posts(id) on delete cascade,
+  content text not null default '',
+  author_name text not null default '',
+  author_affiliation text not null default '',
+  user_id uuid,
+  is_admin_reply boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+alter table public.posts enable row level security;
+alter table public.comments enable row level security;
+
+-- T) posts 정책
+drop policy if exists "posts_select" on public.posts;
+drop policy if exists "posts_insert" on public.posts;
+drop policy if exists "posts_delete_admin" on public.posts;
+create policy "posts_select" on public.posts for select using (true);
+create policy "posts_insert" on public.posts for insert to authenticated
+  with check ( user_id = auth.uid() and ( type = 'suggestion' or (type = 'notice' and public.is_superadmin()) ) );
+create policy "posts_delete_admin" on public.posts for delete to authenticated using (public.is_admin());
+
+-- U) comments 정책
+drop policy if exists "comments_select" on public.comments;
+drop policy if exists "comments_insert" on public.comments;
+drop policy if exists "comments_delete_admin" on public.comments;
+create policy "comments_select" on public.comments for select using (true);
+create policy "comments_insert" on public.comments for insert to authenticated
+  with check ( user_id = auth.uid() );
+create policy "comments_delete_admin" on public.comments for delete to authenticated using (public.is_admin());
+
+-- V) 실시간
+alter publication supabase_realtime add table public.posts;
+alter publication supabase_realtime add table public.comments;

@@ -22,6 +22,7 @@
         </button>
         <button class="btn btn-secondary" id="histBtn" hidden>결재 내역</button>
         <button class="btn btn-secondary" id="membersBtn" hidden>회원 관리</button>
+        <button class="btn btn-secondary" id="boardBtn">📋 건의 게시판</button>
         <button class="btn btn-primary" id="addBtn">+ 자산 등록</button>
         <span class="admin-tag" id="userTag" hidden></span>
         <button class="btn btn-secondary" id="loginBtn">로그인</button>
@@ -374,6 +375,91 @@
       <div class="modal-footer">
         <button class="btn btn-primary" id="inspectSubmit">검수 확인</button>
         <button class="btn btn-secondary" data-close>취소</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 건의 게시판 모달 -->
+  <div class="modal-overlay" id="boardOverlay" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>건의 게시판</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="board-toolbar">
+          <p class="board-desc">건의사항을 자유롭게 남겨주세요. 관리자가 확인 후 댓글로 답변드립니다.</p>
+          <button class="btn btn-primary" id="boardWriteBtn">✏️ 글쓰기</button>
+        </div>
+        <div id="boardBody"></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
+    </div>
+  </div>
+
+  <!-- 글쓰기 모달 -->
+  <div class="modal-overlay" id="postFormOverlay" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>글쓰기</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <form id="postForm" class="modal-body">
+        <div class="form-row" id="pf-type-row" style="margin-bottom:12px;display:none;">
+          <label>종류</label>
+          <select id="pf-type">
+            <option value="suggestion">건의사항</option>
+            <option value="notice">공지사항 (최고관리자)</option>
+          </select>
+        </div>
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>이름 <span class="req">*</span></label>
+          <input type="text" id="pf-name" placeholder="예: 홍길동" />
+        </div>
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>소속 <span class="req">*</span></label>
+          <input type="text" id="pf-affil" placeholder="예: 글로컬대학사업본부" />
+        </div>
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>제목 <span class="req">*</span></label>
+          <input type="text" id="pf-title" placeholder="제목을 입력하세요" />
+        </div>
+        <div class="form-row">
+          <label>내용 <span class="req">*</span></label>
+          <textarea id="pf-content" rows="6" placeholder="내용을 입력하세요"></textarea>
+        </div>
+        <p class="form-error" id="postFormError" hidden></p>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="postFormSubmit">등록</button>
+        <button class="btn btn-secondary" id="postFormCancelBtn">취소</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 글 보기 + 댓글 모달 -->
+  <div class="modal-overlay" id="postViewOverlay" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="postViewTitle">건의사항</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body" id="postViewBody"></div>
+      <div class="comment-write" id="commentWrite">
+        <div class="comment-fields">
+          <input type="text" id="commentName" placeholder="이름" />
+          <input type="text" id="commentAffil" placeholder="소속 (선택)" />
+        </div>
+        <div class="comment-input-row">
+          <textarea id="commentInput" rows="2" placeholder="댓글을 입력하세요"></textarea>
+          <button class="btn btn-primary" id="commentSubmit">등록</button>
+        </div>
+        <p class="form-error" id="commentError" hidden></p>
+      </div>
+      <p class="comment-login-note" id="commentLoginNote" hidden>댓글을 작성하려면 로그인이 필요합니다.</p>
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="postDeleteBtn" hidden>글 삭제</button>
+        <button class="btn btn-secondary" id="postViewBackBtn">목록으로</button>
       </div>
     </div>
   </div>
