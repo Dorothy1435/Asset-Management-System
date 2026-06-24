@@ -90,7 +90,13 @@ async function renderPdfFirstPage(dataUrl) {
   const raw = atob(base64);
   const bytes = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-  const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+  // cMap(한글 등 CJK)·표준폰트 데이터를 지정해야 글자가 렌더링됨 (없으면 글자가 통째로 안 보임)
+  const pdf = await window.pdfjsLib.getDocument({
+    data: bytes,
+    cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",
+    cMapPacked: true,
+    standardFontDataUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/",
+  }).promise;
   const page = await pdf.getPage(1);
   const base = page.getViewport({ scale: 1 });
   const MAX = 1280;
