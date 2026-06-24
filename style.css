@@ -542,6 +542,19 @@ body {
 .btn-label:hover { border-color: var(--primary); color: var(--primary); }
 .thumb-label { cursor: zoom-in; }
 
+/* 라벨 PDF 미리보기 */
+.label-pdf-thumb { position: relative; display: inline-block; line-height: 0; }
+.pdf-badge {
+  position: absolute; left: 2px; bottom: 2px; pointer-events: none;
+  background: #dc2626; color: #fff; font-size: 9px; font-weight: 700;
+  padding: 1px 4px; border-radius: 4px; line-height: 1.3;
+}
+.label-preview-img {
+  display: block; max-width: 180px; max-height: 220px;
+  border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: #fff;
+}
+.label-preview-cap { font-size: 12px; color: var(--text-light); margin-bottom: 6px; }
+
 /* 검수(Inspection) */
 .btn-inspect { background: #ecfeff; color: #0e7490; border: 1px solid #a5f3fc; }
 .btn-inspect:hover { background: #cffafe; }

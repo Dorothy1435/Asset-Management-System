@@ -29,6 +29,10 @@ let sortState = { key: null, dir: 1 };
 let currentPhoto = "";
 let currentLabelFile = "";
 let currentLabelFileName = "";
+let currentLabelPreview = "";  // PDF 라벨의 1페이지 미리보기 이미지(base64)
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
 let currentUser = null;
 let myProfile = null;
 let isAdmin = false;
@@ -72,16 +76,39 @@ function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
 const findAsset = (id) => assets.find((x) => String(x.id) === String(id));
 const isImageData = (f) => /^data:image\//i.test(f || "");
-// 목록 '라벨' 칸: 이미지면 썸네일(클릭 시 확대), 그 외(PDF 등)는 다운로드 버튼
+// 목록 '라벨' 칸: 이미지면 썸네일(클릭 시 확대), PDF면 1페이지 미리보기 썸네일, 미리보기 없으면 다운로드 버튼
 function labelCell(a) {
   if (!a.labelFile) return "-";
   if (isImageData(a.labelFile)) return `<img class="thumb thumb-label" src="${a.labelFile}" alt="라벨" loading="lazy" title="클릭하면 크게 보기" />`;
+  if (a.labelPreview) return `<span class="label-pdf-thumb"><img class="thumb thumb-label" src="${a.labelPreview}" alt="라벨(PDF)" loading="lazy" title="클릭하면 크게 보기 (PDF 1페이지)" /><span class="pdf-badge">PDF</span></span>`;
   return `<button class="btn-mini btn-label" data-id="${esc(a.id)}" title="${esc(a.labelFileName || "라벨 파일")}">⬇ 라벨</button>`;
+}
+// PDF 데이터 URL의 1페이지를 캔버스에 렌더링해 JPEG 미리보기(base64)로 반환
+async function renderPdfFirstPage(dataUrl) {
+  if (!window.pdfjsLib) throw new Error("PDF 라이브러리 미로드");
+  const base64 = (dataUrl.split(",")[1]) || "";
+  const raw = atob(base64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+  const page = await pdf.getPage(1);
+  const base = page.getViewport({ scale: 1 });
+  const MAX = 1280;
+  const scale = Math.min(MAX / base.width, MAX / base.height, 2);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return canvas.toDataURL("image/jpeg", 0.85);
 }
 
 // ===== 스냅샷 =====
-const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
-const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
+const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
+const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
 function snapshotOf(a) {
   if (!a) return null;
   const o = {};
@@ -502,8 +529,9 @@ function openDetail(id) {
   const photo = a.imageUrl
     ? `<div class="detail-photo"><img src="${a.imageUrl}" alt="물품 사진" /></div>`
     : `<div class="detail-photo no-photo">등록된 사진 없음</div>`;
-  const labelPhoto = isImageData(a.labelFile)
-    ? `<div class="detail-photo detail-label-photo"><span class="detail-photo-cap">라벨 사진</span><img src="${a.labelFile}" alt="라벨 사진" /></div>`
+  const labelImgSrc = isImageData(a.labelFile) ? a.labelFile : (a.labelPreview || "");
+  const labelPhoto = labelImgSrc
+    ? `<div class="detail-photo detail-label-photo"><span class="detail-photo-cap">라벨 사진${isImageData(a.labelFile) ? "" : " (PDF 1페이지)"}</span><img src="${labelImgSrc}" alt="라벨 사진" /></div>`
     : "";
   const rows = [
     ["자산명", a.assetName], ["자산번호", a.assetNumber], ["라벨스티커", a.labelSticker],
@@ -582,7 +610,7 @@ async function deleteLabelFile(id) {
   if (!a || !a.labelFile) return;
   if (!confirm(`이 라벨 파일을 삭제하시겠습니까?\n\n${a.assetName}`)) return;
   try {
-    await applyUpdate(a.id, { labelFile: "", labelFileName: "" }, { note: "라벨 파일 삭제" });
+    await applyUpdate(a.id, { labelFile: "", labelFileName: "", labelPreview: "" }, { note: "라벨 파일 삭제" });
   } catch (e) { console.error(e); alert("라벨 삭제에 실패했습니다."); return; }
   await reloadAll(); rerender(); openDetail(a.id);
 }
@@ -606,7 +634,7 @@ function openForm(id) {
   form.reset();
   document.getElementById("formError").hidden = true;
   currentPhoto = "";
-  currentLabelFile = ""; currentLabelFileName = "";
+  currentLabelFile = ""; currentLabelFileName = ""; currentLabelPreview = "";
   document.querySelectorAll(".request-only").forEach((el) => (el.style.display = isAdmin ? "none" : ""));
 
   if (id) {
@@ -617,7 +645,7 @@ function openForm(id) {
     fillForm(a);
     document.getElementById("f-id").value = a.id;
     currentPhoto = a.imageUrl || "";
-    currentLabelFile = a.labelFile || ""; currentLabelFileName = a.labelFileName || "";
+    currentLabelFile = a.labelFile || ""; currentLabelFileName = a.labelFileName || ""; currentLabelPreview = a.labelPreview || "";
   } else {
     document.getElementById("formTitle").textContent = isAdmin ? "자산 등록" : "자산 등록 요청";
     document.getElementById("formSaveBtn").textContent = isAdmin ? "등록" : "등록 요청";
@@ -645,7 +673,8 @@ function renderLabelFileInfo() {
   const box = document.getElementById("labelFileInfo");
   const removeBtn = document.getElementById("removeLabelFileBtn");
   if (currentLabelFile) {
-    box.innerHTML = `<a href="${currentLabelFile}" download="${esc(currentLabelFileName || "라벨파일")}" class="label-file-link">📎 ${esc(currentLabelFileName || "라벨 파일")} (다운로드)</a>`;
+    const preview = currentLabelPreview ? `<img src="${currentLabelPreview}" alt="라벨 미리보기" class="label-preview-img" /><div class="label-preview-cap">PDF 1페이지 미리보기</div>` : "";
+    box.innerHTML = preview + `<a href="${currentLabelFile}" download="${esc(currentLabelFileName || "라벨파일")}" class="label-file-link">📎 ${esc(currentLabelFileName || "라벨 파일")} (다운로드)</a>`;
     removeBtn.hidden = false;
   } else {
     box.innerHTML = `<span class="photo-placeholder">파일 없음</span>`;
@@ -674,6 +703,7 @@ function handleLabelFileUpload(file) {
         canvas.getContext("2d").drawImage(img, 0, 0, width, height);
         currentLabelFile = canvas.toDataURL("image/jpeg", 0.85);
         currentLabelFileName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+        currentLabelPreview = "";  // 이미지 라벨은 labelFile 자체가 미리보기
         renderLabelFileInfo();
       };
       img.onerror = () => showFormError("이미지를 읽을 수 없습니다. 다른 파일로 시도해주세요.");
@@ -689,10 +719,20 @@ function handleLabelFileUpload(file) {
       return;
     }
     const reader = new FileReader();
-    reader.onload = (e) => {
-      currentLabelFile = e.target.result;       // data URL (base64)
+    reader.onload = async (e) => {
+      currentLabelFile = e.target.result;       // data URL (base64) — 원본(다운로드용)
       currentLabelFileName = file.name;
+      currentLabelPreview = "";
       renderLabelFileInfo();
+      // PDF면 1페이지를 이미지로 렌더링해 미리보기 생성 (실패해도 원본은 저장/다운로드 가능)
+      if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+        try {
+          currentLabelPreview = await renderPdfFirstPage(currentLabelFile);
+          renderLabelFileInfo();
+        } catch (err) {
+          console.error("PDF 미리보기 생성 실패:", err);
+        }
+      }
     };
     reader.readAsDataURL(file);
   }
@@ -740,7 +780,7 @@ async function saveForm() {
 
   const fields = {
     assetName, assetNumber, location, manager,
-    labelSticker: get("labelSticker"), labelFile: currentLabelFile || "", labelFileName: currentLabelFile ? currentLabelFileName : "",
+    labelSticker: get("labelSticker"), labelFile: currentLabelFile || "", labelFileName: currentLabelFile ? currentLabelFileName : "", labelPreview: currentLabelFile ? (currentLabelPreview || "") : "",
     status: get("status") || "취득", dept: get("dept"),
     model: get("model"), spec: get("spec"), maker: get("maker"),
     acquireCost: Number(get("acquireCost")) || 0, note: get("note"), imageUrl: currentPhoto || "",
@@ -963,6 +1003,7 @@ async function applyState(assetId, snap) {
   }
 }
 async function revertHistory(histId) {
+  if (!isSuperAdmin) { alert("원상복구(되돌리기)는 최고관리자만 할 수 있습니다."); return; }
   const h = history.find((x) => String(x.id) === String(histId));
   if (!h) return;
   if (h.action === "inspect") { alert("검수 기록은 되돌리기 대상이 아닙니다. 검수 기록 삭제는 상세 화면에서 가능합니다."); return; }
@@ -975,6 +1016,7 @@ async function revertHistory(histId) {
   await reloadAll(); rerender(); renderHistory();
 }
 async function deleteHistory(histId) {
+  if (!isSuperAdmin) { alert("기록 삭제는 최고관리자만 할 수 있습니다."); return; }
   if (!confirm("이 기록을 삭제하시겠습니까?\n\n(기록만 지워지며 현재 자산 상태는 바뀌지 않습니다. 삭제 후 이 시점으로 되돌릴 수 없습니다.)")) return;
   try { const { error } = await sb.from("history").delete().eq("id", histId); if (error) throw error; }
   catch (e) { console.error(e); alert("기록 삭제에 실패했습니다."); return; }
@@ -1026,6 +1068,7 @@ function editMyRequest(reqId) {
     document.getElementById("formError").hidden = true;
     currentPhoto = (r.payload && r.payload.imageUrl) || "";
     currentLabelFile = (r.payload && r.payload.labelFile) || "";
+    currentLabelPreview = (r.payload && r.payload.labelPreview) || "";
     currentLabelFileName = (r.payload && r.payload.labelFileName) || "";
     document.querySelectorAll(".request-only").forEach((el) => (el.style.display = ""));
     document.getElementById("formTitle").textContent = r.action === "create" ? "등록 요청 수정" : "수정 요청 수정";
@@ -1173,9 +1216,15 @@ function renderHistory() {
   if (rows.length === 0) { body.innerHTML = `<div class="empty-msg">기록이 없습니다.</div>`; return; }
   const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림", inspect: "검수" };
   const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert", inspect: "req-inspect" };
-  body.innerHTML = rows.map((h) => {
+  body.innerHTML =
+    (isSuperAdmin ? "" : `<div class="notice" style="margin-bottom:14px;">원상복구(되돌리기)와 기록 삭제는 <b>최고관리자</b>만 할 수 있습니다. 일반 관리자는 이력 조회만 가능합니다.</div>`) +
+    rows.map((h) => {
     const meta = [h.approved_by && `결재자: ${esc(h.approved_by)}`, h.requester && `신청자: ${esc(h.requester)}`, h.note && esc(h.note)].filter(Boolean).join(" · ");
-    const canRevert = h.action !== "inspect";
+    const canRevert = h.action !== "inspect" && isSuperAdmin;
+    const actions = isSuperAdmin
+      ? `${canRevert ? `<button class="btn btn-secondary btn-sm" data-revert="${h.id}">이전 상태로 되돌리기</button>` : ""}
+         <button class="btn btn-danger btn-sm" data-delhist="${h.id}">기록 삭제</button>`
+      : "";
     return `
       <div class="req-card">
         <div class="req-top">
@@ -1184,10 +1233,7 @@ function renderHistory() {
         </div>
         <div class="req-summary">${histSummary(h)}</div>
         ${meta ? `<div class="req-meta" style="margin-bottom:8px;">${meta}</div>` : ""}
-        <div class="req-actions">
-          ${canRevert ? `<button class="btn btn-secondary btn-sm" data-revert="${h.id}">이전 상태로 되돌리기</button>` : ""}
-          <button class="btn btn-danger btn-sm" data-delhist="${h.id}">기록 삭제</button>
-        </div>
+        ${actions ? `<div class="req-actions">${actions}</div>` : ""}
       </div>`;
   }).join("");
 }
@@ -1331,7 +1377,7 @@ document.getElementById("lightbox").addEventListener("click", closeLightbox);
 document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files[0]));
 document.getElementById("removePhotoBtn").addEventListener("click", () => { currentPhoto = ""; document.getElementById("f-image").value = ""; renderPhotoPreview(); });
 document.getElementById("f-labelFile").addEventListener("change", (e) => handleLabelFileUpload(e.target.files[0]));
-document.getElementById("removeLabelFileBtn").addEventListener("click", () => { currentLabelFile = ""; currentLabelFileName = ""; document.getElementById("f-labelFile").value = ""; renderLabelFileInfo(); });
+document.getElementById("removeLabelFileBtn").addEventListener("click", () => { currentLabelFile = ""; currentLabelFileName = ""; currentLabelPreview = ""; document.getElementById("f-labelFile").value = ""; renderLabelFileInfo(); });
 document.getElementById("formSaveBtn").addEventListener("click", saveForm);
 document.getElementById("assetForm").addEventListener("submit", (e) => { e.preventDefault(); saveForm(); });
 

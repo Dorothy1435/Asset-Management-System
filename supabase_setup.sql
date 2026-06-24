@@ -230,3 +230,20 @@ create trigger on_auth_user_created after insert on auth.users
 -- O) 이름/소속은 위 트리거(handle_new_user, SECURITY DEFINER)가 가입 시 서버에서 저장합니다.
 --    권한(role) 위변조 방지를 위해 일반 사용자에게 profiles 직접 수정 권한은 주지 않습니다.
 --    (회원관리에서 권한 변경은 기존 관리자 정책 profiles_admin_all 로만 가능)
+
+
+-- =====================================================================
+-- [원상복구 권한] 이력 삭제는 최고관리자(superadmin)만 — 일반 관리자는 감사 로그를 지울 수 없음
+-- 이 블록을 SQL Editor에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+
+-- P) 최고관리자 판별 함수
+create or replace function public.is_superadmin() returns boolean
+language sql security definer stable set search_path = public as $$
+  select exists(select 1 from public.profiles where id = auth.uid() and role = 'superadmin');
+$$;
+
+-- Q) history 삭제 정책: 관리자 → 최고관리자 전용으로 교체
+--    (조회/기록 추가는 기존대로 관리자 모두 가능. 되돌리기는 assets 쓰기로 동작하며 'revert'로 다시 이력에 남습니다.)
+drop policy if exists "hist_delete_admin" on public.history;
+create policy "hist_delete_super" on public.history for delete to authenticated using (public.is_superadmin());
