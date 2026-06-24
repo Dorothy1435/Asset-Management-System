@@ -532,12 +532,13 @@ function renderInspectionLog(a) {
   if (list.length === 0) {
     html += `<div class="insp-empty">아직 검수 기록이 없습니다. ‘검수’ 버튼으로 분기별·회차별 검수를 확인하세요.</div>`;
   } else {
-    html += `<table class="insp-table"><thead><tr><th>구분</th><th>검수일시</th><th>확인자</th>${isAdmin ? "<th></th>" : ""}</tr></thead><tbody>`;
+    html += `<table class="insp-table"><thead><tr><th>구분</th><th>검수일시</th><th>확인자</th><th>소속</th>${isAdmin ? "<th></th>" : ""}</tr></thead><tbody>`;
     html += list.slice().reverse().map((ins) => `
       <tr>
         <td><span class="insp-ok">✔</span> ${esc([ins.periodType, ins.period].filter(Boolean).join(" "))}</td>
         <td>${fmtTime(ins.checkedAt)}</td>
         <td>${esc(ins.inspector || "-")}</td>
+        <td>${esc(ins.affiliation || "-")}</td>
         ${isAdmin ? `<td><button class="btn-mini btn-del" data-delinsp="${esc(ins.id)}">삭제</button></td>` : ""}
       </tr>`).join("");
     html += `</tbody></table>`;
@@ -640,19 +641,48 @@ function renderLabelFileInfo() {
 }
 function handleLabelFileUpload(file) {
   if (!file) return;
-  const MAX_BYTES = 3 * 1024 * 1024; // 3MB
+  const MAX_BYTES = 10 * 1024 * 1024; // 원본 10MB까지 허용(이미지는 자동 압축됨)
   if (file.size > MAX_BYTES) {
-    showFormError("라벨 파일은 3MB 이하만 업로드할 수 있습니다.");
+    showFormError("라벨 파일은 10MB 이하만 업로드할 수 있습니다.");
     document.getElementById("f-labelFile").value = "";
     return;
   }
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    currentLabelFile = e.target.result;       // data URL (base64)
-    currentLabelFileName = file.name;
-    renderLabelFileInfo();
-  };
-  reader.readAsDataURL(file);
+  if (file.type.startsWith("image/")) {
+    // 라벨 이미지는 제품 사진처럼 압축 저장 (base64 용량 초과로 업로드 실패하는 문제 방지)
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1280; // 라벨 글자 가독성을 위해 제품 사진보다 크게
+        let { width, height } = img;
+        if (width > MAX || height > MAX) { const r = Math.min(MAX / width, MAX / height); width = Math.round(width * r); height = Math.round(height * r); }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        currentLabelFile = canvas.toDataURL("image/jpeg", 0.85);
+        currentLabelFileName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+        renderLabelFileInfo();
+      };
+      img.onerror = () => showFormError("이미지를 읽을 수 없습니다. 다른 파일로 시도해주세요.");
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  } else {
+    // PDF 등 이미지가 아닌 파일은 압축이 안 되므로 용량을 더 작게 제한
+    const MAX_RAW = 2 * 1024 * 1024; // 2MB
+    if (file.size > MAX_RAW) {
+      showFormError("이미지가 아닌 라벨 파일(PDF 등)은 2MB 이하만 가능합니다. 사진으로 올리면 더 큰 파일도 자동 압축됩니다.");
+      document.getElementById("f-labelFile").value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      currentLabelFile = e.target.result;       // data URL (base64)
+      currentLabelFileName = file.name;
+      renderLabelFileInfo();
+    };
+    reader.readAsDataURL(file);
+  }
 }
 function handlePhotoUpload(file) {
   if (!file) return;
@@ -717,7 +747,8 @@ async function saveForm() {
     }
   } catch (e) {
     console.error(e);
-    showFormError("저장에 실패했습니다. 네트워크 연결을 확인하고 다시 시도해주세요.");
+    const detail = e?.message ? ` (${e.message})` : "";
+    showFormError("저장에 실패했습니다. 라벨/사진 파일이 너무 크면 실패할 수 있습니다." + detail);
     saveBtn.disabled = false;
     return;
   }
@@ -788,7 +819,8 @@ function openInspect(id) {
   document.getElementById("inspectError").hidden = true;
   document.getElementById("insp-type").value = "분기";
   document.getElementById("insp-period").value = "";
-  document.getElementById("insp-inspector").value = myProfile?.name || myProfile?.username || "";
+  document.getElementById("insp-inspector").value = myProfile?.name || "";
+  document.getElementById("insp-affil").value = myProfile?.affiliation || "";
   document.getElementById("insp-checked").checked = true;
   document.getElementById("inspectTarget").innerHTML = `<b>${esc(a.assetName)}</b> (${esc(a.assetNumber)})`;
   document.getElementById("inspectTitle").textContent = isAdmin ? "검수 확인" : "검수 요청";
@@ -800,6 +832,7 @@ async function submitInspect() {
   const periodType = document.getElementById("insp-type").value;
   const period = document.getElementById("insp-period").value.trim();
   const inspector = document.getElementById("insp-inspector").value.trim();
+  const affiliation = document.getElementById("insp-affil").value.trim();
   const checked = document.getElementById("insp-checked").checked;
   const errEl = document.getElementById("inspectError");
   errEl.hidden = true;
@@ -808,16 +841,17 @@ async function submitInspect() {
   if (!inspector) { errEl.textContent = "검수 확인자 이름을 입력해주세요."; errEl.hidden = false; return; }
   const a = findAsset(inspectTargetId);
   if (!a) { hide("inspectOverlay"); return; }
+  const reqName = affiliation ? `${inspector} (${affiliation})` : inspector;
   const btn = document.getElementById("inspectSubmit");
   btn.disabled = true;
   try {
     if (isAdmin) {
-      await applyInspect(inspectTargetId, { periodType, period, inspector });
+      await applyInspect(inspectTargetId, { periodType, period, inspector, affiliation });
     } else {
       await submitRequest({
         action: "inspect", target_id: inspectTargetId,
-        payload: { periodType, period, inspector, assetName: a.assetName, assetNumber: a.assetNumber },
-        requester: inspector, note: `${periodType} ${period} 검수 확인`,
+        payload: { periodType, period, inspector, affiliation, assetName: a.assetName, assetNumber: a.assetNumber },
+        requester: reqName, note: `${periodType} ${period} 검수 확인`,
       });
     }
   } catch (e) {
@@ -838,13 +872,14 @@ async function writeInspections(id, list) {
   const { error } = await sb.from("assets").upsert({ id: String(id), kind, data: { ...existing, inspections: list }, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
-async function applyInspect(id, { periodType, period, inspector }, meta = {}) {
+async function applyInspect(id, { periodType, period, inspector, affiliation }, meta = {}) {
   const current = findAsset(id);
   if (!current) throw new Error("자산 없음");
-  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", checkedAt: new Date().toISOString() };
+  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", checkedAt: new Date().toISOString() };
   const list = Array.isArray(current.inspections) ? [...current.inspections, insp] : [insp];
   await writeInspections(id, list);
-  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || inspector, note: `검수 확인 · ${[periodType, period].filter(Boolean).join(" ")} · 확인자: ${inspector}` });
+  const who = inspector + (affiliation ? ` (${affiliation})` : "");
+  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${[periodType, period].filter(Boolean).join(" ")} · 확인자: ${who}` });
 }
 async function removeInspection(assetId, inspId) {
   const current = findAsset(assetId);
@@ -1046,7 +1081,7 @@ function renderReview() {
   body.innerHTML = requests.map((r) => {
     const p = r.payload || {};
     let summary;
-    if (r.action === "inspect") summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")}) · 검수 구분: <b>${esc([p.periodType, p.period].filter(Boolean).join(" "))}</b> · 확인자: ${esc(p.inspector || "-")}`;
+    if (r.action === "inspect") summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")}) · 검수 구분: <b>${esc([p.periodType, p.period].filter(Boolean).join(" "))}</b> · 확인자: ${esc(p.inspector || "-")}${p.affiliation ? ` (${esc(p.affiliation)})` : ""}`;
     else summary = r.action === "delete"
       ? `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})`
       : `<div class="req-fields">
