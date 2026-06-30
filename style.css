@@ -100,6 +100,26 @@ body {
   padding: 24px;
 }
 
+/* 상세 화면 사용자 등록 */
+.user-editor {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.user-editor-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.user-editor-row input {
+  flex: 1;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+}
+.user-editor-row input:focus { outline: none; border-color: var(--primary); }
+
 /* 게시판 페이지 */
 .board-page-head {
   display: flex;

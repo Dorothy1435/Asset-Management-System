@@ -50,7 +50,7 @@
 
     <section class="toolbar">
       <div class="search-box">
-        <input type="text" id="searchInput" placeholder="자산명, 자산번호, 위치, 담당자, 부서, 제작사 검색..." autocomplete="off" />
+        <input type="text" id="searchInput" placeholder="자산명, 자산번호, 위치, 사용자, 부서, 제작사 검색..." autocomplete="off" />
         <button id="clearBtn" class="btn-clear" title="검색어 지우기">✕</button>
       </div>
       <button class="btn btn-secondary" id="advToggle">상세 필터</button>
@@ -86,7 +86,7 @@
             <th class="sortable" data-key="assetNumber">자산번호 <span class="sort-arrow"></span></th>
             <th>라벨</th>
             <th class="sortable" data-key="location">위치 <span class="sort-arrow"></span></th>
-            <th class="sortable" data-key="manager"><span id="thManager">담당자</span> <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="manager"><span id="thManager">사용자</span> <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="dept">부서 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="status">상태 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="regDate">등재일 <span class="sort-arrow"></span></th>
@@ -192,12 +192,12 @@
             <input type="text" id="f-location" />
           </div>
           <div class="form-row">
-            <label id="lbl-manager">담당자 <span class="req">*</span></label>
-            <input type="text" id="f-manager" />
+            <label id="lbl-manager">사용자</label>
+            <input type="text" id="f-manager" placeholder="상세 화면에서도 등록·수정 가능" />
           </div>
           <div class="form-row">
             <label>운영 부서</label>
-            <input type="text" id="f-dept" />
+            <select id="f-dept"></select>
           </div>
           <div class="form-row">
             <label>모델명</label>
@@ -394,7 +394,7 @@
               <option value="분기">분기별</option>
               <option value="회차">회차별</option>
             </select>
-            <input type="text" id="insp-period" placeholder="예: 2026 1분기 / 3회차" />
+            <select id="insp-period"></select>
           </div>
         </div>
         <div class="form-row" style="margin-bottom:12px;">

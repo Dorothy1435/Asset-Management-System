@@ -36,6 +36,8 @@ let currentPageName = "assets"; // "assets" | "board"
 // 라우트별 자산 그룹 매핑
 const ROUTES = { "2024": GROUP_2024, "elec": GROUP_ELEC };
 const GROUP_TO_ROUTE = { [GROUP_2024]: "2024", [GROUP_ELEC]: "elec" };
+// 운영 부서 표준 목록 (폼/필터 공통)
+const DEPTS = ["기획사무국", "지역혁신국", "교육혁신국", "산업혁신국", "현장캠퍼스"];
 
 let sortState = { key: null, dir: 1 };
 let currentPhoto = "";
@@ -202,8 +204,6 @@ async function reloadAll() {
 function rerender() {
   renderNav();
   if (currentPageName === "assets") {
-    const thM = document.getElementById("thManager");
-    if (thM) thM.textContent = currentGroup === GROUP_ELEC ? "대여자" : "담당자";
     initFilters();
     renderStats();
     updateUI();
@@ -511,7 +511,9 @@ function fillSelect(id, values, allLabel) {
 }
 function initFilters() {
   const inGroup = assets.filter((a) => groupOf(a) === currentGroup);
-  fillSelect("deptFilter", inGroup.map((a) => a.dept), "전체");
+  // 부서 필터: 표준 5개 부서를 먼저 노출하고, 데이터에 있는 기타 값도 함께 제공
+  const deptVals = inGroup.map((a) => a.dept).filter(Boolean);
+  fillSelect("deptFilter", [...DEPTS, ...deptVals], "전체");
   fillSelect("statusFilter", inGroup.map((a) => a.status), "전체");
 }
 function applyFilter() {
@@ -614,6 +616,47 @@ function renderPagination() {
 }
 
 // ===== 상세 =====
+// 상세 화면에서 사용자(이름)를 바로 등록/수정한다.
+function renderUserEditor(a) {
+  if (!currentUser) return "";
+  const btnLabel = isAdmin ? "저장" : "등록 요청";
+  return `<div class="user-editor">
+    <h3 class="insp-title">사용자 등록</h3>
+    <div class="user-editor-row">
+      <input type="text" id="detailUserInput" value="${esc(a.manager || "")}" placeholder="사용자 이름" autocomplete="off" />
+      <button class="btn btn-primary" id="detailUserSaveBtn">${btnLabel}</button>
+    </div>
+    ${isAdmin ? "" : `<p class="insp-note">사용자 등록은 관리자 승인 후 반영됩니다.</p>`}
+  </div>`;
+}
+async function saveDetailUser(id) {
+  const a = findAsset(id);
+  if (!a) return;
+  if (!requireLogin()) return;
+  const input = document.getElementById("detailUserInput");
+  const value = input ? input.value.trim() : "";
+  const btn = document.getElementById("detailUserSaveBtn");
+  if (btn) btn.disabled = true;
+  try {
+    if (isAdmin) {
+      await applyUpdate(id, { manager: value });
+      await reloadAll(); rerender();
+      openDetail(id);
+    } else {
+      await submitRequest({
+        action: "update", target_id: id,
+        payload: { manager: value, assetName: a.assetName, assetNumber: a.assetNumber },
+        requester: myProfile?.name || "", note: "사용자 등록/변경",
+      });
+      hide("detailOverlay");
+      alert("사용자 등록 요청이 접수되었습니다. 관리자 승인 후 반영됩니다.");
+    }
+  } catch (e) {
+    console.error(e);
+    if (btn) btn.disabled = false;
+    alert("저장에 실패했습니다. 잠시 후 다시 시도해주세요.");
+  }
+}
 function openDetail(id) {
   const a = findAsset(id);
   if (!a) return;
@@ -634,13 +677,14 @@ function openDetail(id) {
     ["단가", a.unitPrice ? won(a.unitPrice) : ""], ["수량", a.qty],
     ["취득금액", a.acquireCost ? won(a.acquireCost) : ""], ["취득일자", a.acquireDate],
     ["보관 위치", a.location], ["관리 기관", a.org], ["운영 부서", a.dept],
-    [isElec ? "대여자" : "담당자", a.manager],
+    ["사용자", a.manager],
   ];
   if (isElec) rows.push(["대여 일시", a.rentDate], ["반납 일시", a.returnDate]);
   rows.push(["등재일", a.regDate], ["상태", a.status], ["비고", a.note]);
   document.getElementById("detailTitle").textContent = a.assetName || "자산 상세 정보";
   document.getElementById("detailBody").innerHTML = photo + labelPhoto +
     `<dl class="detail-grid">` + rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") + `</dl>` +
+    renderUserEditor(a) +
     renderInspectionLog(a);
   document.getElementById("detailDownloadBtn").hidden = !a.imageUrl;
   document.getElementById("detailLabelBtn").hidden = !a.labelFile;
@@ -747,6 +791,7 @@ function openForm(id) {
     document.getElementById("formSaveBtn").textContent = isAdmin ? "등록" : "등록 요청";
     document.getElementById("f-id").value = "";
     document.getElementById("f-assetGroup").value = currentGroup;
+    setDeptSelect("");
   }
   updateFormForGroup();
   renderPhotoPreview();
@@ -757,7 +802,8 @@ function fillForm(a) {
   const set = (k, v) => (document.getElementById("f-" + k).value = v ?? "");
   set("assetName", a.assetName); set("assetNumber", a.assetNumber); set("labelSticker", a.labelSticker);
   document.getElementById("f-status").value = a.status || "취득";
-  set("location", a.location); set("manager", a.manager); set("dept", a.dept);
+  set("location", a.location); set("manager", a.manager);
+  setDeptSelect(a.dept);
   set("model", a.model); set("spec", a.spec); set("maker", a.maker);
   set("acquireCost", a.acquireCost || ""); set("note", a.note);
   set("rentDate", a.rentDate); set("returnDate", a.returnDate);
@@ -775,13 +821,19 @@ function updateFormForGroup() {
   const opts = isElec ? STATUS_OPTS_ELEC : STATUS_OPTS_DEFAULT;
   sel.innerHTML = opts.map((s) => `<option value="${s}">${s}</option>`).join("");
   sel.value = opts.includes(prev) ? prev : opts[isElec ? 1 : 0]; // 전자 신규 기본값: 보관중
-  // 담당자 → 대여자
-  document.getElementById("lbl-manager").innerHTML = isElec ? "대여자" : `담당자 <span class="req">*</span>`;
   // 대여/반납 일시 행
   document.getElementById("row-rentDate").hidden = !isElec;
   document.getElementById("row-returnDate").hidden = !isElec;
   // 전자는 필수(*) 표시 제거
   document.querySelectorAll("#assetForm .req").forEach((el) => (el.style.display = isElec ? "none" : ""));
+}
+// 운영 부서 select 옵션 구성 (표준 목록 + 기존 값 보존)
+function setDeptSelect(value) {
+  const sel = document.getElementById("f-dept");
+  const list = [...DEPTS];
+  if (value && !list.includes(value)) list.push(value); // 기존(레거시) 부서 값 유지
+  sel.innerHTML = `<option value="">(선택 안 함)</option>` + list.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
+  sel.value = value || "";
 }
 function renderPhotoPreview() {
   const box = document.getElementById("photoPreview");
@@ -893,8 +945,8 @@ async function saveForm() {
   const group = document.getElementById("f-assetGroup").value || GROUP_2024;
   const isElec = group === GROUP_ELEC;
   // 전자 메뉴는 필수 입력 조건 없음 (등록/수정/삭제 자유)
-  if (!isElec && (!assetName || !assetNumber || !location || !manager)) {
-    showFormError("필수 항목을 입력해주세요. (자산명, 자산번호, 위치, 담당자)");
+  if (!isElec && (!assetName || !assetNumber || !location)) {
+    showFormError("필수 항목을 입력해주세요. (자산명, 자산번호, 위치)");
     return;
   }
   // 자산번호 중복 (값이 있을 때만, 편집중인 자산/요청 제외)
@@ -997,7 +1049,7 @@ function openInspect(id) {
   inspectTargetId = id;
   document.getElementById("inspectError").hidden = true;
   document.getElementById("insp-type").value = "분기";
-  document.getElementById("insp-period").value = "";
+  fillInspPeriod();
   document.getElementById("insp-inspector").value = myProfile?.name || "";
   document.getElementById("insp-affil").value = myProfile?.affiliation || "";
   document.getElementById("insp-checked").checked = true;
@@ -1006,6 +1058,15 @@ function openInspect(id) {
   document.getElementById("inspectSubmit").textContent = isAdmin ? "검수 확인" : "검수 요청";
   document.getElementById("inspectNote").hidden = isAdmin;
   show("inspectOverlay");
+}
+// 검수 구분(분기/회차)에 따라 옆칸 드롭다운을 채운다. (분기: 1~4분기, 회차: 1~8회차)
+function fillInspPeriod() {
+  const type = document.getElementById("insp-type").value;
+  const sel = document.getElementById("insp-period");
+  const opts = type === "회차"
+    ? Array.from({ length: 8 }, (_, i) => `${i + 1}회차`)
+    : Array.from({ length: 4 }, (_, i) => `${i + 1}분기`);
+  sel.innerHTML = opts.map((o) => `<option value="${o}">${o}</option>`).join("");
 }
 async function submitInspect() {
   const periodType = document.getElementById("insp-type").value;
@@ -1270,7 +1331,7 @@ function renderReview() {
             <span><b>${esc(p.assetName || "")}</b></span>
             <span>자산번호: ${esc(p.assetNumber || "-")}</span>
             <span>위치: ${esc(p.location || "-")}</span>
-            <span>담당자: ${esc(p.manager || "-")}</span>
+            <span>사용자: ${esc(p.manager || "-")}</span>
             <span>상태: ${esc(p.status || "-")}</span>
             ${p.dept ? `<span>부서: ${esc(p.dept)}</span>` : ""}
          </div>`;
@@ -1313,7 +1374,7 @@ async function rejectRequest(reqId) {
 
 // ===== 결재/변경 이력 (관리자) =====
 function shortVal(v) { v = v === "" || v === null || v === undefined ? "(없음)" : String(v); return v.length > 28 ? v.slice(0, 28) + "…" : v; }
-const HIST_LABELS = { assetName: "자산명", assetNumber: "자산번호", labelSticker: "라벨스티커", labelFile: "라벨 파일", status: "상태", location: "위치", manager: "담당자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
+const HIST_LABELS = { assetName: "자산명", assetNumber: "자산번호", labelSticker: "라벨스티커", labelFile: "라벨 파일", status: "상태", location: "위치", manager: "사용자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
 function histSummary(h) {
   if (h.action === "inspect") return `🔍 ${esc(h.note || "검수 확인")}`;
   if (h.action === "delete") return `자산이 <b>삭제</b>되었습니다.`;
@@ -1594,7 +1655,7 @@ function exportExcel() {
     "모델명": a.model || "", "규격": a.spec || "", "제작회사": a.maker || "",
     "단가": a.unitPrice || 0, "수량": a.qty || 0, "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "",
     "보관 위치": a.location || "", "관리 기관": a.org || "", "운영 부서": a.dept || "",
-    "담당자/대여자": a.manager || "", "대여일시": a.rentDate || "", "반납일시": a.returnDate || "",
+    "사용자": a.manager || "", "대여일시": a.rentDate || "", "반납일시": a.returnDate || "",
     "등재일": a.regDate || "", "상태": a.status || "", "비고": a.note || "",
     "구분": a._added ? "직접등록" : a._edited ? "수정됨" : "엑셀원본",
   }));
@@ -1646,9 +1707,12 @@ document.getElementById("detailInspectBtn").addEventListener("click", () => open
 document.getElementById("detailBody").addEventListener("click", (e) => {
   const img = e.target.closest(".detail-photo img");
   if (img) { openLightbox(img.src); return; }
+  const saveUser = e.target.closest("#detailUserSaveBtn");
+  if (saveUser) { saveDetailUser(detailCurrentId); return; }
   const delInsp = e.target.closest("button[data-delinsp]");
   if (delInsp) removeInspection(detailCurrentId, delInsp.dataset.delinsp);
 });
+document.getElementById("insp-type").addEventListener("change", fillInspPeriod);
 document.getElementById("inspectSubmit").addEventListener("click", submitInspect);
 document.getElementById("inspectForm").addEventListener("submit", (e) => { e.preventDefault(); submitInspect(); });
 document.getElementById("lightbox").addEventListener("click", closeLightbox);
