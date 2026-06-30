@@ -23,6 +23,7 @@ let members = [];
 let assets = [];
 let filtered = [];
 let currentPage = 1;
+let inspFilter = false; // 올해 검수 누락만 보기 (2025년도 자산 전용)
 const PER_PAGE = 20;
 
 // ===== 메뉴(자산 그룹) / 페이지 라우팅 =====
@@ -92,6 +93,25 @@ function fmtTime(iso) {
     const p = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   } catch { return iso; }
+}
+function fmtDate(iso) {
+  if (!iso) return "-";
+  try {
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  } catch { return iso; }
+}
+// 가장 최근 검수 기록 (없으면 null)
+function lastInspection(a) {
+  const l = Array.isArray(a.inspections) ? a.inspections : [];
+  return l.length ? l[l.length - 1] : null;
+}
+// 올해 검수 여부 (검수일 기준)
+function inspectedThisYear(a) {
+  const l = Array.isArray(a.inspections) ? a.inspections : [];
+  const y = new Date().getFullYear();
+  return l.some((ins) => ins.checkedAt && new Date(ins.checkedAt).getFullYear() === y);
 }
 function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
@@ -233,6 +253,7 @@ function applyHashRoute() {
     const si = document.getElementById("searchInput");
     if (si) si.value = "";
     ["deptFilter", "statusFilter", "minCost", "maxCost"].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+    inspFilter = false;
     currentPage = 1;
   }
   showPage(r.page);
@@ -274,7 +295,7 @@ async function loadData() {
   } catch {
     baseAssets = [];
     document.getElementById("assetTbody").innerHTML =
-      `<tr><td colspan="9" style="padding:40px;text-align:center;color:#c2410c;">엑셀 데이터를 불러오지 못했습니다.</td></tr>`;
+      `<tr><td colspan="10" style="padding:40px;text-align:center;color:#c2410c;">엑셀 데이터를 불러오지 못했습니다.</td></tr>`;
   }
   await initAuth();
   await reloadAll();
@@ -498,11 +519,19 @@ function renderStats() {
   const totalCost = inGroup.reduce((s, a) => s + (a.acquireCost || 0), 0);
   const inUse = inGroup.filter((a) => a.status === "사용중" || a.status === "대여중").length;
   const labelCount = inGroup.filter((a) => a.labelFile).length;
+  const showInsp = currentGroup !== GROUP_ELEC; // 검수율은 2025년도 자산 전용
+  const inspectedCnt = showInsp ? inGroup.filter(inspectedThisYear).length : 0;
+  const inspRate = total ? Math.round((inspectedCnt / total) * 100) : 0;
+  const yr = new Date().getFullYear();
+  const inspCard = showInsp
+    ? `<div class="stat-card stat-insp"><div class="num">${inspectedCnt.toLocaleString()}/${total.toLocaleString()} <span class="rate">(${inspRate}%)</span></div><div class="label">${yr}년 검수 완료</div></div>`
+    : "";
   document.getElementById("stats").innerHTML = `
     <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">${esc(currentGroup)}</div></div>
     <div class="stat-card"><div class="num">${(totalCost / 100000000).toFixed(1)}억</div><div class="label">총 취득금액</div></div>
     <div class="stat-card"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
-    <div class="stat-card"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>`;
+    <div class="stat-card"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>
+    ${inspCard}`;
 }
 
 // ===== 필터 =====
@@ -527,8 +556,10 @@ function applyFilter() {
   const minCost = Number(document.getElementById("minCost").value) || 0;
   const maxCostRaw = document.getElementById("maxCost").value;
   const maxCost = maxCostRaw === "" ? Infinity : Number(maxCostRaw);
+  const inspActive = inspFilter && currentGroup !== GROUP_ELEC;
   filtered = assets.filter((a) => {
     if (groupOf(a) !== currentGroup) return false;
+    if (inspActive && inspectedThisYear(a)) return false;
     if (dept && a.dept !== dept) return false;
     if (status && a.status !== status) return false;
     const cost = a.acquireCost || 0;
@@ -576,13 +607,23 @@ function render() {
   }
   emptyMsg.hidden = true;
   const pending = pendingTargetSet();
+  const showInsp = currentGroup !== GROUP_ELEC; // 검수는 2025년도 자산 전용 (전자 제외)
+  const tableEl = document.querySelector(".asset-table");
+  if (tableEl) tableEl.classList.toggle("hide-insp", !showInsp);
+  const uninspBtn = document.getElementById("uninspBtn");
+  if (uninspBtn) {
+    uninspBtn.hidden = !showInsp;
+    uninspBtn.classList.toggle("active", showInsp && inspFilter);
+  }
   const start = (currentPage - 1) * PER_PAGE;
   const pageItems = filtered.slice(start, start + PER_PAGE);
   tbody.innerHTML = pageItems.map((a) => {
     let tag = "";
     if (a._added) tag = `<span class="tag tag-added">직접</span>`;
-    if (Array.isArray(a.inspections) && a.inspections.length) tag += ` <span class="tag tag-inspected">검수</span>`;
+    const li = showInsp ? lastInspection(a) : null;
+    if (li) tag += ` <span class="tag tag-inspected">검수 ${esc([li.periodType, li.period].filter(Boolean).join(" ") || "완료")}</span>`;
     if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
+    const inspDate = li ? fmtDate(li.checkedAt) : "—";
     const thumb = a.imageUrl ? `<img class="thumb" src="${a.imageUrl}" alt="" loading="lazy" />` : "";
     return `
     <tr>
@@ -594,6 +635,7 @@ function render() {
       <td>${esc(val(a.dept))}</td>
       <td>${statusBadge(a.status)}</td>
       <td>${esc(val(a.regDate))}</td>
+      <td class="col-insp cell-insp">${inspDate}</td>
       <td class="cell-actions">
         <button class="btn-mini btn-view" data-id="${esc(a.id)}">상세</button>
         <button class="btn-mini btn-edit" data-id="${esc(a.id)}">${isAdmin ? "수정" : "수정요청"}</button>
@@ -1687,6 +1729,7 @@ document.getElementById("advReset").addEventListener("click", () => {
 });
 document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEventListener("click", () => setSort(th.dataset.key)));
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
+document.getElementById("uninspBtn").addEventListener("click", () => { inspFilter = !inspFilter; applyFilter(); });
 document.getElementById("addBtn").addEventListener("click", () => openForm(null));
 
 document.getElementById("assetTbody").addEventListener("click", (e) => {

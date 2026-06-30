@@ -524,6 +524,10 @@ body {
 .tag-added { background: #dcfce7; color: #15803d; }
 .tag-edited { background: #fef9c3; color: #a16207; }
 .tag-inspected { background: #dbeafe; color: #1d4ed8; }
+.col-insp { white-space: nowrap; text-align: center; color: #64748b; }
+.asset-table.hide-insp .col-insp { display: none; }
+#uninspBtn.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.stat-insp .rate { font-size: 0.7em; color: #1d4ed8; }
 
 /* 폼 */
 .form-grid {
