@@ -523,6 +523,7 @@ body {
 }
 .tag-added { background: #dcfce7; color: #15803d; }
 .tag-edited { background: #fef9c3; color: #a16207; }
+.tag-inspected { background: #dbeafe; color: #1d4ed8; }
 
 /* 폼 */
 .form-grid {

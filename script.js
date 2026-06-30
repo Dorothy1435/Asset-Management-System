@@ -581,7 +581,7 @@ function render() {
   tbody.innerHTML = pageItems.map((a) => {
     let tag = "";
     if (a._added) tag = `<span class="tag tag-added">직접</span>`;
-    else if (a._edited) tag = `<span class="tag tag-edited">수정</span>`;
+    if (Array.isArray(a.inspections) && a.inspections.length) tag += ` <span class="tag tag-inspected">검수</span>`;
     if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
     const thumb = a.imageUrl ? `<img class="thumb" src="${a.imageUrl}" alt="" loading="lazy" />` : "";
     return `
