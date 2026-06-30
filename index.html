@@ -32,7 +32,16 @@
     </div>
   </header>
 
+  <nav class="main-nav">
+    <div class="main-nav-inner">
+      <button class="nav-link" data-route="2024">2024년도 자산 <span class="nav-count">0</span></button>
+      <button class="nav-link" data-route="elec">전자 <span class="nav-count">0</span></button>
+      <button class="nav-link" data-route="board">건의 게시판</button>
+    </div>
+  </nav>
+
   <main class="container">
+   <div id="page-assets">
     <div class="notice" id="userNotice">
       자산 조회는 누구나 가능합니다. 등록·수정·삭제를 <b>요청</b>하려면 로그인하세요. (요청은 관리자 승인 후 반영)
     </div>
@@ -90,6 +99,19 @@
     </section>
 
     <nav class="pagination" id="pagination"></nav>
+   </div><!-- /#page-assets -->
+
+   <section id="page-board" hidden>
+     <div class="board-page-head">
+       <h2 class="board-page-title">건의 게시판</h2>
+       <button class="btn btn-secondary" id="boardBackBtn">← 자산 목록으로</button>
+     </div>
+     <div class="board-toolbar">
+       <p class="board-desc">건의사항을 자유롭게 남겨주세요. 관리자가 확인 후 댓글로 답변드립니다.</p>
+       <button class="btn btn-primary" id="boardWriteBtn">✏️ 글쓰기</button>
+     </div>
+     <div id="boardBody"></div>
+   </section>
   </main>
 
   <!-- 상세 모달 -->
@@ -122,6 +144,13 @@
       <form id="assetForm" class="modal-body">
         <input type="hidden" id="f-id" />
         <div class="form-grid">
+          <div class="form-row">
+            <label>메뉴(구분) <span class="req">*</span></label>
+            <select id="f-assetGroup">
+              <option value="2024년도 자산">2024년도 자산</option>
+              <option value="전자">전자</option>
+            </select>
+          </div>
           <div class="form-row">
             <label>자산명 <span class="req">*</span></label>
             <input type="text" id="f-assetName" required />
@@ -376,24 +405,6 @@
         <button class="btn btn-primary" id="inspectSubmit">검수 확인</button>
         <button class="btn btn-secondary" data-close>취소</button>
       </div>
-    </div>
-  </div>
-
-  <!-- 건의 게시판 모달 -->
-  <div class="modal-overlay" id="boardOverlay" hidden>
-    <div class="modal modal-wide" role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <h2>건의 게시판</h2>
-        <button class="modal-close" data-close>✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="board-toolbar">
-          <p class="board-desc">건의사항을 자유롭게 남겨주세요. 관리자가 확인 후 댓글로 답변드립니다.</p>
-          <button class="btn btn-primary" id="boardWriteBtn">✏️ 글쓰기</button>
-        </div>
-        <div id="boardBody"></div>
-      </div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
     </div>
   </div>
 

@@ -25,6 +25,18 @@ let filtered = [];
 let currentPage = 1;
 const PER_PAGE = 20;
 
+// ===== 메뉴(자산 그룹) / 페이지 라우팅 =====
+const GROUP_2024 = "2024년도 자산";
+const GROUP_ELEC = "전자";
+const GROUPS = [GROUP_2024, GROUP_ELEC];
+// assetGroup 값이 없는 기존(엑셀 원본) 자산은 모두 '2024년도 자산'으로 간주
+const groupOf = (a) => a.assetGroup || GROUP_2024;
+let currentGroup = GROUP_2024;
+let currentPageName = "assets"; // "assets" | "board"
+// 라우트별 자산 그룹 매핑
+const ROUTES = { "2024": GROUP_2024, "elec": GROUP_ELEC };
+const GROUP_TO_ROUTE = { [GROUP_2024]: "2024", [GROUP_ELEC]: "elec" };
+
 let sortState = { key: null, dir: 1 };
 let currentPhoto = "";
 let currentLabelFile = "";
@@ -116,8 +128,8 @@ async function renderPdfFirstPage(dataUrl) {
 }
 
 // ===== 스냅샷 =====
-const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate"];
-const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl"];
+const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate", "assetGroup"];
+const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "assetGroup"];
 function snapshotOf(a) {
   if (!a) return null;
   const o = {};
@@ -188,10 +200,65 @@ async function reloadAll() {
   buildAssets();
 }
 function rerender() {
-  initFilters();
-  renderStats();
-  updateUI();
-  applyFilter();
+  renderNav();
+  if (currentPageName === "assets") {
+    initFilters();
+    renderStats();
+    updateUI();
+    applyFilter();
+  } else {
+    updateUI();
+  }
+}
+
+// ===== 페이지 라우팅 (해시 기반) =====
+function parseHash() {
+  const h = (location.hash || "").replace(/^#\/?/, "").trim();
+  if (h === "board") return { page: "board" };
+  if (ROUTES[h]) return { page: "assets", group: ROUTES[h] };
+  return { page: "assets", group: GROUP_2024 };
+}
+function applyHashRoute() {
+  const r = parseHash();
+  currentPageName = r.page;
+  if (r.page === "assets") {
+    currentGroup = r.group;
+    // 그룹이 바뀌면 검색/필터/페이지 초기화
+    const si = document.getElementById("searchInput");
+    if (si) si.value = "";
+    ["deptFilter", "statusFilter", "minCost", "maxCost"].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+    currentPage = 1;
+  }
+  showPage(r.page);
+  if (authInited) {
+    if (r.page === "board") openBoardPage();
+    else rerender();
+  }
+}
+function showPage(page) {
+  const assetsEl = document.getElementById("page-assets");
+  const boardEl = document.getElementById("page-board");
+  if (assetsEl) assetsEl.hidden = page !== "assets";
+  if (boardEl) boardEl.hidden = page !== "board";
+  // 자산 페이지에서만 의미있는 버튼 노출 제어
+  const addBtn = document.getElementById("addBtn");
+  if (addBtn) addBtn.style.display = page === "assets" ? "" : "none";
+  window.scrollTo({ top: 0 });
+}
+function navTo(route) { location.hash = "#/" + route; }
+function renderNav() {
+  const counts = {};
+  GROUPS.forEach((g) => (counts[g] = 0));
+  assets.forEach((a) => { const g = groupOf(a); if (counts[g] !== undefined) counts[g]++; });
+  document.querySelectorAll(".main-nav .nav-link").forEach((btn) => {
+    const route = btn.dataset.route;
+    let active = false;
+    if (route === "board") active = currentPageName === "board";
+    else active = currentPageName === "assets" && GROUP_TO_ROUTE[currentGroup] === route;
+    btn.classList.toggle("active", active);
+    const cnt = btn.querySelector(".nav-count");
+    if (cnt && ROUTES[route]) cnt.textContent = counts[ROUTES[route]].toLocaleString();
+  });
 }
 
 async function loadData() {
@@ -205,9 +272,10 @@ async function loadData() {
   }
   await initAuth();
   await reloadAll();
-  rerender();
-  sbSubscribe();
   authInited = true;
+  applyHashRoute();      // 해시에 맞는 첫 페이지 렌더
+  sbSubscribe();
+  window.addEventListener("hashchange", applyHashRoute);
 }
 
 function sbSubscribe() {
@@ -222,7 +290,7 @@ function sbSubscribe() {
       if (!document.getElementById("myReqOverlay").hidden) renderMyRequests();
     })
     .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, async () => {
-      if (!document.getElementById("boardOverlay").hidden) { await sbLoadPosts(); renderBoard(); }
+      if (currentPageName === "board") { await sbLoadPosts(); renderBoard(); }
     })
     .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, async () => {
       if (!document.getElementById("postViewOverlay").hidden && currentPostId) {
@@ -419,15 +487,16 @@ function updateUI() {
 
 // ===== 통계 =====
 function renderStats() {
-  const total = assets.length;
-  const totalCost = assets.reduce((s, a) => s + (a.acquireCost || 0), 0);
-  const addedCount = overlay.filter((o) => o.kind === "added").length;
-  const labelCount = assets.filter((a) => a.labelFile).length;
+  const inGroup = assets.filter((a) => groupOf(a) === currentGroup);
+  const total = inGroup.length;
+  const totalCost = inGroup.reduce((s, a) => s + (a.acquireCost || 0), 0);
+  const inUse = inGroup.filter((a) => a.status === "사용중" || a.status === "대여중").length;
+  const labelCount = inGroup.filter((a) => a.labelFile).length;
   document.getElementById("stats").innerHTML = `
-    <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">전체 자산</div></div>
+    <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">${esc(currentGroup)}</div></div>
     <div class="stat-card"><div class="num">${(totalCost / 100000000).toFixed(1)}억</div><div class="label">총 취득금액</div></div>
     <div class="stat-card"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
-    <div class="stat-card"><div class="num">${addedCount}</div><div class="label">직접 등록</div></div>`;
+    <div class="stat-card"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>`;
 }
 
 // ===== 필터 =====
@@ -439,8 +508,9 @@ function fillSelect(id, values, allLabel) {
   if (opts.includes(prev)) sel.value = prev;
 }
 function initFilters() {
-  fillSelect("deptFilter", assets.map((a) => a.dept), "전체");
-  fillSelect("statusFilter", assets.map((a) => a.status), "전체");
+  const inGroup = assets.filter((a) => groupOf(a) === currentGroup);
+  fillSelect("deptFilter", inGroup.map((a) => a.dept), "전체");
+  fillSelect("statusFilter", inGroup.map((a) => a.status), "전체");
 }
 function applyFilter() {
   const kw = document.getElementById("searchInput").value.trim().toLowerCase();
@@ -450,6 +520,7 @@ function applyFilter() {
   const maxCostRaw = document.getElementById("maxCost").value;
   const maxCost = maxCostRaw === "" ? Infinity : Number(maxCostRaw);
   filtered = assets.filter((a) => {
+    if (groupOf(a) !== currentGroup) return false;
     if (dept && a.dept !== dept) return false;
     if (status && a.status !== status) return false;
     const cost = a.acquireCost || 0;
@@ -553,6 +624,7 @@ function openDetail(id) {
     ? `<div class="detail-photo detail-label-photo"><span class="detail-photo-cap">라벨 사진${isImageData(a.labelFile) ? "" : " (PDF 1페이지)"}</span><img src="${labelImgSrc}" alt="라벨 사진" /></div>`
     : "";
   const rows = [
+    ["메뉴", groupOf(a)],
     ["자산명", a.assetName], ["자산번호", a.assetNumber], ["라벨스티커", a.labelSticker],
     ["라벨 파일", a.labelFile ? (a.labelFileName || "첨부됨") : ""],
     ["모델명", a.model], ["규격", a.spec], ["제작회사", a.maker],
@@ -669,6 +741,7 @@ function openForm(id) {
     document.getElementById("formTitle").textContent = isAdmin ? "자산 등록" : "자산 등록 요청";
     document.getElementById("formSaveBtn").textContent = isAdmin ? "등록" : "등록 요청";
     document.getElementById("f-id").value = "";
+    document.getElementById("f-assetGroup").value = currentGroup;
   }
   renderPhotoPreview();
   renderLabelFileInfo();
@@ -681,6 +754,7 @@ function fillForm(a) {
   set("location", a.location); set("manager", a.manager); set("dept", a.dept);
   set("model", a.model); set("spec", a.spec); set("maker", a.maker);
   set("acquireCost", a.acquireCost || ""); set("note", a.note);
+  document.getElementById("f-assetGroup").value = groupOf(a);
 }
 function renderPhotoPreview() {
   const box = document.getElementById("photoPreview");
@@ -803,6 +877,7 @@ async function saveForm() {
     status: get("status") || "취득", dept: get("dept"),
     model: get("model"), spec: get("spec"), maker: get("maker"),
     acquireCost: Number(get("acquireCost")) || 0, note: get("note"), imageUrl: currentPhoto || "",
+    assetGroup: get("assetGroup") || GROUP_2024,
   };
 
   const saveBtn = document.getElementById("formSaveBtn");
@@ -1340,10 +1415,13 @@ async function sbLoadComments(postId) {
   if (error) { console.error("댓글 로드 오류:", error.message); postComments = []; return; }
   postComments = data || [];
 }
-async function openBoard() {
+async function openBoardPage() {
+  renderNav();
+  updateUI();
+  const body = document.getElementById("boardBody");
+  if (body && posts.length === 0) body.innerHTML = `<div class="empty-msg">불러오는 중...</div>`;
   await sbLoadPosts();
   renderBoard();
-  show("boardOverlay");
 }
 function renderBoard() {
   const body = document.getElementById("boardBody");
@@ -1479,6 +1557,7 @@ async function deletePost(id) {
 function exportExcel() {
   if (filtered.length === 0) { alert("내보낼 자산이 없습니다."); return; }
   const rows = filtered.map((a) => ({
+    "메뉴": groupOf(a),
     "자산명": a.assetName || "", "자산번호": a.assetNumber || "", "라벨스티커": a.labelSticker || "", "라벨파일": a.labelFile ? (a.labelFileName || "있음") : "",
     "모델명": a.model || "", "규격": a.spec || "", "제작회사": a.maker || "",
     "단가": a.unitPrice || 0, "수량": a.qty || 0, "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "",
@@ -1489,7 +1568,7 @@ function exportExcel() {
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "자산목록");
-  XLSX.writeFile(wb, `자산목록_${todayStr()}.xlsx`);
+  XLSX.writeFile(wb, `${currentGroup}_자산목록_${todayStr()}.xlsx`);
 }
 
 // ===== 이벤트 =====
@@ -1602,8 +1681,10 @@ document.getElementById("membersBody").addEventListener("click", (e) => {
 });
 
 // 건의 게시판
-document.getElementById("boardBtn").addEventListener("click", openBoard);
+document.getElementById("boardBtn").addEventListener("click", () => navTo("board"));
+document.querySelectorAll(".main-nav .nav-link").forEach((btn) => btn.addEventListener("click", () => navTo(btn.dataset.route)));
 document.getElementById("boardWriteBtn").addEventListener("click", openPostForm);
+document.getElementById("boardBackBtn").addEventListener("click", () => navTo("2024"));
 document.getElementById("boardBody").addEventListener("click", (e) => {
   const card = e.target.closest("[data-post]");
   if (card) openPostView(card.dataset.post);
@@ -1620,7 +1701,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "boardOverlay", "postFormOverlay", "postViewOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });
