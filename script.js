@@ -23,7 +23,8 @@ let members = [];
 let assets = [];
 let filtered = [];
 let currentPage = 1;
-let inspFilter = false; // 올해 검수 누락만 보기 (2025년도 자산 전용)
+let inspFilter = false; // 선택 회차 미검수만 보기 (2025년도 자산 전용)
+let inspRound = "1회차"; // 대시보드/필터 기준 검수 회차
 const PER_PAGE = 20;
 
 // ===== 메뉴(자산 그룹) / 페이지 라우팅 =====
@@ -107,11 +108,10 @@ function lastInspection(a) {
   const l = Array.isArray(a.inspections) ? a.inspections : [];
   return l.length ? l[l.length - 1] : null;
 }
-// 올해 검수 여부 (검수일 기준)
-function inspectedThisYear(a) {
+// 특정 회차 검수 여부
+function inspectedRound(a, round) {
   const l = Array.isArray(a.inspections) ? a.inspections : [];
-  const y = new Date().getFullYear();
-  return l.some((ins) => ins.checkedAt && new Date(ins.checkedAt).getFullYear() === y);
+  return l.some((ins) => ins.period === round);
 }
 function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
@@ -520,11 +520,11 @@ function renderStats() {
   const inUse = inGroup.filter((a) => a.status === "사용중" || a.status === "대여중").length;
   const labelCount = inGroup.filter((a) => a.labelFile).length;
   const showInsp = currentGroup !== GROUP_ELEC; // 검수율은 2025년도 자산 전용
-  const inspectedCnt = showInsp ? inGroup.filter(inspectedThisYear).length : 0;
+  const inspectedCnt = showInsp ? inGroup.filter((a) => inspectedRound(a, inspRound)).length : 0;
   const inspRate = total ? Math.round((inspectedCnt / total) * 100) : 0;
-  const yr = new Date().getFullYear();
+  const roundSel = `<select id="inspRoundSel" class="stat-sel">${Array.from({ length: 8 }, (_, i) => `${i + 1}회차`).map((r) => `<option value="${r}"${r === inspRound ? " selected" : ""}>${r}</option>`).join("")}</select>`;
   const inspCard = showInsp
-    ? `<div class="stat-card stat-insp"><div class="num">${inspectedCnt.toLocaleString()}/${total.toLocaleString()} <span class="rate">(${inspRate}%)</span></div><div class="label">${yr}년 검수 완료</div></div>`
+    ? `<div class="stat-card stat-insp"><div class="num">${inspectedCnt.toLocaleString()}/${total.toLocaleString()} <span class="rate">(${inspRate}%)</span></div><div class="label">${roundSel} 검수 완료</div></div>`
     : "";
   document.getElementById("stats").innerHTML = `
     <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">${esc(currentGroup)}</div></div>
@@ -559,7 +559,7 @@ function applyFilter() {
   const inspActive = inspFilter && currentGroup !== GROUP_ELEC;
   filtered = assets.filter((a) => {
     if (groupOf(a) !== currentGroup) return false;
-    if (inspActive && inspectedThisYear(a)) return false;
+    if (inspActive && inspectedRound(a, inspRound)) return false;
     if (dept && a.dept !== dept) return false;
     if (status && a.status !== status) return false;
     const cost = a.acquireCost || 0;
@@ -613,6 +613,7 @@ function render() {
   const uninspBtn = document.getElementById("uninspBtn");
   if (uninspBtn) {
     uninspBtn.hidden = !showInsp;
+    uninspBtn.textContent = `🔍 ${inspRound} 미검수`;
     uninspBtn.classList.toggle("active", showInsp && inspFilter);
   }
   const start = (currentPage - 1) * PER_PAGE;
@@ -621,7 +622,7 @@ function render() {
     let tag = "";
     if (a._added) tag = `<span class="tag tag-added">직접</span>`;
     const li = showInsp ? lastInspection(a) : null;
-    if (li) tag += ` <span class="tag tag-inspected">검수 ${esc([li.periodType, li.period].filter(Boolean).join(" ") || "완료")}</span>`;
+    if (li) tag += ` <span class="tag tag-inspected">검수 ${esc(li.period || "완료")}</span>`;
     if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
     const inspDate = li ? fmtDate(li.checkedAt) : "—";
     const thumb = a.imageUrl ? `<img class="thumb" src="${a.imageUrl}" alt="" loading="lazy" />` : "";
@@ -745,12 +746,12 @@ function renderInspectionLog(a) {
   const list = Array.isArray(a.inspections) ? a.inspections : [];
   let html = `<div class="insp-section"><h3 class="insp-title">검수 기록 <span class="insp-count">${list.length}</span></h3>`;
   if (list.length === 0) {
-    html += `<div class="insp-empty">아직 검수 기록이 없습니다. ‘검수’ 버튼으로 분기별·회차별 검수를 확인하세요.</div>`;
+    html += `<div class="insp-empty">아직 검수 기록이 없습니다. ‘검수’ 버튼으로 회차별 검수를 확인하세요.</div>`;
   } else {
     html += `<table class="insp-table"><thead><tr><th>구분</th><th>검수일시</th><th>확인자</th><th>소속</th>${isAdmin ? "<th></th>" : ""}</tr></thead><tbody>`;
     html += list.slice().reverse().map((ins) => `
       <tr>
-        <td><span class="insp-ok">✔</span> ${esc([ins.periodType, ins.period].filter(Boolean).join(" "))}</td>
+        <td><span class="insp-ok">✔</span> ${esc(ins.period || "-")}</td>
         <td>${fmtTime(ins.checkedAt)}</td>
         <td>${esc(ins.inspector || "-")}</td>
         <td>${esc(ins.affiliation || "-")}</td>
@@ -1097,7 +1098,6 @@ function openInspect(id) {
   if (!a) return;
   inspectTargetId = id;
   document.getElementById("inspectError").hidden = true;
-  document.getElementById("insp-type").value = "분기";
   fillInspPeriod();
   document.getElementById("insp-inspector").value = myProfile?.name || "";
   const affil = myProfile?.affiliation || "";
@@ -1111,17 +1111,14 @@ function openInspect(id) {
   document.getElementById("inspectNote").hidden = isAdmin;
   show("inspectOverlay");
 }
-// 검수 구분(분기/회차)에 따라 옆칸 드롭다운을 채운다. (분기: 1~4분기, 회차: 1~8회차)
+// 검수 회차 드롭다운을 채운다. (1~8회차)
 function fillInspPeriod() {
-  const type = document.getElementById("insp-type").value;
   const sel = document.getElementById("insp-period");
-  const opts = type === "회차"
-    ? Array.from({ length: 8 }, (_, i) => `${i + 1}회차`)
-    : Array.from({ length: 4 }, (_, i) => `${i + 1}분기`);
+  const opts = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`);
   sel.innerHTML = opts.map((o) => `<option value="${o}">${o}</option>`).join("");
 }
 async function submitInspect() {
-  const periodType = document.getElementById("insp-type").value;
+  const periodType = "회차";
   const period = document.getElementById("insp-period").value.trim();
   const inspector = document.getElementById("insp-inspector").value.trim();
   const affiliation = document.getElementById("insp-affil").value.trim();
@@ -1129,7 +1126,7 @@ async function submitInspect() {
   const errEl = document.getElementById("inspectError");
   errEl.hidden = true;
   if (!checked) { errEl.textContent = "‘검수 완료를 확인합니다’에 체크해주세요."; errEl.hidden = false; return; }
-  if (!period) { errEl.textContent = "검수 구분(분기/회차)을 입력해주세요. 예: 2026 1분기"; errEl.hidden = false; return; }
+  if (!period) { errEl.textContent = "검수 회차를 선택해주세요."; errEl.hidden = false; return; }
   if (!inspector) { errEl.textContent = "검수 확인자 이름을 입력해주세요."; errEl.hidden = false; return; }
   const a = findAsset(inspectTargetId);
   if (!a) { hide("inspectOverlay"); return; }
@@ -1143,7 +1140,7 @@ async function submitInspect() {
       await submitRequest({
         action: "inspect", target_id: inspectTargetId,
         payload: { periodType, period, inspector, affiliation, assetName: a.assetName, assetNumber: a.assetNumber },
-        requester: reqName, note: `${periodType} ${period} 검수 확인`,
+        requester: reqName, note: `${period} 검수 확인`,
       });
     }
   } catch (e) {
@@ -1171,7 +1168,7 @@ async function applyInspect(id, { periodType, period, inspector, affiliation }, 
   const list = Array.isArray(current.inspections) ? [...current.inspections, insp] : [insp];
   await writeInspections(id, list);
   const who = inspector + (affiliation ? ` (${affiliation})` : "");
-  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${[periodType, period].filter(Boolean).join(" ")} · 확인자: ${who}` });
+  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${period} · 확인자: ${who}` });
 }
 async function removeInspection(assetId, inspId) {
   const current = findAsset(assetId);
@@ -1181,7 +1178,7 @@ async function removeInspection(assetId, inspId) {
   const list = (current.inspections || []).filter((x) => String(x.id) !== String(inspId));
   try {
     await writeInspections(assetId, list);
-    await logHistory({ asset_id: assetId, asset_name: current.assetName, action: "inspect", before: null, after: null, note: `검수 기록 삭제 · ${target ? [target.periodType, target.period].filter(Boolean).join(" ") + " · " + (target.inspector || "") : ""}` });
+    await logHistory({ asset_id: assetId, asset_name: current.assetName, action: "inspect", before: null, after: null, note: `검수 기록 삭제 · ${target ? (target.period || "") + " · " + (target.inspector || "") : ""}` });
   } catch (e) { console.error(e); alert("삭제에 실패했습니다."); return; }
   await reloadAll(); rerender(); openDetail(assetId);
 }
@@ -1352,7 +1349,7 @@ function renderMyRequests() {
       ? `${r.action !== "inspect" ? `<button class="btn btn-secondary btn-sm" data-editreq="${r.id}">수정</button>` : ""}
          <button class="btn btn-danger btn-sm" data-cancelreq="${r.id}">취소</button>`
       : `<button class="btn btn-danger btn-sm" data-delreq="${r.id}">삭제</button>`;
-    const extra = r.action === "inspect" && p.period ? ` · 검수: ${esc([p.periodType, p.period].filter(Boolean).join(" "))}` : (p.location ? ` · 위치: ${esc(p.location)}` : "");
+    const extra = r.action === "inspect" && p.period ? ` · 검수: ${esc(p.period)}` : (p.location ? ` · 위치: ${esc(p.location)}` : "");
     return `
       <div class="req-card">
         <div class="req-top">
@@ -1376,7 +1373,7 @@ function renderReview() {
   body.innerHTML = requests.map((r) => {
     const p = r.payload || {};
     let summary;
-    if (r.action === "inspect") summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")}) · 검수 구분: <b>${esc([p.periodType, p.period].filter(Boolean).join(" "))}</b> · 확인자: ${esc(p.inspector || "-")}${p.affiliation ? ` (${esc(p.affiliation)})` : ""}`;
+    if (r.action === "inspect") summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")}) · 검수 회차: <b>${esc(p.period || "-")}</b> · 확인자: ${esc(p.inspector || "-")}${p.affiliation ? ` (${esc(p.affiliation)})` : ""}`;
     else summary = r.action === "delete"
       ? `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})`
       : `<div class="req-fields">
@@ -1730,6 +1727,9 @@ document.getElementById("advReset").addEventListener("click", () => {
 document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEventListener("click", () => setSort(th.dataset.key)));
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
 document.getElementById("uninspBtn").addEventListener("click", () => { inspFilter = !inspFilter; applyFilter(); });
+document.getElementById("stats").addEventListener("change", (e) => {
+  if (e.target && e.target.id === "inspRoundSel") { inspRound = e.target.value; renderStats(); applyFilter(); }
+});
 document.getElementById("addBtn").addEventListener("click", () => openForm(null));
 
 document.getElementById("assetTbody").addEventListener("click", (e) => {
@@ -1765,7 +1765,6 @@ document.getElementById("detailBody").addEventListener("click", (e) => {
   const delInsp = e.target.closest("button[data-delinsp]");
   if (delInsp) removeInspection(detailCurrentId, delInsp.dataset.delinsp);
 });
-document.getElementById("insp-type").addEventListener("change", fillInspPeriod);
 document.getElementById("inspectSubmit").addEventListener("click", submitInspect);
 document.getElementById("inspectForm").addEventListener("submit", (e) => { e.preventDefault(); submitInspect(); });
 document.getElementById("lightbox").addEventListener("click", closeLightbox);
