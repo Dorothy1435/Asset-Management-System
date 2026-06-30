@@ -26,16 +26,20 @@ let currentPage = 1;
 const PER_PAGE = 20;
 
 // ===== 메뉴(자산 그룹) / 페이지 라우팅 =====
-const GROUP_2024 = "2024년도 자산";
+const GROUP_2024 = "2025년도 자산";
 const GROUP_ELEC = "전자";
 const GROUPS = [GROUP_2024, GROUP_ELEC];
-// assetGroup 값이 없는 기존(엑셀 원본) 자산은 모두 '2024년도 자산'으로 간주
-const groupOf = (a) => a.assetGroup || GROUP_2024;
+// assetGroup 값이 없거나 옛 이름('2024년도 자산')인 기존 자산은 모두 기본 자산 메뉴로 간주
+const groupOf = (a) => {
+  const g = a.assetGroup;
+  if (!g || g === "2024년도 자산") return GROUP_2024;
+  return g;
+};
 let currentGroup = GROUP_2024;
 let currentPageName = "assets"; // "assets" | "board"
-// 라우트별 자산 그룹 매핑
-const ROUTES = { "2024": GROUP_2024, "elec": GROUP_ELEC };
-const GROUP_TO_ROUTE = { [GROUP_2024]: "2024", [GROUP_ELEC]: "elec" };
+// 라우트별 자산 그룹 매핑 (옛 해시 '2024'도 호환)
+const ROUTES = { "2025": GROUP_2024, "2024": GROUP_2024, "elec": GROUP_ELEC };
+const GROUP_TO_ROUTE = { [GROUP_2024]: "2025", [GROUP_ELEC]: "elec" };
 // 운영 부서 표준 목록 (폼/필터 공통)
 const DEPTS = ["기획사무국", "지역혁신국", "교육혁신국", "산업혁신국", "현장캠퍼스"];
 
@@ -827,12 +831,15 @@ function updateFormForGroup() {
   // 전자는 필수(*) 표시 제거
   document.querySelectorAll("#assetForm .req").forEach((el) => (el.style.display = isElec ? "none" : ""));
 }
-// 운영 부서 select 옵션 구성 (표준 목록 + 기존 값 보존)
+// 부서 select 옵션 HTML (표준 5개 + 기존 값 보존)
+function deptOptionsHtml(value) {
+  const list = [...DEPTS];
+  if (value && !list.includes(value)) list.push(value);
+  return `<option value="">(선택 안 함)</option>` + list.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
+}
 function setDeptSelect(value) {
   const sel = document.getElementById("f-dept");
-  const list = [...DEPTS];
-  if (value && !list.includes(value)) list.push(value); // 기존(레거시) 부서 값 유지
-  sel.innerHTML = `<option value="">(선택 안 함)</option>` + list.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
+  sel.innerHTML = deptOptionsHtml(value);
   sel.value = value || "";
 }
 function renderPhotoPreview() {
@@ -1051,7 +1058,10 @@ function openInspect(id) {
   document.getElementById("insp-type").value = "분기";
   fillInspPeriod();
   document.getElementById("insp-inspector").value = myProfile?.name || "";
-  document.getElementById("insp-affil").value = myProfile?.affiliation || "";
+  const affil = myProfile?.affiliation || "";
+  const affilSel = document.getElementById("insp-affil");
+  affilSel.innerHTML = deptOptionsHtml(affil);
+  affilSel.value = affil;
   document.getElementById("insp-checked").checked = true;
   document.getElementById("inspectTarget").innerHTML = `<b>${esc(a.assetName)}</b> (${esc(a.assetNumber)})`;
   document.getElementById("inspectTitle").textContent = isAdmin ? "검수 확인" : "검수 요청";
@@ -1782,7 +1792,7 @@ document.getElementById("membersBody").addEventListener("click", (e) => {
 document.getElementById("boardBtn").addEventListener("click", () => navTo("board"));
 document.querySelectorAll(".main-nav .nav-link").forEach((btn) => btn.addEventListener("click", () => navTo(btn.dataset.route)));
 document.getElementById("boardWriteBtn").addEventListener("click", openPostForm);
-document.getElementById("boardBackBtn").addEventListener("click", () => navTo("2024"));
+document.getElementById("boardBackBtn").addEventListener("click", () => navTo("2025"));
 document.getElementById("boardBody").addEventListener("click", (e) => {
   const card = e.target.closest("[data-post]");
   if (card) openPostView(card.dataset.post);
