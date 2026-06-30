@@ -86,7 +86,7 @@
             <th class="sortable" data-key="assetNumber">자산번호 <span class="sort-arrow"></span></th>
             <th>라벨</th>
             <th class="sortable" data-key="location">위치 <span class="sort-arrow"></span></th>
-            <th class="sortable" data-key="manager">담당자 <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="manager"><span id="thManager">담당자</span> <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="dept">부서 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="status">상태 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="regDate">등재일 <span class="sort-arrow"></span></th>
@@ -152,12 +152,12 @@
             </select>
           </div>
           <div class="form-row">
-            <label>자산명 <span class="req">*</span></label>
-            <input type="text" id="f-assetName" required />
+            <label id="lbl-assetName">자산명 <span class="req">*</span></label>
+            <input type="text" id="f-assetName" />
           </div>
           <div class="form-row">
-            <label>자산번호 <span class="req">*</span></label>
-            <input type="text" id="f-assetNumber" required />
+            <label id="lbl-assetNumber">자산번호 <span class="req">*</span></label>
+            <input type="text" id="f-assetNumber" />
           </div>
           <div class="form-row">
             <label>라벨스티커</label>
@@ -179,13 +179,21 @@
               <option value="폐기">폐기</option>
             </select>
           </div>
+          <div class="form-row elec-only" id="row-rentDate" hidden>
+            <label>대여 일시</label>
+            <input type="date" id="f-rentDate" />
+          </div>
+          <div class="form-row elec-only" id="row-returnDate" hidden>
+            <label>반납 일시</label>
+            <input type="date" id="f-returnDate" />
+          </div>
           <div class="form-row full">
-            <label>보관 위치 <span class="req">*</span></label>
-            <input type="text" id="f-location" required />
+            <label id="lbl-location">보관 위치 <span class="req">*</span></label>
+            <input type="text" id="f-location" />
           </div>
           <div class="form-row">
-            <label>담당자 <span class="req">*</span></label>
-            <input type="text" id="f-manager" required />
+            <label id="lbl-manager">담당자 <span class="req">*</span></label>
+            <input type="text" id="f-manager" />
           </div>
           <div class="form-row">
             <label>운영 부서</label>

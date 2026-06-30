@@ -128,8 +128,8 @@ async function renderPdfFirstPage(dataUrl) {
 }
 
 // ===== 스냅샷 =====
-const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate", "assetGroup"];
-const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "assetGroup"];
+const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate", "assetGroup", "rentDate", "returnDate"];
+const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "assetGroup", "rentDate", "returnDate"];
 function snapshotOf(a) {
   if (!a) return null;
   const o = {};
@@ -202,6 +202,8 @@ async function reloadAll() {
 function rerender() {
   renderNav();
   if (currentPageName === "assets") {
+    const thM = document.getElementById("thManager");
+    if (thM) thM.textContent = currentGroup === GROUP_ELEC ? "대여자" : "담당자";
     initFilters();
     renderStats();
     updateUI();
@@ -623,6 +625,7 @@ function openDetail(id) {
   const labelPhoto = labelImgSrc
     ? `<div class="detail-photo detail-label-photo"><span class="detail-photo-cap">라벨 사진${isImageData(a.labelFile) ? "" : " (PDF 1페이지)"}</span><img src="${labelImgSrc}" alt="라벨 사진" /></div>`
     : "";
+  const isElec = groupOf(a) === GROUP_ELEC;
   const rows = [
     ["메뉴", groupOf(a)],
     ["자산명", a.assetName], ["자산번호", a.assetNumber], ["라벨스티커", a.labelSticker],
@@ -631,8 +634,10 @@ function openDetail(id) {
     ["단가", a.unitPrice ? won(a.unitPrice) : ""], ["수량", a.qty],
     ["취득금액", a.acquireCost ? won(a.acquireCost) : ""], ["취득일자", a.acquireDate],
     ["보관 위치", a.location], ["관리 기관", a.org], ["운영 부서", a.dept],
-    ["담당자", a.manager], ["등재일", a.regDate], ["상태", a.status], ["비고", a.note],
+    [isElec ? "대여자" : "담당자", a.manager],
   ];
+  if (isElec) rows.push(["대여 일시", a.rentDate], ["반납 일시", a.returnDate]);
+  rows.push(["등재일", a.regDate], ["상태", a.status], ["비고", a.note]);
   document.getElementById("detailTitle").textContent = a.assetName || "자산 상세 정보";
   document.getElementById("detailBody").innerHTML = photo + labelPhoto +
     `<dl class="detail-grid">` + rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") + `</dl>` +
@@ -743,6 +748,7 @@ function openForm(id) {
     document.getElementById("f-id").value = "";
     document.getElementById("f-assetGroup").value = currentGroup;
   }
+  updateFormForGroup();
   renderPhotoPreview();
   renderLabelFileInfo();
   show("formOverlay");
@@ -754,7 +760,28 @@ function fillForm(a) {
   set("location", a.location); set("manager", a.manager); set("dept", a.dept);
   set("model", a.model); set("spec", a.spec); set("maker", a.maker);
   set("acquireCost", a.acquireCost || ""); set("note", a.note);
+  set("rentDate", a.rentDate); set("returnDate", a.returnDate);
   document.getElementById("f-assetGroup").value = groupOf(a);
+}
+
+// 선택한 메뉴(구분)에 따라 폼 UI를 전환한다.
+const STATUS_OPTS_DEFAULT = ["취득", "사용중", "보관중", "불용", "폐기"];
+const STATUS_OPTS_ELEC = ["사용중", "보관중"];
+function updateFormForGroup() {
+  const isElec = document.getElementById("f-assetGroup").value === GROUP_ELEC;
+  // 상태 옵션 (전자는 사용중/보관중만)
+  const sel = document.getElementById("f-status");
+  const prev = sel.value;
+  const opts = isElec ? STATUS_OPTS_ELEC : STATUS_OPTS_DEFAULT;
+  sel.innerHTML = opts.map((s) => `<option value="${s}">${s}</option>`).join("");
+  sel.value = opts.includes(prev) ? prev : opts[isElec ? 1 : 0]; // 전자 신규 기본값: 보관중
+  // 담당자 → 대여자
+  document.getElementById("lbl-manager").innerHTML = isElec ? "대여자" : `담당자 <span class="req">*</span>`;
+  // 대여/반납 일시 행
+  document.getElementById("row-rentDate").hidden = !isElec;
+  document.getElementById("row-returnDate").hidden = !isElec;
+  // 전자는 필수(*) 표시 제거
+  document.querySelectorAll("#assetForm .req").forEach((el) => (el.style.display = isElec ? "none" : ""));
 }
 function renderPhotoPreview() {
   const box = document.getElementById("photoPreview");
@@ -863,21 +890,26 @@ async function saveForm() {
   const id = document.getElementById("f-id").value;
   const get = (k) => document.getElementById("f-" + k).value.trim();
   const assetName = get("assetName"), assetNumber = get("assetNumber"), location = get("location"), manager = get("manager");
-  if (!assetName || !assetNumber || !location || !manager) {
+  const group = document.getElementById("f-assetGroup").value || GROUP_2024;
+  const isElec = group === GROUP_ELEC;
+  // 전자 메뉴는 필수 입력 조건 없음 (등록/수정/삭제 자유)
+  if (!isElec && (!assetName || !assetNumber || !location || !manager)) {
     showFormError("필수 항목을 입력해주세요. (자산명, 자산번호, 위치, 담당자)");
     return;
   }
-  // 자산번호 중복 (편집중인 자산/요청 제외)
-  const dup = assets.find((a) => a.assetNumber === assetNumber && String(a.id) !== String(id));
-  if (dup && !editingRequestId) { showFormError("이미 등록된 자산번호입니다."); return; }
+  // 자산번호 중복 (값이 있을 때만, 편집중인 자산/요청 제외)
+  if (assetNumber && !editingRequestId) {
+    const dup = assets.find((a) => a.assetNumber === assetNumber && String(a.id) !== String(id));
+    if (dup) { showFormError("이미 등록된 자산번호입니다."); return; }
+  }
 
   const fields = {
     assetName, assetNumber, location, manager,
     labelSticker: get("labelSticker"), labelFile: currentLabelFile || "", labelFileName: currentLabelFile ? currentLabelFileName : "", labelPreview: currentLabelFile ? (currentLabelPreview || "") : "",
-    status: get("status") || "취득", dept: get("dept"),
+    status: get("status") || (isElec ? "보관중" : "취득"), dept: get("dept"),
     model: get("model"), spec: get("spec"), maker: get("maker"),
     acquireCost: Number(get("acquireCost")) || 0, note: get("note"), imageUrl: currentPhoto || "",
-    assetGroup: get("assetGroup") || GROUP_2024,
+    assetGroup: group, rentDate: get("rentDate"), returnDate: get("returnDate"),
   };
 
   const saveBtn = document.getElementById("formSaveBtn");
@@ -1562,7 +1594,8 @@ function exportExcel() {
     "모델명": a.model || "", "규격": a.spec || "", "제작회사": a.maker || "",
     "단가": a.unitPrice || 0, "수량": a.qty || 0, "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "",
     "보관 위치": a.location || "", "관리 기관": a.org || "", "운영 부서": a.dept || "",
-    "담당자": a.manager || "", "등재일": a.regDate || "", "상태": a.status || "", "비고": a.note || "",
+    "담당자/대여자": a.manager || "", "대여일시": a.rentDate || "", "반납일시": a.returnDate || "",
+    "등재일": a.regDate || "", "상태": a.status || "", "비고": a.note || "",
     "구분": a._added ? "직접등록" : a._edited ? "수정됨" : "엑셀원본",
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -1624,6 +1657,7 @@ document.getElementById("f-image").addEventListener("change", (e) => handlePhoto
 document.getElementById("removePhotoBtn").addEventListener("click", () => { currentPhoto = ""; document.getElementById("f-image").value = ""; renderPhotoPreview(); });
 document.getElementById("f-labelFile").addEventListener("change", (e) => handleLabelFileUpload(e.target.files[0]));
 document.getElementById("removeLabelFileBtn").addEventListener("click", () => { currentLabelFile = ""; currentLabelFileName = ""; currentLabelPreview = ""; document.getElementById("f-labelFile").value = ""; renderLabelFileInfo(); });
+document.getElementById("f-assetGroup").addEventListener("change", updateFormForGroup);
 document.getElementById("formSaveBtn").addEventListener("click", saveForm);
 document.getElementById("assetForm").addEventListener("submit", (e) => { e.preventDefault(); saveForm(); });
 
