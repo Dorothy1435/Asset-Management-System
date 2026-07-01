@@ -46,12 +46,35 @@ const GROUP_TO_ROUTE = { [GROUP_2024]: "2025", [GROUP_ELEC]: "elec" };
 const DEPTS = ["기획사무국", "지역혁신국", "교육혁신국", "산업혁신국", "현장캠퍼스"];
 
 let sortState = { key: null, dir: 1 };
-let currentPhoto = "";
+let currentPhotos = [];   // 물품 사진 여러 장 (base64 배열). imageUrl은 첫 장, imageUrls는 전체.
 let currentLabelFile = "";
 let currentLabelFileName = "";
 let currentLabelPreview = "";  // PDF 라벨의 1페이지 미리보기 이미지(base64)
-if (window.pdfjsLib) {
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+// ===== 무거운 라이브러리는 필요할 때만 로드 (첫 화면 속도 개선) =====
+const _scriptCache = {};
+function loadScript(url) {
+  if (_scriptCache[url]) return _scriptCache[url];
+  _scriptCache[url] = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = url; s.async = true;
+    s.onload = resolve;
+    s.onerror = () => { delete _scriptCache[url]; reject(new Error("스크립트 로드 실패: " + url)); };
+    document.head.appendChild(s);
+  });
+  return _scriptCache[url];
+}
+async function ensureXlsx() {
+  if (!window.XLSX) await loadScript("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js");
+}
+async function ensurePdfjs() {
+  if (!window.pdfjsLib) {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js");
+    if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+}
+async function ensureTesseract() {
+  if (!window.Tesseract) await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js");
 }
 let currentUser = null;
 let myProfile = null;
@@ -126,6 +149,7 @@ function labelCell(a) {
 }
 // PDF 데이터 URL의 1페이지를 캔버스에 렌더링해 JPEG 미리보기(base64)로 반환
 async function renderPdfFirstPage(dataUrl) {
+  await ensurePdfjs();
   if (!window.pdfjsLib) throw new Error("PDF 라이브러리 미로드");
   const base64 = (dataUrl.split(",")[1]) || "";
   const raw = atob(base64);
@@ -154,8 +178,8 @@ async function renderPdfFirstPage(dataUrl) {
 }
 
 // ===== 스냅샷 =====
-const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "regDate", "assetGroup", "rentDate", "returnDate"];
-const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "assetGroup", "rentDate", "returnDate"];
+const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "imageUrls", "regDate", "assetGroup", "rentDate", "returnDate"];
+const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "imageUrls", "assetGroup", "rentDate", "returnDate"];
 function snapshotOf(a) {
   if (!a) return null;
   const o = {};
@@ -355,6 +379,9 @@ async function applySession(session) {
     isAdmin = false;
     isSuperAdmin = false;
   }
+  // 로그인 전에는 시작 화면만, 로그인 후에는 자산관리 시스템을 보여준다.
+  document.body.classList.toggle("authed", !!currentUser);
+  if (currentUser) ALL_MODALS.forEach(hide); // 로그인 성공 시 열려있던 로그인 모달 등 닫기
 }
 
 function idToEmail(input, forceDomain) {
@@ -372,8 +399,19 @@ function openAuth(mode) {
   document.getElementById("authPw").value = "";
   document.getElementById("authName").value = "";
   document.getElementById("authAffil").value = "";
+  resetConsent();
   applyAuthMode();
   show("authOverlay");
+}
+// 회원가입 동의 체크박스 초기화/동기화
+function resetConsent() {
+  ["agreeAll", "agreePrivacy", "agreePledge"].forEach((id) => { const el = document.getElementById(id); if (el) el.checked = false; });
+}
+function consentAllChecked() {
+  return document.querySelectorAll("#consentBox .agree-item:checked").length === document.querySelectorAll("#consentBox .agree-item").length;
+}
+function syncConsentAll() {
+  document.getElementById("agreeAll").checked = consentAllChecked();
 }
 function applyAuthMode() {
   const isSignup = authMode === "signup";
@@ -397,6 +435,7 @@ async function authSubmit() {
   btn.disabled = true;
   try {
     if (authMode === "signup") {
+      if (!consentAllChecked()) { errEl.textContent = "회원가입을 위해 필수 동의 항목에 모두 체크해주세요."; errEl.hidden = false; btn.disabled = false; return; }
       const email = idToEmail(idVal, true);
       const name = document.getElementById("authName").value.trim();
       const affiliation = document.getElementById("authAffil").value.trim();
@@ -708,8 +747,9 @@ function openDetail(id) {
   const a = findAsset(id);
   if (!a) return;
   detailCurrentId = id;
-  const photo = a.imageUrl
-    ? `<div class="detail-photo"><img src="${a.imageUrl}" alt="물품 사진" /></div>`
+  const pics = photosOf(a);
+  const photo = pics.length
+    ? `<div class="detail-photos">${pics.map((src, i) => `<div class="detail-photo"><img src="${src}" alt="물품 사진 ${i + 1}" /></div>`).join("")}</div>`
     : `<div class="detail-photo no-photo">등록된 사진 없음</div>`;
   const labelImgSrc = isImageData(a.labelFile) ? a.labelFile : (a.labelPreview || "");
   const labelPhoto = labelImgSrc
@@ -820,8 +860,9 @@ function openForm(id) {
   const form = document.getElementById("assetForm");
   form.reset();
   document.getElementById("formError").hidden = true;
-  currentPhoto = "";
+  currentPhotos = [];
   currentLabelFile = ""; currentLabelFileName = ""; currentLabelPreview = "";
+  updateOcrBtn();
   document.querySelectorAll(".request-only").forEach((el) => (el.style.display = isAdmin ? "none" : ""));
 
   if (id) {
@@ -831,7 +872,7 @@ function openForm(id) {
     document.getElementById("formSaveBtn").textContent = isAdmin ? "저장" : "수정 요청";
     fillForm(a);
     document.getElementById("f-id").value = a.id;
-    currentPhoto = a.imageUrl || "";
+    currentPhotos = photosOf(a);
     currentLabelFile = a.labelFile || ""; currentLabelFileName = a.labelFileName || ""; currentLabelPreview = a.labelPreview || "";
   } else {
     document.getElementById("formTitle").textContent = isAdmin ? "자산 등록" : "자산 등록 요청";
@@ -885,11 +926,23 @@ function setDeptSelect(value) {
   sel.innerHTML = deptOptionsHtml(value);
   sel.value = value || "";
 }
+// 자산의 사진들을 배열로 반환 (신형 imageUrls 우선, 없으면 구형 imageUrl 1장)
+function photosOf(a) {
+  if (Array.isArray(a.imageUrls) && a.imageUrls.length) return a.imageUrls.filter(Boolean);
+  return a.imageUrl ? [a.imageUrl] : [];
+}
 function renderPhotoPreview() {
   const box = document.getElementById("photoPreview");
   const removeBtn = document.getElementById("removePhotoBtn");
-  if (currentPhoto) { box.innerHTML = `<img src="${currentPhoto}" alt="미리보기" />`; removeBtn.hidden = false; }
-  else { box.innerHTML = `<span class="photo-placeholder">사진 없음</span>`; removeBtn.hidden = true; }
+  if (currentPhotos.length) {
+    box.innerHTML = currentPhotos.map((src, i) =>
+      `<div class="photo-thumb"><img src="${src}" alt="미리보기 ${i + 1}" /><button type="button" class="photo-thumb-del" data-photo-idx="${i}" title="이 사진 제거">✕</button></div>`
+    ).join("");
+    removeBtn.hidden = false;
+  } else {
+    box.innerHTML = `<span class="photo-placeholder">사진 없음</span>`;
+    removeBtn.hidden = true;
+  }
 }
 function renderLabelFileInfo() {
   const box = document.getElementById("labelFileInfo");
@@ -902,6 +955,14 @@ function renderLabelFileInfo() {
     box.innerHTML = `<span class="photo-placeholder">파일 없음</span>`;
     removeBtn.hidden = true;
   }
+  updateOcrBtn();
+}
+// 라벨이 이미지일 때만 OCR 자동채우기 버튼 노출
+function updateOcrBtn() {
+  const btn = document.getElementById("ocrBtn");
+  if (!btn) return;
+  btn.hidden = !isImageData(currentLabelFile);
+  if (btn.hidden) { const st = document.getElementById("ocrStatus"); if (st) st.hidden = true; }
 }
 function handleLabelFileUpload(file) {
   if (!file) return;
@@ -959,33 +1020,122 @@ function handleLabelFileUpload(file) {
     reader.readAsDataURL(file);
   }
 }
-function handlePhotoUpload(file) {
-  if (!file) return;
-  if (!file.type.startsWith("image/")) {
-    showFormError("이미지 파일만 업로드할 수 있습니다.");
-    document.getElementById("f-image").value = "";
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = new Image();
-    img.onload = () => {
-      const MAX = 800;
-      let { width, height } = img;
-      if (width > MAX || height > MAX) { const r = Math.min(MAX / width, MAX / height); width = Math.round(width * r); height = Math.round(height * r); }
-      const canvas = document.createElement("canvas");
-      canvas.width = width; canvas.height = height;
-      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-      currentPhoto = canvas.toDataURL("image/jpeg", 0.7);
-      renderPhotoPreview();
+// 이미지 1장을 압축해 base64로 변환 (Promise)
+function compressImage(file, max, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > max || height > max) { const r = Math.min(max / width, max / height); width = Math.round(width * r); height = Math.round(height * r); }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
     };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function handlePhotoUpload(files) {
+  const list = Array.from(files || []).filter(Boolean);
+  if (!list.length) return;
+  if (list.some((f) => !f.type.startsWith("image/"))) {
+    showFormError("이미지 파일만 업로드할 수 있습니다.");
+  }
+  const imgs = list.filter((f) => f.type.startsWith("image/"));
+  for (const f of imgs) {
+    try {
+      const data = await compressImage(f, 800, 0.7);
+      currentPhotos.push(data);
+      renderPhotoPreview();
+    } catch { /* 한 장 실패해도 나머지는 계속 */ }
+  }
+  document.getElementById("f-image").value = "";
 }
 function showFormError(msg) {
   const el = document.getElementById("formError");
   el.textContent = msg; el.hidden = false;
+}
+
+// ===== 라벨 사진 OCR 자동 채우기 (Tesseract.js, 한글+영문) =====
+// 라벨의 '항목  값' 구조를 인식해 등록 폼을 자동으로 채운다.
+const OCR_MAP = [
+  { keys: ["품명"], field: "assetName" },
+  { keys: ["규격"], field: "spec" },
+  { keys: ["모델명", "모델"], field: "model" },
+  { keys: ["비치호실", "비치", "보관위치"], field: "location" },
+  { keys: ["자산코드", "자산번호"], field: "assetNumber" },
+  { keys: ["금액", "취득금액", "구입금액"], field: "acquireCost", numeric: true },
+  { keys: ["제작회사", "제조사", "제작사"], field: "maker" },
+  { keys: ["비고"], field: "note" },
+];
+const OCR_FIELD_NAMES = { assetName: "품명", spec: "규격", model: "모델명", location: "위치", assetNumber: "자산코드", acquireCost: "금액", maker: "제작회사", note: "비고" };
+function setOcrStatus(msg, kind) {
+  const st = document.getElementById("ocrStatus");
+  if (!st) return;
+  st.hidden = false;
+  st.textContent = msg;
+  st.className = "ocr-status" + (kind ? " ocr-" + kind : "");
+}
+async function runLabelOcr() {
+  if (!isImageData(currentLabelFile)) { setOcrStatus("라벨을 이미지(사진)로 올려야 자동 인식할 수 있습니다.", "err"); return; }
+  const btn = document.getElementById("ocrBtn");
+  btn.disabled = true;
+  setOcrStatus("인식 모듈을 준비하는 중입니다…", "load");
+  try {
+    await ensureTesseract();
+    if (!window.Tesseract) throw new Error("Tesseract 미로드");
+    setOcrStatus("라벨을 인식하는 중입니다… 처음 실행은 인식 데이터를 내려받아 30초~1분 걸릴 수 있어요.", "load");
+    const { data } = await Tesseract.recognize(currentLabelFile, "kor+eng", {
+      logger: (m) => { if (m.status === "recognizing text") setOcrStatus(`라벨 인식 중… ${Math.round((m.progress || 0) * 100)}%`, "load"); },
+    });
+    const filled = fillFromOcr(data.text || "");
+    if (filled.length) setOcrStatus(`✔ 자동 인식 완료: ${filled.join(", ")} 을(를) 채웠습니다. 내용을 확인·수정해주세요.`, "ok");
+    else setOcrStatus("인식된 항목을 찾지 못했습니다. 라벨이 반듯하게(수평) 나오도록 다시 촬영해보세요.", "err");
+  } catch (e) {
+    console.error("OCR 실패:", e);
+    setOcrStatus("자동 인식에 실패했습니다. 잠시 후 다시 시도해주세요.", "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+// OCR 텍스트에서 '항목 값'을 뽑아 폼에 채운다. 채운 항목명 배열 반환.
+function fillFromOcr(text) {
+  const lines = text.split(/\n+/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const filled = [];
+  const applied = new Set();
+  const stripValue = (s) => s.replace(/^[:\-·.\s]+/, "").trim();
+  const setField = (m, raw) => {
+    let v = stripValue(raw);
+    if (!v || applied.has(m.field)) return;
+    if (m.numeric) { v = v.replace(/[^0-9]/g, ""); if (!v) return; }
+    const el = document.getElementById("f-" + m.field);
+    if (!el) return;
+    el.value = v;
+    applied.add(m.field);
+    filled.push(OCR_FIELD_NAMES[m.field] || m.field);
+  };
+  lines.forEach((line, i) => {
+    const lNoSpace = line.replace(/\s/g, "");
+    for (const m of OCR_MAP) {
+      if (applied.has(m.field)) continue;
+      for (const key of m.keys) {
+        const kNoSpace = key.replace(/\s/g, "");
+        if (lNoSpace.indexOf(kNoSpace) === 0) {
+          const after = lNoSpace.slice(kNoSpace.length);
+          if (stripValue(after)) setField(m, after);
+          else if (lines[i + 1]) setField(m, lines[i + 1]);
+          break;
+        }
+      }
+    }
+  });
+  return filled;
 }
 
 async function saveForm() {
@@ -1010,7 +1160,7 @@ async function saveForm() {
     labelSticker: get("labelSticker"), labelFile: currentLabelFile || "", labelFileName: currentLabelFile ? currentLabelFileName : "", labelPreview: currentLabelFile ? (currentLabelPreview || "") : "",
     status: get("status") || (isElec ? "보관중" : "취득"), dept: get("dept"),
     model: get("model"), spec: get("spec"), maker: get("maker"),
-    acquireCost: Number(get("acquireCost")) || 0, note: get("note"), imageUrl: currentPhoto || "",
+    acquireCost: Number(get("acquireCost")) || 0, note: get("note"), imageUrl: currentPhotos[0] || "", imageUrls: currentPhotos.slice(),
     assetGroup: group, rentDate: get("rentDate"), returnDate: get("returnDate"),
   };
 
@@ -1309,7 +1459,8 @@ function editMyRequest(reqId) {
     const form = document.getElementById("assetForm");
     form.reset();
     document.getElementById("formError").hidden = true;
-    currentPhoto = (r.payload && r.payload.imageUrl) || "";
+    currentPhotos = photosOf(r.payload || {});
+    updateOcrBtn();
     currentLabelFile = (r.payload && r.payload.labelFile) || "";
     currentLabelPreview = (r.payload && r.payload.labelPreview) || "";
     currentLabelFileName = (r.payload && r.payload.labelFileName) || "";
@@ -1703,8 +1854,9 @@ async function deletePost(id) {
 }
 
 // ===== 엑셀 내보내기 =====
-function exportExcel() {
+async function exportExcel() {
   if (filtered.length === 0) { alert("내보낼 자산이 없습니다."); return; }
+  try { await ensureXlsx(); } catch { alert("엑셀 모듈을 불러오지 못했습니다. 인터넷 연결을 확인해주세요."); return; }
   const rows = filtered.map((a) => ({
     "메뉴": groupOf(a),
     "자산명": a.assetName || "", "자산번호": a.assetNumber || "", "라벨스티커": a.labelSticker || "", "라벨파일": a.labelFile ? (a.labelFileName || "있음") : "",
@@ -1776,16 +1928,41 @@ document.getElementById("inspectSubmit").addEventListener("click", submitInspect
 document.getElementById("inspectForm").addEventListener("submit", (e) => { e.preventDefault(); submitInspect(); });
 document.getElementById("lightbox").addEventListener("click", closeLightbox);
 
-document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files[0]));
-document.getElementById("removePhotoBtn").addEventListener("click", () => { currentPhoto = ""; document.getElementById("f-image").value = ""; renderPhotoPreview(); });
+document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files));
+document.getElementById("removePhotoBtn").addEventListener("click", () => { currentPhotos = []; document.getElementById("f-image").value = ""; renderPhotoPreview(); });
+document.getElementById("photoPreview").addEventListener("click", (e) => {
+  const del = e.target.closest("button[data-photo-idx]");
+  if (del) { currentPhotos.splice(Number(del.dataset.photoIdx), 1); renderPhotoPreview(); return; }
+  const img = e.target.closest("img");
+  if (img) openLightbox(img.src);
+});
 document.getElementById("f-labelFile").addEventListener("change", (e) => handleLabelFileUpload(e.target.files[0]));
-document.getElementById("removeLabelFileBtn").addEventListener("click", () => { currentLabelFile = ""; currentLabelFileName = ""; currentLabelPreview = ""; document.getElementById("f-labelFile").value = ""; renderLabelFileInfo(); });
+document.getElementById("removeLabelFileBtn").addEventListener("click", () => { currentLabelFile = ""; currentLabelFileName = ""; currentLabelPreview = ""; document.getElementById("f-labelFile").value = ""; renderLabelFileInfo(); updateOcrBtn(); });
+document.getElementById("ocrBtn").addEventListener("click", runLabelOcr);
 document.getElementById("f-assetGroup").addEventListener("change", updateFormForGroup);
 document.getElementById("formSaveBtn").addEventListener("click", saveForm);
 document.getElementById("assetForm").addEventListener("submit", (e) => { e.preventDefault(); saveForm(); });
 
 document.getElementById("delReqSubmit").addEventListener("click", submitDeleteRequest);
 document.getElementById("delReqForm").addEventListener("submit", (e) => { e.preventDefault(); submitDeleteRequest(); });
+
+// 시작 화면 (로그인 전)
+document.getElementById("landingLoginBtn").addEventListener("click", () => openAuth("login"));
+document.getElementById("landingSignupBtn").addEventListener("click", () => openAuth("signup"));
+
+// 회원가입 동의 체크박스
+const CONSENT_TEXT = {
+  privacy: "[개인정보 수집·이용 동의]\n\n1. 수집 항목: 아이디(이메일), 이름, 소속, 비밀번호\n2. 수집 목적: 자산관리 시스템 회원 식별 및 서비스 제공, 등록·검수 이력 관리\n3. 보유 기간: 회원 탈퇴 또는 소속 만료 시까지\n4. 동의를 거부할 수 있으나, 거부 시 회원가입 및 서비스 이용이 제한됩니다.",
+  pledge: "[자산관리 성실 서약]\n\n1. 본인은 등록·수정·검수하는 자산 정보를 사실에 근거하여 정확하게 입력합니다.\n2. 담당 자산을 성실히 관리하고, 이동·불용·분실 발생 시 지체 없이 반영합니다.\n3. 시스템 계정과 권한을 타인에게 양도하지 않으며 보안을 준수합니다.",
+};
+document.getElementById("agreeAll").addEventListener("change", (e) => {
+  document.querySelectorAll("#consentBox .agree-item").forEach((c) => (c.checked = e.target.checked));
+});
+document.querySelectorAll("#consentBox .agree-item").forEach((c) => c.addEventListener("change", syncConsentAll));
+document.getElementById("consentBox").addEventListener("click", (e) => {
+  const link = e.target.closest(".consent-link");
+  if (link) { e.preventDefault(); alert(CONSENT_TEXT[link.dataset.consent] || ""); }
+});
 
 // 인증
 document.getElementById("loginBtn").addEventListener("click", () => openAuth("login"));
