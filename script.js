@@ -1263,11 +1263,24 @@ function fillFromOcr(text) {
     else if (cur.f.compact) v = v.replace(/\s+/g, "");
     setIfEmpty(cur.f.field, v);
   }
-  // 항목명을 못 읽어도 값 패턴으로 보완 (자산코드 20자리 / 금액 천단위)
+  // 항목명을 못 읽어도 값 패턴으로 보완 (라벨 양식이 고정이므로 값 형태로 추정)
+  const lines = t.split(/\n+/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const stripLabel = (s) => s.replace(/^(부서명|품\s*명|규\s*격|모델명|비치호실|재\s*원|구입일|금\s*액|자산코드|비\s*고)\s*[:·|-]*\s*/, "").trim();
+  // 자산코드: 20자리 숫자
   const code = (t.replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0];
   if (code) setIfEmpty("assetNumber", code, "자산코드");
+  // 금액: 천단위 구분 숫자 중 가장 큰 값
   const money = (t.match(/\d{1,3}(?:[.,]\s?\d{3})+/g) || []).map((x) => Number(x.replace(/[^0-9]/g, ""))).filter((n) => n >= 1000);
   if (money.length) setIfEmpty("acquireCost", String(Math.max(...money)), "금액");
+  // 자산명(품명): '제품명(제조사 모델 …)' 형태 줄 — 이 라벨은 품명==모델명
+  const prod = lines.map(stripLabel).find((l) => /[가-힣A-Za-z].*\([^)]{5,}\)/.test(l) && /[A-Za-z0-9]{3,}/.test(l));
+  if (prod) setIfEmpty("assetName", prod, "자산명");
+  // 보관위치(비치호실): 주소/호실 패턴 (○○대로 … ○층 ○호)
+  const locLine = lines.find((l) => /(\d+\s*층|\d+\s*호|대로|번길|로\s?\d)/.test(l) && /[가-힣]/.test(l));
+  if (locLine) {
+    const loc = stripLabel(locLine).replace(/\s*재\s*원.*$/, "").replace(/\s*지\s*자\s*체.*$/, "").trim();
+    if (loc) setIfEmpty("location", loc, "위치");
+  }
   return filled;
 }
 
