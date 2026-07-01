@@ -327,6 +327,7 @@ async function loadData() {
   applyHashRoute();      // 해시에 맞는 첫 페이지 렌더
   sbSubscribe();
   window.addEventListener("hashchange", applyHashRoute);
+  migrateOverlayMediaOnce(); // 관리자면 기존 base64 이미지를 Storage로 이동(1회)
 }
 
 function sbSubscribe() {
@@ -364,6 +365,7 @@ async function initAuth() {
     if (!authInited) return;
     await reloadAll();
     rerender();
+    migrateOverlayMediaOnce();
   });
 }
 async function applySession(session) {
@@ -1351,7 +1353,67 @@ async function logHistory(entry) {
     });
   } catch (e) { console.error("이력 기록 실패:", e); }
 }
+// ===== 이미지 저장소(Storage) : base64를 파일로 올리고 URL만 DB에 저장 (속도 개선) =====
+const MEDIA_BUCKET = "asset-media";
+// data:URL(base64)이면 Storage에 업로드하고 공개 URL 반환. 이미 URL이거나 비어있으면 그대로.
+async function uploadMedia(dataUrl, folder) {
+  if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return dataUrl || "";
+  const m = /^data:([^;]+);base64,([\s\S]*)$/.exec(dataUrl);
+  if (!m) return dataUrl;
+  const mime = m[1];
+  const bin = atob(m[2]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ext = mime.includes("pdf") ? "pdf" : (mime.split("/")[1] || "jpg").split("+")[0];
+  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+  const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, new Blob([bytes], { type: mime }), { contentType: mime, upsert: false });
+  if (error) throw error;
+  return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+// 자산 필드의 이미지들을 모두 Storage URL로 치환. 업로드 실패 시 원본(base64) 유지.
+async function withUploadedMedia(fields) {
+  try {
+    const out = { ...fields };
+    if (out.imageUrl) out.imageUrl = await uploadMedia(out.imageUrl, "photos");
+    if (Array.isArray(out.imageUrls)) out.imageUrls = await Promise.all(out.imageUrls.map((u) => uploadMedia(u, "photos")));
+    if (out.labelFile) out.labelFile = await uploadMedia(out.labelFile, "labels");
+    if (out.labelPreview) out.labelPreview = await uploadMedia(out.labelPreview, "labels");
+    if (Array.isArray(out.imageUrls) && out.imageUrls.length) out.imageUrl = out.imageUrls[0];
+    return out;
+  } catch (e) {
+    console.warn("이미지 업로드 실패 — base64로 저장합니다. (Storage 설정 SQL 실행 여부 확인):", e?.message || e);
+    return fields;
+  }
+}
+// 기존 base64 오버레이를 Storage로 한 번 옮긴다(관리자·세션당 1회). 실패해도 조용히 넘어감.
+let _mediaMigrated = false;
+function hasInlineMedia(d) {
+  if (!d) return false;
+  const is64 = (v) => typeof v === "string" && v.startsWith("data:");
+  return is64(d.imageUrl) || is64(d.labelFile) || is64(d.labelPreview) || (Array.isArray(d.imageUrls) && d.imageUrls.some(is64));
+}
+async function migrateOverlayMediaOnce() {
+  if (_mediaMigrated || !isAdmin || !sb) return;
+  _mediaMigrated = true;
+  const heavy = overlay.filter((o) => hasInlineMedia(o.data));
+  if (!heavy.length) return;
+  console.log(`[속도개선] base64 이미지 ${heavy.length}건을 Storage로 이동합니다…`);
+  let ok = 0;
+  for (const o of heavy) {
+    try {
+      const migrated = await withUploadedMedia(o.data);
+      if (hasInlineMedia(migrated)) continue; // 업로드 실패(변화 없음)면 건너뜀
+      const { error } = await sb.from("assets").update({ data: migrated, updated_at: new Date().toISOString() }).eq("id", o.id);
+      if (error) throw error;
+      ok++;
+    } catch (e) { console.warn("이동 실패:", o.id, e?.message || e); }
+  }
+  if (ok) { await sbLoadOverlay(); buildAssets(); rerender(); console.log(`[속도개선] ${ok}건 이동 완료.`); }
+  else _mediaMigrated = false; // 하나도 못 옮겼으면(설정 전) 다음 기회에 재시도
+}
+
 async function applyCreate(fields, meta = {}) {
+  fields = await withUploadedMedia(fields);
   const id = "u" + Date.now() + Math.floor(Math.random() * 1000);
   const data = { ...cleanFields(fields), regDate: todayStr() };
   const { error } = await sb.from("assets").upsert({ id, kind: "added", data, updated_at: new Date().toISOString() });
@@ -1359,6 +1421,7 @@ async function applyCreate(fields, meta = {}) {
   await logHistory({ asset_id: id, asset_name: data.assetName, action: "create", before: null, after: snapshotOf(data), requester: meta.requester, note: meta.note });
 }
 async function applyUpdate(id, fields, meta = {}) {
+  fields = await withUploadedMedia(fields);
   const current = findAsset(id);
   const before = snapshotOf(current);
   const clean = cleanFields(fields);

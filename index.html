@@ -10,25 +10,18 @@
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
   <div id="landing">
     <div class="landing-bg"></div>
-    <div class="landing-inner">
-      <div class="landing-hero">
-        <div class="landing-logo">
-          <img src="logo.png" alt="김해 올-시티 캠퍼스" id="brandLogo"
-               onerror="this.style.display='none';var s=document.getElementById('brandLogoFallback');if(s)s.style.display='block';" />
-          <div id="brandLogoFallback" class="brand-fallback" style="display:none;">GIMHAE<br><span>ALL-CITY CAMPUS</span></div>
-        </div>
-        <h1 class="landing-title">글로컬대학사업본부<br />자산관리 시스템</h1>
-        <p class="landing-sub">김해 올-시티 캠퍼스 · 자산 등록 · 검수 통합 관리 플랫폼</p>
+    <div class="landing-box">
+      <div class="landing-logo">
+        <img src="logo.png" alt="로고" id="brandLogo"
+             onerror="this.style.display='none';var s=document.getElementById('brandLogoFallback');if(s)s.style.display='flex';" />
+        <div id="brandLogoFallback" class="brand-fallback" style="display:none;">🏢</div>
       </div>
-      <div class="landing-card">
-        <h2 class="landing-card-title">환영합니다 👋</h2>
-        <p class="landing-note">로그인 후 자산관리 시스템을 이용하실 수 있습니다.</p>
-        <div class="landing-actions">
-          <button class="btn btn-primary btn-lg" id="landingLoginBtn">로그인</button>
-          <button class="btn btn-outline btn-lg" id="landingSignupBtn">회원가입</button>
-        </div>
-        <p class="landing-foot">© 글로컬대학사업본부 · 김해 올-시티 캠퍼스</p>
+      <h1 class="landing-title">글로컬대학사업본부<br />자산관리 시스템</h1>
+      <div class="landing-actions">
+        <button class="btn btn-primary btn-lg" id="landingLoginBtn">로그인</button>
+        <button class="btn btn-outline btn-lg" id="landingSignupBtn">회원가입</button>
       </div>
+      <p class="landing-foot">© 글로컬대학사업본부</p>
     </div>
   </div>
 
@@ -410,7 +403,7 @@
 
   <!-- 회원 관리 모달 (관리자) -->
   <div class="modal-overlay" id="membersOverlay" hidden>
-    <div class="modal modal-wide" role="dialog" aria-modal="true">
+    <div class="modal modal-xwide" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h2>회원 관리</h2>
         <button class="modal-close" data-close>✕</button>

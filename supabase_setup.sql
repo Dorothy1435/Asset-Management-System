@@ -310,3 +310,31 @@ create policy "comments_delete_admin" on public.comments for delete to authentic
 -- V) 실시간
 alter publication supabase_realtime add table public.posts;
 alter publication supabase_realtime add table public.comments;
+
+
+-- =====================================================================
+-- [속도 개선] 이미지/라벨 파일을 Storage에 저장 (base64 인라인 → 파일 URL)
+--  · 목록을 열 때 5MB짜리 base64를 매번 받지 않게 되어 로딩이 크게 빨라집니다.
+--  · 읽기는 누구나(공개), 업로드/삭제는 관리자만. (파일은 캐시되어 재방문 시 즉시 표시)
+--  · 이 블록 실행 후 관리자로 접속하면 기존 이미지가 자동으로 Storage로 이동합니다.
+-- 이 블록을 SQL Editor에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+
+-- W) 공개 버킷 생성
+insert into storage.buckets (id, name, public)
+values ('asset-media', 'asset-media', true)
+on conflict (id) do update set public = true;
+
+-- X) Storage 정책: 읽기 공개 / 쓰기·수정·삭제는 관리자
+drop policy if exists "media_read" on storage.objects;
+drop policy if exists "media_insert_admin" on storage.objects;
+drop policy if exists "media_update_admin" on storage.objects;
+drop policy if exists "media_delete_admin" on storage.objects;
+create policy "media_read" on storage.objects for select
+  using (bucket_id = 'asset-media');
+create policy "media_insert_admin" on storage.objects for insert to authenticated
+  with check (bucket_id = 'asset-media' and public.is_admin());
+create policy "media_update_admin" on storage.objects for update to authenticated
+  using (bucket_id = 'asset-media' and public.is_admin()) with check (bucket_id = 'asset-media' and public.is_admin());
+create policy "media_delete_admin" on storage.objects for delete to authenticated
+  using (bucket_id = 'asset-media' and public.is_admin());
