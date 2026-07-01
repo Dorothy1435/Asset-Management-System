@@ -1037,8 +1037,15 @@ async function saveForm() {
   hide("formOverlay");
   const wasReqEdit = !!editingRequestId;
   editingRequestId = null;
+  const keepPage = currentPage; // 수정 후에도 보고 있던 페이지 유지 (1페이지로 튀지 않도록)
   await reloadAll();
   rerender();
+  // 기존 자산을 수정한 경우, rerender가 초기화한 페이지를 원래대로 되돌린다.
+  if (id && currentPageName === "assets") {
+    const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+    currentPage = Math.min(keepPage, totalPages);
+    render();
+  }
   if (wasReqEdit) { renderMyRequests(); }
   else if (!isAdmin) alert("요청이 접수되었습니다. 관리자 승인 후 반영됩니다.");
 }

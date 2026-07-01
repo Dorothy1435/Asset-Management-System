@@ -403,6 +403,18 @@ body {
   cursor: not-allowed;
 }
 
+/* 폼 안에서 Enter로 제출되게 하는 숨김 버튼 */
+.hidden-submit {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
 /* 모달 */
 .modal-overlay[hidden] {
   display: none;

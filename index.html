@@ -237,6 +237,7 @@
           </div>
         </div>
         <p class="form-error" id="formError" hidden></p>
+        <button type="submit" class="hidden-submit" tabindex="-1" aria-hidden="true"></button>
       </form>
       <div class="modal-footer">
         <button class="btn btn-primary" id="formSaveBtn">등록</button>
@@ -262,6 +263,7 @@
           <label>삭제 사유</label>
           <input type="text" id="dr-note" placeholder="예: 파손, 불용 처리 등 (선택)" />
         </div>
+        <button type="submit" class="hidden-submit" tabindex="-1" aria-hidden="true"></button>
       </form>
       <div class="modal-footer">
         <button class="btn btn-danger" id="delReqSubmit">삭제 요청</button>
@@ -404,6 +406,7 @@
         <label class="insp-check"><input type="checkbox" id="insp-checked" checked /> 검수 완료를 확인합니다 ✔</label>
         <p class="form-error" id="inspectError" hidden></p>
         <p class="form-info insp-note" id="inspectNote">검수는 관리자 승인 후 기록에 반영됩니다.</p>
+        <button type="submit" class="hidden-submit" tabindex="-1" aria-hidden="true"></button>
       </form>
       <div class="modal-footer">
         <button class="btn btn-primary" id="inspectSubmit">검수 확인</button>
