@@ -140,11 +140,12 @@ function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
 const findAsset = (id) => assets.find((x) => String(x.id) === String(id));
 const isImageData = (f) => /^data:image\//i.test(f || "");
-// 목록 '라벨' 칸: 이미지면 썸네일(클릭 시 확대), PDF면 1페이지 미리보기 썸네일, 미리보기 없으면 다운로드 버튼
+// 목록 '라벨' 칸: 무거운 미리보기 이미지를 목록에서 바로 불러오면 느려지므로,
+// 가벼운 '라벨' 버튼만 보여주고 클릭할 때 이미지를 확대로 불러온다.
 function labelCell(a) {
   if (!a.labelFile) return "-";
-  if (isImageData(a.labelFile)) return `<img class="thumb thumb-label" src="${a.labelFile}" alt="라벨" loading="lazy" title="클릭하면 크게 보기" />`;
-  if (a.labelPreview) return `<span class="label-pdf-thumb"><img class="thumb thumb-label" src="${a.labelPreview}" alt="라벨(PDF)" loading="lazy" title="클릭하면 크게 보기 (PDF 1페이지)" /><span class="pdf-badge">PDF</span></span>`;
+  const viewable = isImageData(a.labelFile) || a.labelPreview;
+  if (viewable) return `<button class="btn-mini btn-label-view" data-id="${esc(a.id)}" title="클릭하면 라벨 보기">🏷 라벨</button>`;
   return `<button class="btn-mini btn-label" data-id="${esc(a.id)}" title="${esc(a.labelFileName || "라벨 파일")}">⬇ 라벨</button>`;
 }
 // PDF 데이터 URL의 1페이지를 캔버스에 렌더링해 JPEG 미리보기(base64)로 반환
@@ -243,10 +244,8 @@ function pendingTargetSet() {
 }
 
 async function reloadAll() {
-  await sbLoadOverlay();
-  await sbLoadMyRequests();
-  await sbLoadRequests();
-  await sbLoadHistory();
+  // 4개 쿼리를 동시에 실행 (순차 실행보다 훨씬 빠름)
+  await Promise.all([sbLoadOverlay(), sbLoadMyRequests(), sbLoadRequests(), sbLoadHistory()]);
   buildAssets();
 }
 function rerender() {
@@ -313,15 +312,17 @@ function renderNav() {
 }
 
 async function loadData() {
-  try {
-    const res = await fetch("assets.json");
-    baseAssets = await res.json();
-  } catch {
-    baseAssets = [];
-    document.getElementById("assetTbody").innerHTML =
-      `<tr><td colspan="10" style="padding:40px;text-align:center;color:#c2410c;">엑셀 데이터를 불러오지 못했습니다.</td></tr>`;
-  }
+  // assets.json 다운로드와 로그인 세션 확인을 동시에 진행 (서로 독립적)
+  const baseP = fetch("assets.json")
+    .then((r) => r.json())
+    .then((d) => { baseAssets = d; })
+    .catch(() => {
+      baseAssets = [];
+      document.getElementById("assetTbody").innerHTML =
+        `<tr><td colspan="10" style="padding:40px;text-align:center;color:#c2410c;">엑셀 데이터를 불러오지 못했습니다.</td></tr>`;
+    });
   await initAuth();
+  await baseP;
   await reloadAll();
   authInited = true;
   applyHashRoute();      // 해시에 맞는 첫 페이지 렌더
@@ -1960,7 +1961,8 @@ document.getElementById("assetTbody").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-id]");
   if (!btn) return;
   const id = btn.dataset.id;
-  if (btn.classList.contains("btn-label")) downloadLabelFile(id);
+  if (btn.classList.contains("btn-label-view")) { const a = findAsset(id); if (a) openLightbox(isImageData(a.labelFile) ? a.labelFile : a.labelPreview); }
+  else if (btn.classList.contains("btn-label")) downloadLabelFile(id);
   else if (btn.classList.contains("btn-view")) openDetail(id);
   else if (btn.classList.contains("btn-edit")) openForm(id);
   else if (btn.classList.contains("btn-del")) handleDelete(id);
