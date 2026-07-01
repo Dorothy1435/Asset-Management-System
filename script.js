@@ -1253,34 +1253,26 @@ function fillFromOcr(text) {
     el.value = value;
     filled.push(label || OCR_FIELD_NAMES[field] || field);
   };
+  // 항목명 바로 뒤(같은 칸)의 값을 형식 가정 없이 '그대로' 가져온다.
+  // 값은 항목명과 같은 줄에 오고(없으면 다음 줄), 다음 항목명 전까지로 경계를 잡는다.
   for (let i = 0; i < marks.length; i++) {
     const cur = marks[i];
-    if (!cur.f.field) continue; // 구분자 전용 항목
+    if (!cur.f.field) continue; // 구분자 전용 항목(부서명·재원·구입일)
     const next = marks[i + 1];
-    let v = t.slice(cur.end, next ? next.start : t.length);
-    v = v.replace(/^[\s:·\-|]+/, "").replace(/\s+/g, " ").trim();
+    const raw = t.slice(cur.end, next ? next.start : t.length);
+    // 라벨과 같은 줄의 값(비어 있으면 다음 줄) 한 줄만 취함
+    let v = (raw.split(/\n/).map((s) => s.replace(/^[\s:·|\-]+/, "").trim()).find(Boolean)) || "";
+    // 위치는 오른쪽 칸(재원/지자체)이 같은 줄에 붙어 오면 잘라냄
+    if (cur.f.field === "location") v = v.replace(/\s*(재\s*원|지\s*자\s*체).*$/, "").trim();
     if (cur.f.numeric) v = v.replace(/[^0-9]/g, "");
     else if (cur.f.compact) v = v.replace(/\s+/g, "");
     setIfEmpty(cur.f.field, v);
   }
-  // 항목명을 못 읽어도 값 패턴으로 보완 (라벨 양식이 고정이므로 값 형태로 추정)
-  const lines = t.split(/\n+/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
-  const stripLabel = (s) => s.replace(/^(부서명|품\s*명|규\s*격|모델명|비치호실|재\s*원|구입일|금\s*액|자산코드|비\s*고)\s*[:·|-]*\s*/, "").trim();
-  // 자산코드: 20자리 숫자
+  // 형식이 뚜렷한 항목만 값 패턴으로 보완 (자산코드 20자리 / 금액 천단위)
   const code = (t.replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0];
   if (code) setIfEmpty("assetNumber", code, "자산코드");
-  // 금액: 천단위 구분 숫자 중 가장 큰 값
   const money = (t.match(/\d{1,3}(?:[.,]\s?\d{3})+/g) || []).map((x) => Number(x.replace(/[^0-9]/g, ""))).filter((n) => n >= 1000);
   if (money.length) setIfEmpty("acquireCost", String(Math.max(...money)), "금액");
-  // 자산명(품명): '제품명(제조사 모델 …)' 형태 줄 — 이 라벨은 품명==모델명
-  const prod = lines.map(stripLabel).find((l) => /[가-힣A-Za-z].*\([^)]{5,}\)/.test(l) && /[A-Za-z0-9]{3,}/.test(l));
-  if (prod) setIfEmpty("assetName", prod, "자산명");
-  // 보관위치(비치호실): 주소/호실 패턴 (○○대로 … ○층 ○호)
-  const locLine = lines.find((l) => /(\d+\s*층|\d+\s*호|대로|번길|로\s?\d)/.test(l) && /[가-힣]/.test(l));
-  if (locLine) {
-    const loc = stripLabel(locLine).replace(/\s*재\s*원.*$/, "").replace(/\s*지\s*자\s*체.*$/, "").trim();
-    if (loc) setIfEmpty("location", loc, "위치");
-  }
   return filled;
 }
 
