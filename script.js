@@ -1274,69 +1274,23 @@ function showOcrResult() {
   parts.push("[글자 인식(OCR) 결과]\n" + (lastOcrText || "(인식된 글자 없음)"));
   alert(parts.join("\n\n──────────\n\n"));
 }
-// 인식 텍스트에서 각 '항목명' 위치를 찾아, 다음 항목명 직전까지를 값으로 채운다.
+// 인식 텍스트에서 '자산번호(20자리)'와 '취득금액(천단위 숫자)'만 채운다.
+// (품명·비치호실 등 한글 항목은 OCR 정확도 한계로 자동입력하지 않음 — 직접 입력)
 function fillFromOcr(text) {
   const t = (text || "").replace(/\r/g, "");
-  // 각 항목명의 첫 등장 위치 (항목명 글자 사이 공백 허용: 부 서 명 → 부\s*서\s*명)
-  const marks = [];
-  OCR_FIELDS.forEach((f) => {
-    const re = new RegExp(f.key.split("").join("\\s*"));
-    const m = re.exec(t);
-    if (m) marks.push({ f, start: m.index, end: m.index + m[0].length });
-  });
-  marks.sort((a, b) => a.start - b.start);
   const filled = [];
   const setIfEmpty = (field, value, label) => {
     const el = document.getElementById("f-" + field);
     if (!el || el.value.trim() || !value) return;   // 이미 값이 있으면(QR/사용자 입력) 덮어쓰지 않음
     el.value = value;
-    filled.push(label || OCR_FIELD_NAMES[field] || field);
+    filled.push(label || field);
   };
-  // 항목명 바로 뒤(같은 칸)의 값을 형식 가정 없이 '그대로' 가져온다.
-  // 값은 항목명과 같은 줄에 오고(없으면 다음 줄), 다음 항목명 전까지로 경계를 잡는다.
-  for (let i = 0; i < marks.length; i++) {
-    const cur = marks[i];
-    if (!cur.f.field) continue; // 구분자 전용 항목(부서명·재원·구입일)
-    const next = marks[i + 1];
-    const raw = t.slice(cur.end, next ? next.start : t.length);
-    // 라벨과 같은 줄의 값(비어 있으면 다음 줄) 한 줄만 취함
-    let v = (raw.split(/\n/).map((s) => s.replace(/^[\s:·|\-]+/, "").trim()).find(Boolean)) || "";
-    // 위치는 오른쪽 칸(재원/지자체)이 같은 줄에 붙어 오면 잘라냄
-    if (cur.f.field === "location") v = v.replace(/\s*(재\s*원|지\s*자\s*체).*$/, "").trim();
-    if (cur.f.numeric) v = v.replace(/[^0-9]/g, "");
-    else if (cur.f.compact) v = v.replace(/\s+/g, "");
-    setIfEmpty(cur.f.field, v);
-  }
-  // 형식이 뚜렷한 항목만 값 패턴으로 보완 (자산코드 20자리 / 금액 천단위)
+  // 자산번호: 20자리 숫자
   const code = (t.replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0];
-  if (code) setIfEmpty("assetNumber", code, "자산코드");
-  const money = (t.match(/\d{1,3}(?:[.,]\s?\d{3})+/g) || []).map((x) => Number(x.replace(/[^0-9]/g, ""))).filter((n) => n >= 1000);
-  if (money.length) setIfEmpty("acquireCost", String(Math.max(...money)), "금액");
-  // 항목명(품명)이 인식 안 돼도, 잘 읽히는 '부서명 값(…사업본부)' 다음 줄을 품명으로 사용
-  const lines = t.split(/\n/).map((l) => l.replace(/^[\s:·|\-]+/, "").trim());
-  const deptIdx = lines.findIndex((l) => /사업본부|산학협력단/.test(l) && !/품|규격|모델/.test(l));
-  if (deptIdx >= 0) {
-    const after = lines.slice(deptIdx + 1).filter(Boolean);
-    // 부서명 값 자체가 잡혔으면 그 다음 줄, 헤더(산학협력단)가 잡혔으면 부서명 다음의 다음 줄
-    const cand = /산학협력단/.test(lines[deptIdx]) ? after[1] : after[0];
-    if (cand && !/산학협력단|사업본부/.test(cand)) setIfEmpty("assetName", cand, "자산명");
-  }
-  // 비치호실(위치) 보완: 구입일(날짜) 줄 바로 앞의 한글 줄 (재원/지자체/제품명 제외)
-  const locEl = document.getElementById("f-location");
-  if (locEl && !locEl.value.trim()) {
-    const asset = (document.getElementById("f-assetName").value || "").trim();
-    const dateIdx = lines.findIndex((l) => /\d{4}\s*[-.]\s*\d{1,2}\s*[-.]\s*\d{1,2}/.test(l) || /구\s*입\s*일/.test(l));
-    if (dateIdx > 0) {
-      for (let k = dateIdx - 1; k >= 0 && k >= dateIdx - 3; k--) {
-        const cand = (lines[k] || "").replace(/\s*(재\s*원|지\s*자\s*체).*$/, "").trim();
-        if (!cand || !/[가-힣]/.test(cand)) continue;
-        if (/사업본부|산학협력단|기계기구/.test(cand)) continue;
-        if (asset && cand.includes(asset.slice(0, 6))) continue; // 품명/모델명 값과 같으면 제외
-        setIfEmpty("location", cand, "위치");
-        break;
-      }
-    }
-  }
+  if (code) setIfEmpty("assetNumber", code, "자산번호");
+  // 취득금액: 천단위 구분 숫자 중 가장 큰 값
+  const money = (t.match(/\d{1,3}(?:[.,]\s?\d{3})+/g) || []).map((x) => Number(x.replace(/[^0-9]/g, ""))).filter((n) => n >= 1000 && n < 100000000);
+  if (money.length) setIfEmpty("acquireCost", String(Math.max(...money)), "취득금액");
   return filled;
 }
 
