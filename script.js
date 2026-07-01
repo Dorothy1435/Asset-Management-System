@@ -1273,6 +1273,15 @@ function fillFromOcr(text) {
   if (code) setIfEmpty("assetNumber", code, "자산코드");
   const money = (t.match(/\d{1,3}(?:[.,]\s?\d{3})+/g) || []).map((x) => Number(x.replace(/[^0-9]/g, ""))).filter((n) => n >= 1000);
   if (money.length) setIfEmpty("acquireCost", String(Math.max(...money)), "금액");
+  // 항목명(품명)이 인식 안 돼도, 잘 읽히는 '부서명 값(…사업본부)' 다음 줄을 품명으로 사용
+  const lines = t.split(/\n/).map((l) => l.replace(/^[\s:·|\-]+/, "").trim());
+  const deptIdx = lines.findIndex((l) => /사업본부|산학협력단/.test(l) && !/품|규격|모델/.test(l));
+  if (deptIdx >= 0) {
+    const after = lines.slice(deptIdx + 1).filter(Boolean);
+    // 부서명 값 자체가 잡혔으면 그 다음 줄, 헤더(산학협력단)가 잡혔으면 부서명 다음의 다음 줄
+    const cand = /산학협력단/.test(lines[deptIdx]) ? after[1] : after[0];
+    if (cand && !/산학협력단|사업본부/.test(cand)) setIfEmpty("assetName", cand, "자산명");
+  }
   return filled;
 }
 
