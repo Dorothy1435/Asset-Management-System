@@ -76,6 +76,9 @@ async function ensurePdfjs() {
 async function ensureTesseract() {
   if (!window.Tesseract) await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js");
 }
+async function ensureJsQR() {
+  if (!window.jsQR) await loadScript("https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js");
+}
 let currentUser = null;
 let myProfile = null;
 let isAdmin = false;
@@ -324,12 +327,17 @@ async function loadData() {
     });
   await initAuth();
   await baseP;
-  await reloadAll();
+  await sbLoadOverlay();  // 목록 표시에 꼭 필요한 최소 데이터만 먼저
+  buildAssets();
   authInited = true;
-  applyHashRoute();      // 해시에 맞는 첫 페이지 렌더
+  applyHashRoute();      // 목록을 최대한 빨리 렌더
   sbSubscribe();
   window.addEventListener("hashchange", applyHashRoute);
-  migrateOverlayMediaOnce(); // 관리자면 기존 base64 이미지를 Storage로 이동(1회)
+  // 배지·모달용 부가 데이터(내 신청/승인대기/이력/회원)는 백그라운드로 로드 — 목록 표시를 막지 않음
+  Promise.all([sbLoadMyRequests(), sbLoadRequests(), sbLoadHistory(), sbLoadMembers()]).then(() => {
+    if (currentPageName === "assets") updateUI();
+    migrateOverlayMediaOnce(); // 관리자면 기존 base64 이미지를 Storage로 이동(1회)
+  });
 }
 
 function sbSubscribe() {
@@ -973,7 +981,10 @@ function updateOcrBtn() {
   const btn = document.getElementById("ocrBtn");
   if (!btn) return;
   btn.hidden = !isImageData(currentLabelFile);
-  if (btn.hidden) { const st = document.getElementById("ocrStatus"); if (st) st.hidden = true; }
+  if (btn.hidden) {
+    const st = document.getElementById("ocrStatus"); if (st) st.hidden = true;
+    const rb = document.getElementById("ocrResultBtn"); if (rb) rb.hidden = true;
+  }
 }
 function handleLabelFileUpload(file) {
   if (!file) return;
@@ -1126,39 +1137,86 @@ function preprocessOcrImage(dataUrl) {
     img.src = dataUrl;
   });
 }
+// QR코드를 이미지에서 읽어 문자열 반환 (없으면 null)
+async function decodeLabelQR(dataUrl) {
+  try { await ensureJsQR(); } catch { return null; }
+  if (!window.jsQR) return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      // 해상도가 너무 낮으면 QR이 안 읽히므로 최소 1600px는 유지
+      const longest = Math.max(img.width, img.height);
+      const s = longest > 2600 ? 2600 / longest : (longest < 1600 ? 1600 / longest : 1);
+      const w = Math.round(img.width * s), h = Math.round(img.height * s);
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0, w, h);
+      let out = null;
+      try { const d = ctx.getImageData(0, 0, w, h); const r = window.jsQR(d.data, w, h, { inversionAttempts: "attemptBoth" }); out = r ? r.data : null; } catch {}
+      resolve(out);
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+// QR 문자열에서 채울 수 있는 값(주로 자산코드) 추출
+function fillFromQR(qr) {
+  if (!qr) return [];
+  const filled = [];
+  const code = (String(qr).match(/\d{16,24}/) || [])[0];
+  if (code) {
+    const el = document.getElementById("f-assetNumber");
+    if (el) { el.value = code; filled.push("자산코드"); }
+  }
+  return filled;
+}
+let lastOcrText = "";   // 마지막 인식 원문 (진단용 '결과 보기')
+let lastQrText = "";
 async function runLabelOcr() {
   if (!isImageData(currentLabelFile)) { setOcrStatus("라벨을 이미지(사진)로 올려야 자동 인식할 수 있습니다.", "err"); return; }
   const btn = document.getElementById("ocrBtn");
   btn.disabled = true;
-  setOcrStatus("인식 모듈을 준비하는 중입니다…", "load");
+  const filled = [];
+  lastOcrText = ""; lastQrText = "";
   let worker = null;
   try {
+    // 1) QR코드 먼저 (가장 정확·빠름)
+    setOcrStatus("QR코드를 확인하는 중…", "load");
+    lastQrText = await decodeLabelQR(currentLabelFile) || "";
+    if (lastQrText) filled.push(...fillFromQR(lastQrText));
+
+    // 2) 글자 인식(OCR)으로 나머지 항목 채우기
     await ensureTesseract();
     if (!window.Tesseract) throw new Error("Tesseract 미로드");
     const image = await preprocessOcrImage(currentLabelFile);
-    setOcrStatus("라벨을 인식하는 중입니다… 처음 실행은 인식 데이터를 내려받아 30초~1분 걸릴 수 있어요.", "load");
+    setOcrStatus("라벨 글자를 인식하는 중입니다… 처음 실행은 데이터를 내려받아 30초~1분 걸릴 수 있어요.", "load");
     const logger = (m) => { if (m.status === "recognizing text") setOcrStatus(`라벨 인식 중… ${Math.round((m.progress || 0) * 100)}%`, "load"); };
-    let text = "";
     if (typeof Tesseract.createWorker === "function") {
       worker = await Tesseract.createWorker("kor+eng", 1, { logger });
-      // PSM 6: 표처럼 균일한 블록으로 인식 / 단어 사이 공백 보존
       try { await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" }); } catch {}
       const { data } = await worker.recognize(image);
-      text = data.text || "";
+      lastOcrText = data.text || "";
     } else {
       const { data } = await Tesseract.recognize(image, "kor+eng", { logger });
-      text = data.text || "";
+      lastOcrText = data.text || "";
     }
-    const filled = fillFromOcr(text);
-    if (filled.length) setOcrStatus(`✔ 자동 인식 완료: ${filled.join(", ")} 을(를) 채웠습니다. 내용을 확인·수정해주세요.`, "ok");
-    else setOcrStatus("인식된 항목을 찾지 못했습니다. 라벨 글자가 크고 선명하게(수평) 나오도록 다시 촬영해보세요.", "err");
+    fillFromOcr(lastOcrText).forEach((f) => { if (!filled.includes(f)) filled.push(f); });
   } catch (e) {
-    console.error("OCR 실패:", e);
-    setOcrStatus("자동 인식에 실패했습니다. 잠시 후 다시 시도해주세요.", "err");
+    console.error("자동 인식 오류:", e);
   } finally {
     if (worker) { try { await worker.terminate(); } catch {} }
     btn.disabled = false;
   }
+  // 결과 표시 (+ 무엇이 읽혔는지 확인 버튼)
+  document.getElementById("ocrResultBtn").hidden = !(lastOcrText || lastQrText);
+  if (filled.length) setOcrStatus(`✔ 자동 인식: ${[...new Set(filled)].join(", ")} 채움. 값을 확인·수정하세요.`, "ok");
+  else setOcrStatus("자동 인식이 잘 안 됐어요. ‘인식 결과 보기’로 무엇이 읽혔는지 확인해 주세요. (라벨이 크고 반듯하게 나오게 촬영)", "err");
+}
+// 인식 원문 보기 (진단/확인용)
+function showOcrResult() {
+  const parts = [];
+  if (lastQrText) parts.push("[QR코드 내용]\n" + lastQrText);
+  parts.push("[글자 인식(OCR) 결과]\n" + (lastOcrText || "(인식된 글자 없음)"));
+  alert(parts.join("\n\n──────────\n\n"));
 }
 // 인식 텍스트에서 각 '항목명' 위치를 찾아, 다음 항목명 직전까지를 값으로 채운다.
 function fillFromOcr(text) {
@@ -2091,6 +2149,7 @@ document.getElementById("photoPreview").addEventListener("click", (e) => {
 document.getElementById("f-labelFile").addEventListener("change", (e) => handleLabelFileUpload(e.target.files[0]));
 document.getElementById("removeLabelFileBtn").addEventListener("click", () => { currentLabelFile = ""; currentLabelFileName = ""; currentLabelPreview = ""; document.getElementById("f-labelFile").value = ""; renderLabelFileInfo(); updateOcrBtn(); });
 document.getElementById("ocrBtn").addEventListener("click", runLabelOcr);
+document.getElementById("ocrResultBtn").addEventListener("click", showOcrResult);
 document.getElementById("f-assetGroup").addEventListener("change", updateFormForGroup);
 document.getElementById("formSaveBtn").addEventListener("click", saveForm);
 document.getElementById("assetForm").addEventListener("submit", (e) => { e.preventDefault(); saveForm(); });
