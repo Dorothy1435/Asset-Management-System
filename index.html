@@ -113,10 +113,18 @@
       <button class="btn btn-secondary" id="advReset">필터 초기화</button>
     </section>
 
+    <div class="bulk-bar" id="bulkBar" hidden>
+      <span class="bulk-count"><b id="bulkCount">0</b>개 선택됨</span>
+      <button class="btn btn-secondary btn-sm" id="bulkSelectAll">검색결과 전체 선택</button>
+      <button class="btn btn-primary btn-sm" id="bulkEditBtn">✏️ 선택 항목 일괄 수정</button>
+      <button class="btn btn-secondary btn-sm" id="bulkClear">선택 해제</button>
+    </div>
+
     <section class="table-wrap">
       <table class="asset-table">
         <thead>
           <tr>
+            <th class="col-check"><input type="checkbox" id="checkAllPage" title="이 페이지 전체 선택" /></th>
             <th class="sortable" data-key="assetName">자산명 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="assetNumber">자산번호 <span class="sort-arrow"></span></th>
             <th>라벨</th>
@@ -415,6 +423,52 @@
         <div id="histBody"></div>
       </div>
       <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
+    </div>
+  </div>
+
+  <!-- 일괄 수정 모달 (관리자) -->
+  <div class="modal-overlay" id="bulkEditOverlay" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>선택 항목 일괄 수정</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <form id="bulkEditForm" class="modal-body">
+        <p class="bulk-target" id="bulkEditTarget"></p>
+        <p class="insp-note" style="margin-bottom:14px;">체크한 항목만 선택된 자산 전체에 적용됩니다. 나머지는 그대로 유지됩니다.</p>
+        <div class="bulk-field">
+          <label class="bulk-check"><input type="checkbox" data-bulk="location" /> 보관 위치</label>
+          <input type="text" id="bulk-location" placeholder="새 위치" disabled />
+        </div>
+        <div class="bulk-field">
+          <label class="bulk-check"><input type="checkbox" data-bulk="dept" /> 운영 부서</label>
+          <select id="bulk-dept" disabled></select>
+        </div>
+        <div class="bulk-field">
+          <label class="bulk-check"><input type="checkbox" data-bulk="status" /> 상태</label>
+          <select id="bulk-status" disabled>
+            <option value="취득">취득</option>
+            <option value="사용중">사용중</option>
+            <option value="보관중">보관중</option>
+            <option value="불용">불용</option>
+            <option value="폐기">폐기</option>
+          </select>
+        </div>
+        <div class="bulk-field">
+          <label class="bulk-check"><input type="checkbox" data-bulk="manager" /> 사용자</label>
+          <input type="text" id="bulk-manager" placeholder="새 사용자 (빈칸=지움)" disabled />
+        </div>
+        <div class="bulk-field">
+          <label class="bulk-check"><input type="checkbox" data-bulk="note" /> 비고</label>
+          <input type="text" id="bulk-note" placeholder="새 비고" disabled />
+        </div>
+        <p class="form-error" id="bulkEditError" hidden></p>
+        <div class="bulk-progress" id="bulkProgress" hidden></div>
+      </form>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="bulkEditSave">일괄 적용</button>
+        <button class="btn btn-secondary" data-close>취소</button>
+      </div>
     </div>
   </div>
 

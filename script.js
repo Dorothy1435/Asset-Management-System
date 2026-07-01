@@ -23,6 +23,7 @@ let members = [];
 let assets = [];
 let filtered = [];
 let currentPage = 1;
+let selectedIds = new Set(); // 일괄 수정용 선택 자산 id (관리자)
 let inspFilter = false; // 선택 회차 미검수만 보기 (2025년도 자산 전용)
 let inspRound = "1회차"; // 대시보드/필터 기준 검수 회차
 const PER_PAGE = 20;
@@ -701,13 +702,14 @@ function render() {
     tbody.innerHTML = "";
     emptyMsg.hidden = false;
     document.getElementById("pagination").innerHTML = "";
+    syncBulkUI();
     return;
   }
   emptyMsg.hidden = true;
   const pending = pendingTargetSet();
   const showInsp = currentGroup !== GROUP_ELEC; // 검수는 2025년도 자산 전용 (전자 제외)
   const tableEl = document.querySelector(".asset-table");
-  if (tableEl) tableEl.classList.toggle("hide-insp", !showInsp);
+  if (tableEl) { tableEl.classList.toggle("hide-insp", !showInsp); tableEl.classList.toggle("hide-check", !isAdmin); }
   const uninspBtn = document.getElementById("uninspBtn");
   if (uninspBtn) {
     uninspBtn.hidden = !showInsp;
@@ -726,6 +728,7 @@ function render() {
     const thumb = a.imageUrl ? `<img class="thumb" src="${a.imageUrl}" alt="" loading="lazy" />` : "";
     return `
     <tr>
+      <td class="col-check"><input type="checkbox" class="row-check" data-id="${esc(a.id)}" ${selectedIds.has(String(a.id)) ? "checked" : ""} /></td>
       <td class="cell-name" title="${esc(a.assetName)}"><div class="name-wrap">${thumb}<span>${esc(a.assetName)} ${tag}</span></div></td>
       <td class="cell-num">${esc(a.assetNumber)}</td>
       <td>${labelCell(a)}</td>
@@ -743,6 +746,75 @@ function render() {
     </tr>`;
   }).join("");
   renderPagination();
+  syncBulkUI();
+}
+
+// ===== 일괄 수정 (관리자) =====
+function syncBulkUI() {
+  const bar = document.getElementById("bulkBar");
+  if (!bar) return;
+  if (!isAdmin) { bar.hidden = true; selectedIds.clear(); return; }
+  // 화면에서 지워진(필터에 없는) 선택은 정리
+  const validIds = new Set(filtered.map((a) => String(a.id)));
+  selectedIds.forEach((id) => { if (!validIds.has(id)) selectedIds.delete(id); });
+  document.getElementById("bulkCount").textContent = selectedIds.size;
+  bar.hidden = selectedIds.size === 0;
+  // 현재 페이지 전체선택 체크 상태
+  const start = (currentPage - 1) * PER_PAGE;
+  const pageIds = filtered.slice(start, start + PER_PAGE).map((a) => String(a.id));
+  const allChecked = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const cap = document.getElementById("checkAllPage");
+  if (cap) cap.checked = allChecked;
+}
+function toggleSelect(id, on) {
+  id = String(id);
+  if (on) selectedIds.add(id); else selectedIds.delete(id);
+  syncBulkUI();
+}
+function toggleSelectPage(on) {
+  const start = (currentPage - 1) * PER_PAGE;
+  filtered.slice(start, start + PER_PAGE).forEach((a) => { if (on) selectedIds.add(String(a.id)); else selectedIds.delete(String(a.id)); });
+  render();
+}
+function openBulkEdit() {
+  if (!isAdmin || selectedIds.size === 0) return;
+  document.getElementById("bulkEditError").hidden = true;
+  document.getElementById("bulkProgress").hidden = true;
+  document.getElementById("bulkEditTarget").innerHTML = `선택한 <b>${selectedIds.size}개</b> 자산을 한 번에 수정합니다.`;
+  const bd = document.getElementById("bulk-dept"); bd.innerHTML = deptOptionsHtml(""); bd.value = "";
+  // 초기화: 모든 변경 체크 해제 + 입력 비활성화
+  document.querySelectorAll('#bulkEditForm input[data-bulk]').forEach((c) => {
+    c.checked = false;
+    const input = document.getElementById("bulk-" + c.dataset.bulk);
+    if (input) { input.disabled = true; if (input.tagName === "INPUT") input.value = ""; }
+  });
+  show("bulkEditOverlay");
+}
+async function applyBulkEdit() {
+  if (!isAdmin) return;
+  const fields = {};
+  document.querySelectorAll('#bulkEditForm input[data-bulk]:checked').forEach((c) => {
+    const key = c.dataset.bulk;
+    fields[key] = document.getElementById("bulk-" + key).value.trim();
+  });
+  const errEl = document.getElementById("bulkEditError");
+  errEl.hidden = true;
+  if (Object.keys(fields).length === 0) { errEl.textContent = "변경할 항목을 하나 이상 체크해주세요."; errEl.hidden = false; return; }
+  const ids = [...selectedIds];
+  const btn = document.getElementById("bulkEditSave");
+  const prog = document.getElementById("bulkProgress");
+  btn.disabled = true; prog.hidden = false;
+  let done = 0, failed = 0;
+  for (const id of ids) {
+    prog.textContent = `적용 중… ${done + failed + 1}/${ids.length}`;
+    try { await applyUpdate(id, fields, { note: "일괄 수정" }); done++; }
+    catch (e) { console.error("일괄 수정 실패:", id, e); failed++; }
+  }
+  btn.disabled = false;
+  hide("bulkEditOverlay");
+  selectedIds.clear();
+  await reloadAll(); rerender();
+  alert(`일괄 수정 완료: ${done}건 적용${failed ? `, ${failed}건 실패` : ""}`);
 }
 function renderPagination() {
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
@@ -2148,6 +2220,22 @@ document.getElementById("stats").addEventListener("change", (e) => {
 });
 document.getElementById("addBtn").addEventListener("click", () => openForm(null));
 
+document.getElementById("assetTbody").addEventListener("change", (e) => {
+  const chk = e.target.closest("input.row-check");
+  if (chk) toggleSelect(chk.dataset.id, chk.checked);
+});
+document.getElementById("checkAllPage").addEventListener("change", (e) => toggleSelectPage(e.target.checked));
+document.getElementById("bulkClear").addEventListener("click", () => { selectedIds.clear(); render(); });
+document.getElementById("bulkSelectAll").addEventListener("click", () => { filtered.forEach((a) => selectedIds.add(String(a.id))); render(); });
+document.getElementById("bulkEditBtn").addEventListener("click", openBulkEdit);
+document.getElementById("bulkEditSave").addEventListener("click", applyBulkEdit);
+document.getElementById("bulkEditForm").addEventListener("change", (e) => {
+  const c = e.target.closest("input[data-bulk]");
+  if (!c) return;
+  const input = document.getElementById("bulk-" + c.dataset.bulk);
+  if (input) { input.disabled = !c.checked; if (c.checked) input.focus(); }
+});
+
 document.getElementById("assetTbody").addEventListener("click", (e) => {
   const thumb = e.target.closest("img.thumb");
   if (thumb) { openLightbox(thumb.src); return; }
@@ -2303,7 +2391,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });
