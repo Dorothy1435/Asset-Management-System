@@ -414,6 +414,7 @@ function openAuth(mode) {
   document.getElementById("authId").value = "";
   document.getElementById("authPw").value = "";
   document.getElementById("authName").value = "";
+  document.getElementById("authAffil").innerHTML = deptOptionsHtml("");
   document.getElementById("authAffil").value = "";
   resetConsent();
   applyAuthMode();
@@ -491,6 +492,43 @@ async function logout() {
   await sb.auth.signOut();
 }
 
+// ===== 내 정보(이름/소속) 수정 =====
+function openMyProfile() {
+  if (!currentUser) return;
+  document.getElementById("mpError").hidden = true;
+  document.getElementById("mpInfo").hidden = true;
+  document.getElementById("mp-username").value = myProfile?.username || (currentUser.email || "").split("@")[0];
+  document.getElementById("mp-name").value = myProfile?.name || "";
+  const affil = myProfile?.affiliation || "";
+  const sel = document.getElementById("mp-affil");
+  sel.innerHTML = deptOptionsHtml(affil);
+  sel.value = affil;
+  show("myProfileOverlay");
+}
+async function saveMyProfile() {
+  if (!currentUser) return;
+  const name = document.getElementById("mp-name").value.trim();
+  const affiliation = document.getElementById("mp-affil").value;
+  const errEl = document.getElementById("mpError");
+  const btn = document.getElementById("mpSaveBtn");
+  errEl.hidden = true;
+  btn.disabled = true;
+  try {
+    const { error } = await sb.rpc("update_my_profile", { p_name: name, p_affiliation: affiliation });
+    if (error) throw error;
+    const { data } = await sb.from("profiles").select("*").eq("id", currentUser.id).maybeSingle();
+    if (data) myProfile = data;
+  } catch (e) {
+    console.error(e);
+    errEl.textContent = "저장에 실패했습니다. (Storage/함수 설정 SQL 실행 여부 확인) " + (e.message || "");
+    errEl.hidden = false; btn.disabled = false; return;
+  }
+  btn.disabled = false;
+  hide("myProfileOverlay");
+  updateUI();
+  alert("내 정보가 저장되었습니다.");
+}
+
 async function forgotPassword() {
   const idVal = document.getElementById("authId").value.trim();
   const errEl = document.getElementById("authError");
@@ -542,6 +580,7 @@ function updateUI() {
   g("loginBtn").hidden = loggedIn;
   g("signupBtn").hidden = loggedIn;
   g("logoutBtn").hidden = !loggedIn;
+  g("myProfileBtn").hidden = !loggedIn;
   g("userTag").hidden = !loggedIn;
   g("myReqBtn").hidden = !loggedIn || isAdmin;
   g("reviewBtn").hidden = !isAdmin;
@@ -1281,6 +1320,22 @@ function fillFromOcr(text) {
     // 부서명 값 자체가 잡혔으면 그 다음 줄, 헤더(산학협력단)가 잡혔으면 부서명 다음의 다음 줄
     const cand = /산학협력단/.test(lines[deptIdx]) ? after[1] : after[0];
     if (cand && !/산학협력단|사업본부/.test(cand)) setIfEmpty("assetName", cand, "자산명");
+  }
+  // 비치호실(위치) 보완: 구입일(날짜) 줄 바로 앞의 한글 줄 (재원/지자체/제품명 제외)
+  const locEl = document.getElementById("f-location");
+  if (locEl && !locEl.value.trim()) {
+    const asset = (document.getElementById("f-assetName").value || "").trim();
+    const dateIdx = lines.findIndex((l) => /\d{4}\s*[-.]\s*\d{1,2}\s*[-.]\s*\d{1,2}/.test(l) || /구\s*입\s*일/.test(l));
+    if (dateIdx > 0) {
+      for (let k = dateIdx - 1; k >= 0 && k >= dateIdx - 3; k--) {
+        const cand = (lines[k] || "").replace(/\s*(재\s*원|지\s*자\s*체).*$/, "").trim();
+        if (!cand || !/[가-힣]/.test(cand)) continue;
+        if (/사업본부|산학협력단|기계기구/.test(cand)) continue;
+        if (asset && cand.includes(asset.slice(0, 6))) continue; // 품명/모델명 값과 같으면 제외
+        setIfEmpty("location", cand, "위치");
+        break;
+      }
+    }
   }
   return filled;
 }
@@ -2222,6 +2277,9 @@ document.getElementById("consentBox").addEventListener("click", (e) => {
 document.getElementById("loginBtn").addEventListener("click", () => openAuth("login"));
 document.getElementById("signupBtn").addEventListener("click", () => openAuth("signup"));
 document.getElementById("logoutBtn").addEventListener("click", logout);
+document.getElementById("myProfileBtn").addEventListener("click", openMyProfile);
+document.getElementById("mpSaveBtn").addEventListener("click", saveMyProfile);
+document.getElementById("myProfileForm").addEventListener("submit", (e) => { e.preventDefault(); saveMyProfile(); });
 document.getElementById("authSubmit").addEventListener("click", authSubmit);
 document.getElementById("authForm").addEventListener("submit", (e) => { e.preventDefault(); authSubmit(); });
 document.getElementById("authSwitch").addEventListener("click", () => { authMode = authMode === "login" ? "signup" : "login"; document.getElementById("authError").hidden = true; document.getElementById("authInfo").hidden = true; applyAuthMode(); });
@@ -2291,7 +2349,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });

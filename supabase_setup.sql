@@ -354,3 +354,17 @@ update public.profiles set status = 'approved' where role in ('admin', 'superadm
 
 -- 기존 회원 전원 승인 처리 — ⚠ 최초 1회만!
 update public.profiles set status = 'approved';
+
+
+-- =====================================================================
+-- [내 정보 수정] 회원이 본인 이름/소속만 수정 (권한·상태는 못 바꾸게 함수로 제한)
+-- 이 블록을 SQL Editor에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+create or replace function public.update_my_profile(p_name text, p_affiliation text)
+returns void language sql security definer set search_path = public as $$
+  update public.profiles
+     set name = coalesce(p_name, name),
+         affiliation = coalesce(p_affiliation, affiliation)
+   where id = auth.uid();
+$$;
+grant execute on function public.update_my_profile(text, text) to authenticated;
