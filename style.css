@@ -928,9 +928,18 @@ body:not(.authed) .header,
 body:not(.authed) .main-nav,
 body:not(.authed) .container,
 body:not(.authed) .footer { display: none !important; }
-body.authed #landing { display: none; }
+body.authed #landing,
+body.pending-approval #landing { display: none; }
+/* 가입 승인 대기 화면: 로그인했지만 승인 전일 때만 노출 */
+#pendingApproval { display: none; }
+body.pending-approval #pendingApproval { display: flex; }
+body.pending-approval .header,
+body.pending-approval .main-nav,
+body.pending-approval .container,
+body.pending-approval .footer { display: none !important; }
 
-#landing {
+#landing,
+#pendingApproval {
   position: relative;
   min-height: 100vh;
   display: flex;
@@ -939,6 +948,9 @@ body.authed #landing { display: none; }
   padding: 40px 20px;
   overflow: hidden;
 }
+#pendingApproval { display: none; }
+.pending-icon { font-size: 56px; margin-bottom: 16px; }
+.pending-msg { color: var(--text-light); font-size: 14.5px; line-height: 1.6; margin-bottom: 28px; }
 .landing-bg {
   position: absolute;
   inset: 0;

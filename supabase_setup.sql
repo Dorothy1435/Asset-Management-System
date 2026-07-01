@@ -338,3 +338,19 @@ create policy "media_update_admin" on storage.objects for update to authenticate
   using (bucket_id = 'asset-media' and public.is_admin()) with check (bucket_id = 'asset-media' and public.is_admin());
 create policy "media_delete_admin" on storage.objects for delete to authenticated
   using (bucket_id = 'asset-media' and public.is_admin());
+
+
+-- =====================================================================
+-- [가입 승인제] 회원가입 후 관리자가 '승인'해야 이용할 수 있음
+--  · profiles.status : pending(승인대기) | approved(승인) | rejected(거절)
+--  · 신규 가입은 자동으로 pending. 관리자가 '회원 관리'에서 승인/거절.
+--  ⚠ 아래 UPDATE(백필)는 기존 회원이 잠기지 않도록 '최초 1회만' 실행하세요.
+--     (전체 파일을 다시 실행할 때는 이 UPDATE 줄은 빼고 실행하는 걸 권장)
+-- =====================================================================
+alter table public.profiles add column if not exists status text default 'pending';
+
+-- 관리자/최고관리자는 항상 승인 상태 (재실행해도 안전)
+update public.profiles set status = 'approved' where role in ('admin', 'superadmin');
+
+-- 기존 회원 전원 승인 처리 — ⚠ 최초 1회만!
+update public.profiles set status = 'approved';

@@ -80,6 +80,7 @@ let currentUser = null;
 let myProfile = null;
 let isAdmin = false;
 let isSuperAdmin = false;
+let isApproved = false;
 let detailCurrentId = null;
 let inspectTargetId = null;
 let posts = [];          // 게시판 글
@@ -244,8 +245,8 @@ function pendingTargetSet() {
 }
 
 async function reloadAll() {
-  // 4개 쿼리를 동시에 실행 (순차 실행보다 훨씬 빠름)
-  await Promise.all([sbLoadOverlay(), sbLoadMyRequests(), sbLoadRequests(), sbLoadHistory()]);
+  // 쿼리를 동시에 실행 (순차 실행보다 훨씬 빠름). 회원 목록은 가입 승인 배지용으로 관리자만 로드.
+  await Promise.all([sbLoadOverlay(), sbLoadMyRequests(), sbLoadRequests(), sbLoadHistory(), sbLoadMembers()]);
   buildAssets();
 }
 function rerender() {
@@ -382,9 +383,12 @@ async function applySession(session) {
     isAdmin = false;
     isSuperAdmin = false;
   }
-  // 로그인 전에는 시작 화면만, 로그인 후에는 자산관리 시스템을 보여준다.
-  document.body.classList.toggle("authed", !!currentUser);
-  if (currentUser) ALL_MODALS.forEach(hide); // 로그인 성공 시 열려있던 로그인 모달 등 닫기
+  // 관리자는 항상 승인, 일반 회원은 profiles.status === 'approved' 여야 이용 가능
+  isApproved = isAdmin || myProfile?.status === "approved";
+  // 로그인 전에는 시작 화면 / 승인 전에는 대기 화면 / 승인 후에는 자산관리 시스템
+  document.body.classList.toggle("authed", !!currentUser && isApproved);
+  document.body.classList.toggle("pending-approval", !!currentUser && !isApproved);
+  if (currentUser && isApproved) ALL_MODALS.forEach(hide); // 로그인 성공 시 열려있던 로그인 모달 등 닫기
 }
 
 function idToEmail(input, forceDomain) {
@@ -450,7 +454,7 @@ async function authSubmit() {
       if (error) { errEl.textContent = "가입 실패: " + error.message; errEl.hidden = false; return; }
       if (data.session) {
         hide("authOverlay");
-        alert("가입이 완료되었습니다. 환영합니다!");
+        alert("가입 신청이 접수되었습니다.\n관리자 승인 후 이용하실 수 있습니다.");
       } else {
         // 자동 승인(이메일 인증 OFF)이면 세션이 바로 생기지만,
         // 혹시 세션이 없으면 곧바로 로그인 시도
@@ -533,7 +537,11 @@ function updateUI() {
   g("myReqBtn").hidden = !loggedIn || isAdmin;
   g("reviewBtn").hidden = !isAdmin;
   g("histBtn").hidden = !isAdmin;
-  g("membersBtn").hidden = !isSuperAdmin;
+  g("membersBtn").hidden = !isAdmin; // 가입 승인은 관리자도 가능 (권한변경·삭제는 최고관리자만)
+  const mpc = g("memberPendingCount");
+  const pendingMembers = members.filter((m) => (m.status || "pending") === "pending").length;
+  mpc.textContent = pendingMembers;
+  mpc.hidden = pendingMembers === 0;
 
   if (loggedIn) {
     const uname = myProfile?.name || myProfile?.username || (currentUser.email || "").split("@")[0];
@@ -1066,16 +1074,20 @@ function showFormError(msg) {
 }
 
 // ===== 라벨 사진 OCR 자동 채우기 (Tesseract.js, 한글+영문) =====
-// 라벨의 '항목  값' 구조를 인식해 등록 폼을 자동으로 채운다.
-const OCR_MAP = [
-  { keys: ["품명"], field: "assetName" },
-  { keys: ["규격"], field: "spec" },
-  { keys: ["모델명", "모델"], field: "model" },
-  { keys: ["비치호실", "비치", "보관위치"], field: "location" },
-  { keys: ["자산코드", "자산번호"], field: "assetNumber" },
-  { keys: ["금액", "취득금액", "구입금액"], field: "acquireCost", numeric: true },
-  { keys: ["제작회사", "제조사", "제작사"], field: "maker" },
-  { keys: ["비고"], field: "note" },
+// 인제대 산학협력단 자산 라벨은 항상 같은 표 양식이라, '항목명'의 위치를 찾아
+// 그 다음 항목명 직전까지를 값으로 잘라낸다. (2단 표: 비치호실|재원, 구입일|금액 대응)
+// field 가 없는 항목(부서명·재원·구입일)은 값 경계를 잡아주는 '구분자' 역할만 한다.
+const OCR_FIELDS = [
+  { key: "부서명" },
+  { key: "품명", field: "assetName" },
+  { key: "규격", field: "spec" },
+  { key: "모델명", field: "model" },
+  { key: "비치호실", field: "location" },
+  { key: "재원" },
+  { key: "구입일" },
+  { key: "금액", field: "acquireCost", numeric: true },
+  { key: "자산코드", field: "assetNumber", compact: true },
+  { key: "비고", field: "note" },
 ];
 const OCR_FIELD_NAMES = { assetName: "품명", spec: "규격", model: "모델명", location: "위치", assetNumber: "자산코드", acquireCost: "금액", maker: "제작회사", note: "비고" };
 function setOcrStatus(msg, kind) {
@@ -1085,59 +1097,95 @@ function setOcrStatus(msg, kind) {
   st.textContent = msg;
   st.className = "ocr-status" + (kind ? " ocr-" + kind : "");
 }
+// 인식률을 높이기 위해 그레이스케일 + 대비 보정 후 캔버스로 변환
+function preprocessOcrImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const longest = Math.max(img.width, img.height);
+      const s = longest > 2200 ? 2200 / longest : (longest < 1400 ? 1400 / longest : 1);
+      const w = Math.round(img.width * s), h = Math.round(img.height * s);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        const d = ctx.getImageData(0, 0, w, h);
+        const p = d.data;
+        for (let i = 0; i < p.length; i += 4) {
+          let g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+          g = (g - 128) * 1.35 + 128;            // 대비 강화
+          g = g < 0 ? 0 : g > 255 ? 255 : g;
+          p[i] = p[i + 1] = p[i + 2] = g;
+        }
+        ctx.putImageData(d, 0, 0);
+      } catch { /* 전처리 실패해도 원본 캔버스로 진행 */ }
+      resolve(canvas);
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
 async function runLabelOcr() {
   if (!isImageData(currentLabelFile)) { setOcrStatus("라벨을 이미지(사진)로 올려야 자동 인식할 수 있습니다.", "err"); return; }
   const btn = document.getElementById("ocrBtn");
   btn.disabled = true;
   setOcrStatus("인식 모듈을 준비하는 중입니다…", "load");
+  let worker = null;
   try {
     await ensureTesseract();
     if (!window.Tesseract) throw new Error("Tesseract 미로드");
+    const image = await preprocessOcrImage(currentLabelFile);
     setOcrStatus("라벨을 인식하는 중입니다… 처음 실행은 인식 데이터를 내려받아 30초~1분 걸릴 수 있어요.", "load");
-    const { data } = await Tesseract.recognize(currentLabelFile, "kor+eng", {
-      logger: (m) => { if (m.status === "recognizing text") setOcrStatus(`라벨 인식 중… ${Math.round((m.progress || 0) * 100)}%`, "load"); },
-    });
-    const filled = fillFromOcr(data.text || "");
+    const logger = (m) => { if (m.status === "recognizing text") setOcrStatus(`라벨 인식 중… ${Math.round((m.progress || 0) * 100)}%`, "load"); };
+    let text = "";
+    if (typeof Tesseract.createWorker === "function") {
+      worker = await Tesseract.createWorker("kor+eng", 1, { logger });
+      // PSM 6: 표처럼 균일한 블록으로 인식 / 단어 사이 공백 보존
+      try { await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" }); } catch {}
+      const { data } = await worker.recognize(image);
+      text = data.text || "";
+    } else {
+      const { data } = await Tesseract.recognize(image, "kor+eng", { logger });
+      text = data.text || "";
+    }
+    const filled = fillFromOcr(text);
     if (filled.length) setOcrStatus(`✔ 자동 인식 완료: ${filled.join(", ")} 을(를) 채웠습니다. 내용을 확인·수정해주세요.`, "ok");
-    else setOcrStatus("인식된 항목을 찾지 못했습니다. 라벨이 반듯하게(수평) 나오도록 다시 촬영해보세요.", "err");
+    else setOcrStatus("인식된 항목을 찾지 못했습니다. 라벨 글자가 크고 선명하게(수평) 나오도록 다시 촬영해보세요.", "err");
   } catch (e) {
     console.error("OCR 실패:", e);
     setOcrStatus("자동 인식에 실패했습니다. 잠시 후 다시 시도해주세요.", "err");
   } finally {
+    if (worker) { try { await worker.terminate(); } catch {} }
     btn.disabled = false;
   }
 }
-// OCR 텍스트에서 '항목 값'을 뽑아 폼에 채운다. 채운 항목명 배열 반환.
+// 인식 텍스트에서 각 '항목명' 위치를 찾아, 다음 항목명 직전까지를 값으로 채운다.
 function fillFromOcr(text) {
-  const lines = text.split(/\n+/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
-  const filled = [];
-  const applied = new Set();
-  const stripValue = (s) => s.replace(/^[:\-·.\s]+/, "").trim();
-  const setField = (m, raw) => {
-    let v = stripValue(raw);
-    if (!v || applied.has(m.field)) return;
-    if (m.numeric) { v = v.replace(/[^0-9]/g, ""); if (!v) return; }
-    const el = document.getElementById("f-" + m.field);
-    if (!el) return;
-    el.value = v;
-    applied.add(m.field);
-    filled.push(OCR_FIELD_NAMES[m.field] || m.field);
-  };
-  lines.forEach((line, i) => {
-    const lNoSpace = line.replace(/\s/g, "");
-    for (const m of OCR_MAP) {
-      if (applied.has(m.field)) continue;
-      for (const key of m.keys) {
-        const kNoSpace = key.replace(/\s/g, "");
-        if (lNoSpace.indexOf(kNoSpace) === 0) {
-          const after = lNoSpace.slice(kNoSpace.length);
-          if (stripValue(after)) setField(m, after);
-          else if (lines[i + 1]) setField(m, lines[i + 1]);
-          break;
-        }
-      }
-    }
+  const t = (text || "").replace(/\r/g, "");
+  // 각 항목명의 첫 등장 위치 (항목명 글자 사이 공백 허용: 부 서 명 → 부\s*서\s*명)
+  const marks = [];
+  OCR_FIELDS.forEach((f) => {
+    const re = new RegExp(f.key.split("").join("\\s*"));
+    const m = re.exec(t);
+    if (m) marks.push({ f, start: m.index, end: m.index + m[0].length });
   });
+  marks.sort((a, b) => a.start - b.start);
+  const filled = [];
+  for (let i = 0; i < marks.length; i++) {
+    const cur = marks[i];
+    if (!cur.f.field) continue; // 구분자 전용 항목
+    const next = marks[i + 1];
+    let v = t.slice(cur.end, next ? next.start : t.length);
+    v = v.replace(/^[\s:·\-|]+/, "").replace(/\s+/g, " ").trim();
+    if (cur.f.numeric) v = v.replace(/[^0-9]/g, "");
+    else if (cur.f.compact) v = v.replace(/\s+/g, "");
+    if (!v) continue;
+    const el = document.getElementById("f-" + cur.f.field);
+    if (!el) continue;
+    el.value = v;
+    filled.push(OCR_FIELD_NAMES[cur.f.field] || cur.f.field);
+  }
   return filled;
 }
 
@@ -1707,32 +1755,58 @@ function roleBadge(role) {
   if (role === "admin") return `<span class="badge badge-normal">관리자</span>`;
   return `<span class="badge badge-gray">사용자</span>`;
 }
+function memberStatusBadge(status) {
+  const s = status || "pending";
+  if (s === "approved") return `<span class="badge badge-normal">승인됨</span>`;
+  if (s === "rejected") return `<span class="badge badge-warn">거절됨</span>`;
+  return `<span class="badge badge-gray">승인대기</span>`;
+}
 function renderMembers() {
   const body = document.getElementById("membersBody");
   if (members.length === 0) { body.innerHTML = `<div class="empty-msg">회원이 없습니다.</div>`; return; }
   const myId = currentUser?.id;
+  // 승인 대기 회원을 맨 위로 정렬
+  const sorted = members.slice().sort((a, b) => {
+    const pa = (a.status || "pending") === "pending" ? 0 : 1;
+    const pb = (b.status || "pending") === "pending" ? 0 : 1;
+    return pa - pb;
+  });
+  const pendingN = members.filter((m) => (m.status || "pending") === "pending").length;
   body.innerHTML = `
+    ${pendingN ? `<div class="notice" style="margin-bottom:14px;">승인 대기 중인 가입 신청이 <b>${pendingN}건</b> 있습니다. ‘승인’을 눌러 이용을 허가하세요.</div>` : ""}
     <table class="member-table">
-      <thead><tr><th>이름</th><th>소속</th><th>아이디</th><th>이메일</th><th>권한</th><th>가입일</th><th>관리</th></tr></thead>
+      <thead><tr><th>이름</th><th>소속</th><th>아이디</th><th>이메일</th><th>상태</th><th>권한</th><th>가입일</th><th>관리</th></tr></thead>
       <tbody>
-        ${members.map((m) => {
+        ${sorted.map((m) => {
           const isSelf = String(m.id) === String(myId);
           const isSuper = m.role === "superadmin";
+          const status = m.status || "pending";
+          // 가입 승인/거절 (관리자 가능)
+          let approveBtns = "";
+          if (!isSelf && !isSuper) {
+            if (status !== "approved") approveBtns += `<button class="btn-mini btn-view" data-setstatus="approved" data-id="${esc(m.id)}">승인</button> `;
+            if (status === "pending") approveBtns += `<button class="btn-mini btn-del" data-setstatus="rejected" data-id="${esc(m.id)}">거절</button> `;
+            if (status === "approved") approveBtns += `<button class="btn-mini btn-edit" data-setstatus="pending" data-id="${esc(m.id)}">승인취소</button> `;
+          }
+          // 권한 변경/삭제 (최고관리자만)
+          let superBtns = "";
+          if (!isSelf && !isSuper && isSuperAdmin) {
+            const toggle = m.role === "admin"
+              ? `<button class="btn-mini btn-edit" data-role="user" data-id="${esc(m.id)}">사용자로</button>`
+              : `<button class="btn-mini btn-view" data-role="admin" data-id="${esc(m.id)}">관리자로</button>`;
+            superBtns = `${toggle} <button class="btn-mini btn-del" data-delmember="${esc(m.id)}">삭제</button>`;
+          }
           let actions;
           if (isSelf) actions = `<span class="member-self">본인</span>`;
           else if (isSuper) actions = `<span class="member-self">최고관리자</span>`;
-          else {
-            const toggle = m.role === "admin"
-              ? `<button class="btn-mini btn-edit" data-role="user" data-id="${esc(m.id)}">사용자로 변경</button>`
-              : `<button class="btn-mini btn-view" data-role="admin" data-id="${esc(m.id)}">관리자로 지정</button>`;
-            actions = `${toggle} <button class="btn-mini btn-del" data-delmember="${esc(m.id)}">삭제</button>`;
-          }
+          else actions = approveBtns + superBtns;
           return `
           <tr>
             <td>${esc(m.name || "-")}</td>
             <td>${esc(m.affiliation || "-")}</td>
             <td>${esc(m.username || "-")}</td>
             <td class="cell-num">${esc(m.email || "-")}</td>
+            <td>${memberStatusBadge(status)}</td>
             <td>${roleBadge(m.role)}</td>
             <td>${fmtTime(m.created_at)}</td>
             <td class="cell-actions">${actions}</td>
@@ -1740,7 +1814,20 @@ function renderMembers() {
         }).join("")}
       </tbody>
     </table>
-    <p class="member-count">총 ${members.length}명 · 관리자로 지정된 회원은 회원관리를 제외한 모든 관리 기능을 사용할 수 있습니다.</p>`;
+    <p class="member-count">총 ${members.length}명 · 가입 승인은 관리자가, 권한 변경·삭제는 최고관리자가 할 수 있습니다.</p>`;
+}
+async function setMemberStatus(id, status) {
+  const m = members.find((x) => String(x.id) === String(id));
+  if (!m) return;
+  const label = { approved: "승인", rejected: "거절", pending: "승인취소" }[status] || status;
+  if (!confirm(`${m.name || m.username || m.email} 님을 ${label}하시겠습니까?`)) return;
+  try {
+    const { error } = await sb.from("profiles").update({ status }).eq("id", id);
+    if (error) throw error;
+  } catch (e) { console.error(e); alert("처리에 실패했습니다."); return; }
+  await sbLoadMembers();
+  renderMembers();
+  updateUI();
 }
 async function setMemberRole(id, role) {
   const m = members.find((x) => String(x.id) === String(id));
@@ -2015,6 +2102,10 @@ document.getElementById("delReqForm").addEventListener("submit", (e) => { e.prev
 document.getElementById("landingLoginBtn").addEventListener("click", () => openAuth("login"));
 document.getElementById("landingSignupBtn").addEventListener("click", () => openAuth("signup"));
 
+// 가입 승인 대기 화면
+document.getElementById("pendingRefreshBtn").addEventListener("click", () => location.reload());
+document.getElementById("pendingLogoutBtn").addEventListener("click", logout);
+
 // 회원가입 동의 체크박스
 const CONSENT_TEXT = {
   privacy: "[개인정보 수집·이용 동의]\n\n1. 수집 항목: 아이디(이메일), 이름, 소속, 비밀번호\n2. 수집 목적: 자산관리 시스템 회원 식별 및 서비스 제공, 등록·검수 이력 관리\n3. 보유 기간: 회원 탈퇴 또는 소속 만료 시까지\n4. 동의를 거부할 수 있으나, 거부 시 회원가입 및 서비스 이용이 제한됩니다.",
@@ -2073,9 +2164,11 @@ document.getElementById("histBody").addEventListener("click", (e) => {
 // 회원 관리
 document.getElementById("membersBtn").addEventListener("click", openMembers);
 document.getElementById("membersBody").addEventListener("click", (e) => {
+  const statusBtn = e.target.closest("button[data-setstatus]");
   const roleBtn = e.target.closest("button[data-role]");
   const delBtn = e.target.closest("button[data-delmember]");
-  if (roleBtn) setMemberRole(roleBtn.dataset.id, roleBtn.dataset.role);
+  if (statusBtn) setMemberStatus(statusBtn.dataset.id, statusBtn.dataset.setstatus);
+  else if (roleBtn) setMemberRole(roleBtn.dataset.id, roleBtn.dataset.role);
   else if (delBtn) deleteMember(delBtn.dataset.delmember);
 });
 

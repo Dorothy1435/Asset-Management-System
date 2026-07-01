@@ -25,6 +25,21 @@
     </div>
   </div>
 
+  <!-- 가입 승인 대기 화면 : 로그인했지만 관리자 승인 전이면 이 화면만 보임 -->
+  <div id="pendingApproval">
+    <div class="landing-bg"></div>
+    <div class="landing-box">
+      <div class="pending-icon">⏳</div>
+      <h1 class="landing-title">가입 신청이 접수되었습니다</h1>
+      <p class="pending-msg" id="pendingMsg">관리자 승인 후 자산관리 시스템을 이용하실 수 있습니다.<br />승인되면 다시 로그인해 주세요.</p>
+      <div class="landing-actions">
+        <button class="btn btn-primary btn-lg" id="pendingRefreshBtn">승인됐어요 · 새로고침</button>
+        <button class="btn btn-outline btn-lg" id="pendingLogoutBtn">로그아웃</button>
+      </div>
+      <p class="landing-foot">© 글로컬대학사업본부</p>
+    </div>
+  </div>
+
   <header class="header">
     <div class="header-inner">
       <div>
@@ -39,7 +54,7 @@
           승인 대기 <span class="count-badge" id="pendingCount">0</span>
         </button>
         <button class="btn btn-secondary" id="histBtn" hidden>결재 내역</button>
-        <button class="btn btn-secondary" id="membersBtn" hidden>회원 관리</button>
+        <button class="btn btn-secondary" id="membersBtn" hidden>회원 관리 <span class="count-badge" id="memberPendingCount" hidden>0</span></button>
         <button class="btn btn-secondary" id="boardBtn">📋 건의 게시판</button>
         <button class="btn btn-primary" id="addBtn">+ 자산 등록</button>
         <span class="admin-tag" id="userTag" hidden></span>
