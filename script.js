@@ -260,7 +260,7 @@ function rerender() {
     initFilters();
     renderStats();
     updateUI();
-    applyFilter();
+    applyFilter(false); // 데이터 새로고침 시 보던 페이지 유지 (1페이지로 튀지 않게)
   } else {
     updateUI();
   }
@@ -648,7 +648,7 @@ function initFilters() {
   fillSelect("deptFilter", [...DEPTS, ...deptVals], "전체");
   fillSelect("statusFilter", inGroup.map((a) => a.status), "전체");
 }
-function applyFilter() {
+function applyFilter(resetPage = true) {
   const kw = document.getElementById("searchInput").value.trim().toLowerCase();
   const dept = document.getElementById("deptFilter").value;
   const status = document.getElementById("statusFilter").value;
@@ -668,7 +668,11 @@ function applyFilter() {
     return hay.includes(kw);
   });
   sortFiltered();
-  currentPage = 1;
+  // 검색/필터를 바꿀 때만 1페이지로. 데이터 새로고침(실시간 동기화 등, applyFilter(false))은 보던 페이지 유지.
+  // (이벤트 리스너로 호출되면 첫 인자가 Event 객체이므로 !== false 로 판별)
+  if (resetPage !== false) currentPage = 1;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  if (currentPage > totalPages) currentPage = totalPages;
   render();
 }
 function sortFiltered() {
