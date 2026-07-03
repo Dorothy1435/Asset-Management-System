@@ -912,6 +912,7 @@ function openDetail(id) {
   document.getElementById("detailDownloadBtn").hidden = !a.imageUrl;
   document.getElementById("detailLabelBtn").hidden = !a.labelFile;
   document.getElementById("detailLabelDelBtn").hidden = !(isAdmin && a.labelFile);
+  document.getElementById("detailInspectBtn").textContent = isAdmin ? "검수 확인" : "검수 요청";
   document.getElementById("detailEditBtn").textContent = isAdmin ? "수정" : "수정 요청";
   document.getElementById("detailDeleteBtn").textContent = isAdmin ? "삭제" : "삭제 요청";
   show("detailOverlay");
@@ -921,7 +922,7 @@ function renderInspectionLog(a) {
   const list = Array.isArray(a.inspections) ? a.inspections : [];
   let html = `<div class="insp-section"><h3 class="insp-title">검수 기록 <span class="insp-count">${list.length}</span></h3>`;
   if (list.length === 0) {
-    html += `<div class="insp-empty">아직 검수 기록이 없습니다. 상단 <b>‘📷 사진촬영 검수’</b> 버튼으로 자산 라벨을 촬영해 검수하세요.</div>`;
+    html += `<div class="insp-empty">아직 검수 기록이 없습니다. 상단 <b>‘📷 검수’</b> 버튼으로 라벨을 촬영하거나, 이 상세 화면의 <b>‘검수’</b> 버튼으로 검수하세요.</div>`;
   } else {
     html += `<table class="insp-table"><thead><tr><th>구분</th><th>검수사진</th><th>검수일시</th><th>확인자</th><th>소속</th>${isAdmin ? "<th></th>" : ""}</tr></thead><tbody>`;
     html += list.slice().reverse().map((ins) => `
@@ -1379,37 +1380,71 @@ function findAssetByNumber(code) {
   hit = assets.find((a) => { const n = norm(a.assetNumber); return n.length >= 8 && (n.includes(target) || target.includes(n)); });
   return hit || null;
 }
+// 이미지(dataURL)를 지정한 각도로 회전한 새 dataURL을 만든다. (가로/세로로 찍은 사진 자동 보정용)
+function rotateDataUrl(dataUrl, deg) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const swap = deg === 90 || deg === 270;
+      const w = img.width, h = img.height;
+      const canvas = document.createElement("canvas");
+      canvas.width = swap ? h : w;
+      canvas.height = swap ? w : h;
+      const ctx = canvas.getContext("2d");
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(deg * Math.PI / 180);
+      ctx.drawImage(img, -w / 2, -h / 2);
+      resolve(canvas.toDataURL("image/jpeg", 0.92));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+// 텍스트에서 자산번호(16~24자리 숫자) 추출
+function extractAssetCode(text) {
+  return ((text || "").replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0] || null;
+}
 // 촬영 사진에서 자산번호(자산코드)를 인식한다. QR 우선, 실패 시 글자 인식(OCR).
+// 가로로 찍은 사진도 인식되도록 0°/90°/270°/180° 회전을 차례로 시도한다.
 async function recognizeAssetNumber(dataUrl) {
-  // 1) QR코드 (가장 정확·빠름)
-  try {
-    setScanLoading("QR코드를 확인하는 중…", true);
-    const qr = await decodeLabelQR(dataUrl);
-    if (qr) {
-      const code = (String(qr).replace(/[\s-]/g, "").match(/\d{16,24}/) || [])[0];
+  const ANGLES = [0, 90, 270, 180];
+  // 1) QR코드 (가장 정확·빠름) — 회전별로 시도
+  for (const deg of ANGLES) {
+    try {
+      setScanLoading(deg ? `QR코드 확인 중… (${deg}° 회전)` : "QR코드를 확인하는 중…", true);
+      const src = deg ? await rotateDataUrl(dataUrl, deg) : dataUrl;
+      const qr = await decodeLabelQR(src);
+      const code = qr ? ((String(qr).replace(/[\s-]/g, "").match(/\d{16,24}/) || [])[0]) : null;
       if (code) return code;
-    }
-  } catch (e) { console.error("QR 인식 오류:", e); }
-  // 2) 글자 인식(OCR)
+    } catch (e) { console.error("QR 인식 오류:", e); }
+  }
+  // 2) 글자 인식(OCR) — 회전별로 시도 (워커는 한 번만 생성해 재사용)
   let worker = null;
   try {
     setScanLoading("글자를 인식하는 중입니다… 처음 실행은 30초~1분 걸릴 수 있어요.", true);
     await ensureTesseract();
     if (!window.Tesseract) return null;
-    const image = await preprocessOcrImage(dataUrl);
-    const logger = (m) => { if (m.status === "recognizing text") setScanLoading(`자산번호 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
-    let text = "";
-    if (typeof Tesseract.createWorker === "function") {
-      worker = await Tesseract.createWorker("kor+eng", 1, { logger });
+    const hasWorker = typeof Tesseract.createWorker === "function";
+    if (hasWorker) {
+      worker = await Tesseract.createWorker("kor+eng", 1);
       try { await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" }); } catch {}
-      const { data } = await worker.recognize(image);
-      text = data.text || "";
-    } else {
-      const { data } = await Tesseract.recognize(image, "kor+eng", { logger });
-      text = data.text || "";
     }
-    const code = (text.replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0];
-    if (code) return code;
+    for (let i = 0; i < ANGLES.length; i++) {
+      const deg = ANGLES[i];
+      setScanLoading(`자산번호를 인식하는 중… (${i + 1}/${ANGLES.length}${deg ? `, ${deg}° 회전` : ""})`, true);
+      const src = deg ? await rotateDataUrl(dataUrl, deg) : dataUrl;
+      const image = await preprocessOcrImage(src);
+      let text = "";
+      if (hasWorker) {
+        const { data } = await worker.recognize(image);
+        text = data.text || "";
+      } else {
+        const { data } = await Tesseract.recognize(image, "kor+eng");
+        text = data.text || "";
+      }
+      const code = extractAssetCode(text);
+      if (code) return code;
+    }
   } catch (e) {
     console.error("자산번호 인식 오류:", e);
   } finally {
@@ -1581,15 +1616,14 @@ async function submitDeleteRequest() {
 }
 
 // ===== 검수 확인 =====
-// openInspect 는 반드시 카메라 촬영 흐름(handleScanCapture)에서만 호출된다.
-// photo 인자가 없으면 검수를 진행하지 않는다. (사진촬영을 통해서만 검수 가능)
+// 검수 확인 화면 열기. photo(촬영 사진)가 있으면 검수 기록에 첨부한다.
+// 카메라 검수(handleScanCapture)에서는 사진과 함께, 상세 화면에서는 사진 없이 호출된다.
 function openInspect(id, photo) {
   if (!requireLogin()) return;
   const a = findAsset(id);
   if (!a) return;
-  if (!photo) { alert("검수는 ‘📷 사진촬영 검수’ 버튼으로 라벨을 촬영해야 진행할 수 있습니다."); return; }
   inspectTargetId = id;
-  inspectPhoto = photo;
+  inspectPhoto = photo || "";
   document.getElementById("inspectError").hidden = true;
   fillInspPeriod();
   document.getElementById("insp-inspector").value = myProfile?.name || "";
@@ -1599,12 +1633,17 @@ function openInspect(id, photo) {
   affilSel.value = affil;
   document.getElementById("insp-checked").checked = true;
   document.getElementById("inspectTarget").innerHTML = `<b>${esc(a.assetName)}</b> (${esc(a.assetNumber)})`;
-  // 촬영된 검수 사진 미리보기
+  // 촬영된 검수 사진 미리보기 (사진 검수일 때만 표시)
   const photoRow = document.getElementById("insp-photo-row");
   const photoPrev = document.getElementById("inspPhotoPreview");
   if (photoRow && photoPrev) {
-    photoPrev.innerHTML = `<img src="${inspectPhoto}" alt="검수 사진" />`;
-    photoRow.hidden = false;
+    if (inspectPhoto) {
+      photoPrev.innerHTML = `<img src="${inspectPhoto}" alt="검수 사진" />`;
+      photoRow.hidden = false;
+    } else {
+      photoPrev.innerHTML = "";
+      photoRow.hidden = true;
+    }
   }
   document.getElementById("inspectTitle").textContent = isAdmin ? "검수 확인" : "검수 요청";
   document.getElementById("inspectSubmit").textContent = isAdmin ? "검수 확인" : "검수 요청";
@@ -1628,7 +1667,6 @@ async function submitInspect() {
   if (!checked) { errEl.textContent = "‘검수 완료를 확인합니다’에 체크해주세요."; errEl.hidden = false; return; }
   if (!period) { errEl.textContent = "검수 회차를 선택해주세요."; errEl.hidden = false; return; }
   if (!inspector) { errEl.textContent = "검수 확인자 이름을 입력해주세요."; errEl.hidden = false; return; }
-  if (!inspectPhoto) { errEl.textContent = "검수 사진이 없습니다. ‘📷 사진촬영 검수’로 다시 촬영해주세요."; errEl.hidden = false; return; }
   const a = findAsset(inspectTargetId);
   if (!a) { hide("inspectOverlay"); return; }
   const photo = inspectPhoto;
@@ -1653,8 +1691,8 @@ async function submitInspect() {
   hide("inspectOverlay");
   inspectPhoto = "";
   await reloadAll(); rerender();
-  if (isAdmin) { openDetail(inspectTargetId); alert("검수가 완료되었습니다. 검수 사진이 기록에 추가되었습니다."); }
-  else { hide("detailOverlay"); alert("검수 승인 신청이 접수되었습니다. 관리자 승인 후 검수 사진과 함께 기록에 반영됩니다."); }
+  if (isAdmin) { openDetail(inspectTargetId); alert(photo ? "검수가 완료되었습니다. 검수 사진이 기록에 추가되었습니다." : "검수가 완료되었습니다."); }
+  else { hide("detailOverlay"); alert(photo ? "검수 승인 신청이 접수되었습니다. 관리자 승인 후 검수 사진과 함께 기록에 반영됩니다." : "검수 승인 신청이 접수되었습니다. 관리자 승인 후 기록에 반영됩니다."); }
 }
 // 검수 목록을 오버레이에 저장(기존 데이터 보존)
 async function writeInspections(id, list) {
@@ -2379,6 +2417,7 @@ document.getElementById("detailDeleteBtn").addEventListener("click", () => handl
 document.getElementById("detailDownloadBtn").addEventListener("click", downloadPhoto);
 document.getElementById("detailLabelBtn").addEventListener("click", () => downloadLabelFile(detailCurrentId));
 document.getElementById("detailLabelDelBtn").addEventListener("click", () => deleteLabelFile(detailCurrentId));
+document.getElementById("detailInspectBtn").addEventListener("click", () => openInspect(detailCurrentId));
 document.getElementById("detailBody").addEventListener("click", (e) => {
   const thumb = e.target.closest(".insp-thumb");
   if (thumb) { openLightbox(thumb.src); return; }
