@@ -1421,6 +1421,7 @@ async function recognizeAssetNumber(dataUrl) {
 // 사진촬영 검수 버튼 → 카메라 실행
 function startScanInspect() {
   if (!requireLogin()) return;
+  alert("📷 촬영 안내\n\n· 휴대폰을 세로로 들고 찍어주세요. (가로로 찍으면 인식이 잘 안 됩니다.)\n· 라벨의 QR·자산코드가 화면에 크고 반듯하게 담기도록\n· 밝은 곳에서 흔들림 없이 촬영해 주세요.");
   const input = document.getElementById("scanCameraInput");
   if (input) { input.value = ""; input.click(); }
 }
