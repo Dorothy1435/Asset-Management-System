@@ -1441,56 +1441,62 @@ function findAssetByNumber(code) {
   }
   return null;
 }
-// 인식 텍스트에서 자산코드(20자리)를 뽑는다.
-// 줄 단위로 숫자 덩어리를 만들어 '구입일·금액' 같은 다른 숫자와 붙지 않게 하고,
-// 자산코드 길이인 20자리를 최우선으로 고른다. (없으면 16~24자리 중 가장 긴 것)
-function extractAssetCode(text) {
-  if (!text) return null;
+// 인식 텍스트에서 자산코드(숫자 20개) 후보들을 뽑는다.
+// 자산코드는 대부분 한 줄에 있으므로, 줄 단위로 숫자 덩어리를 만들어
+// '구입일·금액' 같은 다른 숫자와 붙지 않게 한다. 20자리를 최우선으로 정렬해 반환.
+function extractAssetCodes(text) {
+  if (!text) return [];
   const runs = [];
   String(text).split(/[\r\n]+/).forEach((line) => {
     const cleaned = line.replace(/[.\s-]/g, "");           // 한 줄 안의 공백·점·하이픈만 제거
     const m = cleaned.match(/\d{10,}/g);                    // 10자리 이상 숫자 덩어리만 후보
     if (m) runs.push(...m);
   });
-  const exact = runs.find((r) => r.length === 20);         // 자산코드는 20자리
-  if (exact) return exact;
-  return runs.filter((r) => r.length >= 16 && r.length <= 24).sort((a, b) => b.length - a.length)[0] || null;
+  const cand = runs.filter((r) => r.length >= 16 && r.length <= 24);
+  // 20자리(정확 길이) 먼저, 그다음 길이가 긴 순
+  cand.sort((a, b) => (b.length === 20) - (a.length === 20) || b.length - a.length);
+  return [...new Set(cand)];
 }
-// 촬영 사진에서 자산번호(자산코드)를 인식한다.
+// 단일 자산코드 (라벨 등록 폼 자동채우기용)
+function extractAssetCode(text) { return extractAssetCodes(text)[0] || null; }
+// 촬영 사진에서 자산코드(20자리)를 인식한다.
 // QR은 읽지 않고, 라벨에 인쇄된 '자산코드 20자리'를 글자 인식(OCR)으로 읽는다.
+// 일반 인식과 숫자 전용 인식에서 나온 20자리 후보를 모두 모아,
+// 실제 등록된 자산과 일치하는 후보를 우선 선택한다.
 async function recognizeAssetNumber(dataUrl) {
   let worker = null;
+  const candidates = [];
+  const addFrom = (text) => { extractAssetCodes(text).forEach((c) => { if (!candidates.includes(c)) candidates.push(c); }); };
   try {
     setScanLoading("글자를 인식하는 중입니다… 처음 실행은 30초~1분 걸릴 수 있어요.", true);
     await ensureTesseract();
     if (!window.Tesseract) return null;
     const image = await preprocessOcrImage(dataUrl);
     const logger = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
-    const codeOf = extractAssetCode;
     if (typeof Tesseract.createWorker === "function") {
       worker = await Tesseract.createWorker("kor+eng", 1, { logger });
       try { await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" }); } catch {}
       // 1차: 일반 인식(한글+영문)
       let { data } = await worker.recognize(image);
-      let code = codeOf(data.text);
-      if (code) return code;
-      // 2차: 숫자만 인식 — 자산번호(숫자) 정확도 향상
+      addFrom(data.text);
+      // 2차: 숫자만 인식 — 자산코드(숫자) 정확도 향상
       setScanLoading("자산을 다시 확인하는 중…", true);
       try { await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "6" }); } catch {}
       ({ data } = await worker.recognize(image));
-      code = codeOf(data.text);
-      if (code) return code;
+      addFrom(data.text);
     } else {
       const { data } = await Tesseract.recognize(image, "kor+eng", { logger });
-      const code = codeOf(data.text);
-      if (code) return code;
+      addFrom(data.text);
     }
   } catch (e) {
     console.error("자산번호 인식 오류:", e);
   } finally {
     if (worker) { try { await worker.terminate(); } catch {} }
   }
-  return null;
+  // 후보 중 실제 등록된 자산과 매칭되는 것을 우선 (20자리 후보부터 검사됨)
+  for (const c of candidates) { if (findAssetByNumber(c)) return c; }
+  // 매칭이 없으면 20자리(있으면) 또는 첫 후보를 돌려줘 안내에 표시
+  return candidates.find((c) => c.length === 20) || candidates[0] || null;
 }
 // 사진촬영 검수 버튼 → 촬영 안내 모달 표시
 function startScanInspect() {
