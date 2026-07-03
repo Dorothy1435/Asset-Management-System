@@ -1380,71 +1380,37 @@ function findAssetByNumber(code) {
   hit = assets.find((a) => { const n = norm(a.assetNumber); return n.length >= 8 && (n.includes(target) || target.includes(n)); });
   return hit || null;
 }
-// 이미지(dataURL)를 지정한 각도로 회전한 새 dataURL을 만든다. (가로/세로로 찍은 사진 자동 보정용)
-function rotateDataUrl(dataUrl, deg) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const swap = deg === 90 || deg === 270;
-      const w = img.width, h = img.height;
-      const canvas = document.createElement("canvas");
-      canvas.width = swap ? h : w;
-      canvas.height = swap ? w : h;
-      const ctx = canvas.getContext("2d");
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate(deg * Math.PI / 180);
-      ctx.drawImage(img, -w / 2, -h / 2);
-      resolve(canvas.toDataURL("image/jpeg", 0.92));
-    };
-    img.onerror = reject;
-    img.src = dataUrl;
-  });
-}
-// 텍스트에서 자산번호(16~24자리 숫자) 추출
-function extractAssetCode(text) {
-  return ((text || "").replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0] || null;
-}
 // 촬영 사진에서 자산번호(자산코드)를 인식한다. QR 우선, 실패 시 글자 인식(OCR).
-// 가로로 찍은 사진도 인식되도록 0°/90°/270°/180° 회전을 차례로 시도한다.
 async function recognizeAssetNumber(dataUrl) {
-  const ANGLES = [0, 90, 270, 180];
-  // 1) QR코드 (가장 정확·빠름) — 회전별로 시도
-  for (const deg of ANGLES) {
-    try {
-      setScanLoading(deg ? `QR코드 확인 중… (${deg}° 회전)` : "QR코드를 확인하는 중…", true);
-      const src = deg ? await rotateDataUrl(dataUrl, deg) : dataUrl;
-      const qr = await decodeLabelQR(src);
-      const code = qr ? ((String(qr).replace(/[\s-]/g, "").match(/\d{16,24}/) || [])[0]) : null;
+  // 1) QR코드 (가장 정확·빠름)
+  try {
+    setScanLoading("QR코드를 확인하는 중…", true);
+    const qr = await decodeLabelQR(dataUrl);
+    if (qr) {
+      const code = (String(qr).replace(/[\s-]/g, "").match(/\d{16,24}/) || [])[0];
       if (code) return code;
-    } catch (e) { console.error("QR 인식 오류:", e); }
-  }
-  // 2) 글자 인식(OCR) — 회전별로 시도 (워커는 한 번만 생성해 재사용)
+    }
+  } catch (e) { console.error("QR 인식 오류:", e); }
+  // 2) 글자 인식(OCR)
   let worker = null;
   try {
     setScanLoading("글자를 인식하는 중입니다… 처음 실행은 30초~1분 걸릴 수 있어요.", true);
     await ensureTesseract();
     if (!window.Tesseract) return null;
-    const hasWorker = typeof Tesseract.createWorker === "function";
-    if (hasWorker) {
-      worker = await Tesseract.createWorker("kor+eng", 1);
+    const image = await preprocessOcrImage(dataUrl);
+    const logger = (m) => { if (m.status === "recognizing text") setScanLoading(`자산번호 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
+    let text = "";
+    if (typeof Tesseract.createWorker === "function") {
+      worker = await Tesseract.createWorker("kor+eng", 1, { logger });
       try { await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" }); } catch {}
+      const { data } = await worker.recognize(image);
+      text = data.text || "";
+    } else {
+      const { data } = await Tesseract.recognize(image, "kor+eng", { logger });
+      text = data.text || "";
     }
-    for (let i = 0; i < ANGLES.length; i++) {
-      const deg = ANGLES[i];
-      setScanLoading(`자산번호를 인식하는 중… (${i + 1}/${ANGLES.length}${deg ? `, ${deg}° 회전` : ""})`, true);
-      const src = deg ? await rotateDataUrl(dataUrl, deg) : dataUrl;
-      const image = await preprocessOcrImage(src);
-      let text = "";
-      if (hasWorker) {
-        const { data } = await worker.recognize(image);
-        text = data.text || "";
-      } else {
-        const { data } = await Tesseract.recognize(image, "kor+eng");
-        text = data.text || "";
-      }
-      const code = extractAssetCode(text);
-      if (code) return code;
-    }
+    const code = (text.replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0];
+    if (code) return code;
   } catch (e) {
     console.error("자산번호 인식 오류:", e);
   } finally {
