@@ -1441,18 +1441,24 @@ function findAssetByNumber(code) {
   }
   return null;
 }
-// 촬영 사진에서 자산번호(자산코드)를 인식한다. QR 우선, 실패 시 글자 인식(OCR).
+// 인식 텍스트에서 자산코드(20자리)를 뽑는다.
+// 줄 단위로 숫자 덩어리를 만들어 '구입일·금액' 같은 다른 숫자와 붙지 않게 하고,
+// 자산코드 길이인 20자리를 최우선으로 고른다. (없으면 16~24자리 중 가장 긴 것)
+function extractAssetCode(text) {
+  if (!text) return null;
+  const runs = [];
+  String(text).split(/[\r\n]+/).forEach((line) => {
+    const cleaned = line.replace(/[.\s-]/g, "");           // 한 줄 안의 공백·점·하이픈만 제거
+    const m = cleaned.match(/\d{10,}/g);                    // 10자리 이상 숫자 덩어리만 후보
+    if (m) runs.push(...m);
+  });
+  const exact = runs.find((r) => r.length === 20);         // 자산코드는 20자리
+  if (exact) return exact;
+  return runs.filter((r) => r.length >= 16 && r.length <= 24).sort((a, b) => b.length - a.length)[0] || null;
+}
+// 촬영 사진에서 자산번호(자산코드)를 인식한다.
+// QR은 읽지 않고, 라벨에 인쇄된 '자산코드 20자리'를 글자 인식(OCR)으로 읽는다.
 async function recognizeAssetNumber(dataUrl) {
-  // 1) QR코드 (가장 정확·빠름)
-  try {
-    setScanLoading("QR코드를 확인하는 중…", true);
-    const qr = await decodeLabelQR(dataUrl);
-    if (qr) {
-      const code = (String(qr).replace(/[\s-]/g, "").match(/\d{16,24}/) || [])[0];
-      if (code) return code;
-    }
-  } catch (e) { console.error("QR 인식 오류:", e); }
-  // 2) 글자 인식(OCR)
   let worker = null;
   try {
     setScanLoading("글자를 인식하는 중입니다… 처음 실행은 30초~1분 걸릴 수 있어요.", true);
@@ -1460,7 +1466,7 @@ async function recognizeAssetNumber(dataUrl) {
     if (!window.Tesseract) return null;
     const image = await preprocessOcrImage(dataUrl);
     const logger = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
-    const codeOf = (t) => (String(t || "").replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0] || null;
+    const codeOf = extractAssetCode;
     if (typeof Tesseract.createWorker === "function") {
       worker = await Tesseract.createWorker("kor+eng", 1, { logger });
       try { await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" }); } catch {}
@@ -1489,7 +1495,7 @@ async function recognizeAssetNumber(dataUrl) {
 // 사진촬영 검수 버튼 → 카메라 실행
 function startScanInspect() {
   if (!requireLogin()) return;
-  alert("📷 촬영 안내\n\n· 휴대폰을 세로로 들고 찍어주세요. (가로로 찍으면 인식이 잘 안 됩니다.)\n· 라벨의 QR·자산코드가 화면에 크고 반듯하게 담기도록\n· 밝은 곳에서 흔들림 없이 촬영해 주세요.");
+  alert("📷 촬영 안내\n\n· 휴대폰을 세로로 들고 찍어주세요. (가로로 찍으면 인식이 잘 안 됩니다.)\n· 라벨의 ‘자산코드 20자리’가 화면에 크고 반듯하게 담기도록\n· 밝은 곳에서 흔들림 없이 촬영해 주세요.");
   const input = document.getElementById("scanCameraInput");
   if (input) { input.value = ""; input.click(); }
 }
@@ -1504,7 +1510,7 @@ async function handleScanCapture(file) {
     const code = await recognizeAssetNumber(raw);
     setScanLoading("", false);
     if (!code) {
-      alert("사진에서 자산번호(QR·자산코드)를 인식하지 못했습니다.\n\n· 라벨의 QR과 자산코드가 잘리지 않게\n· 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
+      alert("사진에서 자산코드(20자리)를 인식하지 못했습니다.\n\n· 라벨의 ‘자산코드 20자리’가 잘리지 않게\n· 크고 반듯하게, 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
       return;
     }
     const a = findAssetByNumber(code);
@@ -1531,8 +1537,8 @@ function fillFromOcr(text) {
     el.value = value;
     filled.push(label || field);
   };
-  // 자산번호: 20자리 숫자
-  const code = (t.replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0];
+  // 자산번호: 20자리 자산코드 (구입일·금액 등 다른 숫자와 섞이지 않게 줄 단위로 추출)
+  const code = extractAssetCode(t);
   if (code) setIfEmpty("assetNumber", code, "자산번호");
   // 취득금액: 천단위 구분 숫자 중 가장 큰 값
   const money = (t.match(/\d{1,3}(?:[.,]\s?\d{3})+/g) || []).map((x) => Number(x.replace(/[^0-9]/g, ""))).filter((n) => n >= 1000 && n < 100000000);
