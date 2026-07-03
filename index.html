@@ -89,8 +89,11 @@
       </div>
       <button class="btn btn-secondary" id="advToggle">상세 필터</button>
       <button class="btn btn-secondary" id="exportBtn">📥 엑셀 다운로드</button>
+      <button class="btn btn-inspect" id="scanInspectBtn">📷 사진촬영 검수</button>
       <button class="btn btn-secondary" id="uninspBtn" hidden>🔍 올해 검수 누락</button>
       <span class="result-count" id="resultCount"></span>
+      <!-- 모바일에서 바로 후면 카메라가 켜지도록 capture="environment" -->
+      <input type="file" id="scanCameraInput" accept="image/*" capture="environment" hidden />
     </section>
 
     <section class="adv-panel" id="advPanel" hidden>
@@ -170,7 +173,6 @@
         <button class="btn btn-secondary" id="detailLabelBtn" hidden>라벨 파일 다운로드</button>
         <button class="btn btn-danger" id="detailLabelDelBtn" hidden>라벨 삭제</button>
         <button class="btn btn-secondary" id="detailDownloadBtn" hidden>사진 다운로드</button>
-        <button class="btn btn-inspect" id="detailInspectBtn">검수</button>
         <button class="btn btn-primary" id="detailEditBtn">수정</button>
         <button class="btn btn-danger" id="detailDeleteBtn">삭제</button>
         <button class="btn btn-secondary" data-close>목록으로 돌아가기</button>
@@ -524,6 +526,10 @@
       </div>
       <form id="inspectForm" class="modal-body">
         <p class="del-target" id="inspectTarget"></p>
+        <div class="form-row" id="insp-photo-row" style="margin-bottom:12px;" hidden>
+          <label>검수 사진 (촬영됨)</label>
+          <div class="insp-photo-preview" id="inspPhotoPreview"></div>
+        </div>
         <div class="form-row" style="margin-bottom:12px;">
           <label>검수 회차</label>
           <select id="insp-period"></select>
@@ -618,6 +624,15 @@
   <!-- 사진 확대 라이트박스 -->
   <div class="lightbox" id="lightbox" hidden>
     <img id="lightboxImg" src="" alt="확대 이미지" />
+  </div>
+
+  <!-- 검수 사진 인식 로딩 -->
+  <div class="scan-loading" id="scanLoading" hidden>
+    <div class="scan-loading-box">
+      <div class="scan-spinner"></div>
+      <div class="scan-loading-title">📷 자산번호 인식 중…</div>
+      <div class="scan-loading-msg" id="scanLoadingMsg">사진에서 자산코드(QR)를 읽고 있습니다.</div>
+    </div>
   </div>
 
   <footer class="footer">

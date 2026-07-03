@@ -88,6 +88,7 @@ let isSuperAdmin = false;
 let isApproved = false;
 let detailCurrentId = null;
 let inspectTargetId = null;
+let inspectPhoto = "";   // 검수 사진(촬영본) — 카메라 검수 시에만 채워짐
 let posts = [];          // 게시판 글
 let postComments = [];   // 현재 보고 있는 글의 댓글
 let currentPostId = null;
@@ -911,7 +912,6 @@ function openDetail(id) {
   document.getElementById("detailDownloadBtn").hidden = !a.imageUrl;
   document.getElementById("detailLabelBtn").hidden = !a.labelFile;
   document.getElementById("detailLabelDelBtn").hidden = !(isAdmin && a.labelFile);
-  document.getElementById("detailInspectBtn").textContent = isAdmin ? "검수 확인" : "검수 요청";
   document.getElementById("detailEditBtn").textContent = isAdmin ? "수정" : "수정 요청";
   document.getElementById("detailDeleteBtn").textContent = isAdmin ? "삭제" : "삭제 요청";
   show("detailOverlay");
@@ -921,12 +921,13 @@ function renderInspectionLog(a) {
   const list = Array.isArray(a.inspections) ? a.inspections : [];
   let html = `<div class="insp-section"><h3 class="insp-title">검수 기록 <span class="insp-count">${list.length}</span></h3>`;
   if (list.length === 0) {
-    html += `<div class="insp-empty">아직 검수 기록이 없습니다. ‘검수’ 버튼으로 회차별 검수를 확인하세요.</div>`;
+    html += `<div class="insp-empty">아직 검수 기록이 없습니다. 상단 <b>‘📷 사진촬영 검수’</b> 버튼으로 자산 라벨을 촬영해 검수하세요.</div>`;
   } else {
-    html += `<table class="insp-table"><thead><tr><th>구분</th><th>검수일시</th><th>확인자</th><th>소속</th>${isAdmin ? "<th></th>" : ""}</tr></thead><tbody>`;
+    html += `<table class="insp-table"><thead><tr><th>구분</th><th>검수사진</th><th>검수일시</th><th>확인자</th><th>소속</th>${isAdmin ? "<th></th>" : ""}</tr></thead><tbody>`;
     html += list.slice().reverse().map((ins) => `
       <tr>
         <td><span class="insp-ok">✔</span> ${esc(ins.period || "-")}</td>
+        <td>${ins.photo ? `<img src="${ins.photo}" class="insp-thumb" alt="검수 사진" />` : "-"}</td>
         <td>${fmtTime(ins.checkedAt)}</td>
         <td>${esc(ins.inspector || "-")}</td>
         <td>${esc(ins.affiliation || "-")}</td>
@@ -1350,6 +1351,105 @@ function showOcrResult() {
   parts.push("[글자 인식(OCR) 결과]\n" + (lastOcrText || "(인식된 글자 없음)"));
   alert(parts.join("\n\n──────────\n\n"));
 }
+
+// ===== 사진촬영 검수 (카메라로만 검수 가능) =====
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+function setScanLoading(msg, show) {
+  const el = document.getElementById("scanLoading");
+  if (!el) return;
+  if (msg) { const m = document.getElementById("scanLoadingMsg"); if (m) m.textContent = msg; }
+  el.hidden = !show;
+}
+// 자산번호를 정규화(공백·하이픈 제거)해 비교하며 자산을 찾는다.
+function findAssetByNumber(code) {
+  const norm = (s) => String(s || "").replace(/[\s-]/g, "");
+  const target = norm(code);
+  if (!target) return null;
+  // 1) 정확 일치
+  let hit = assets.find((a) => norm(a.assetNumber) === target);
+  if (hit) return hit;
+  // 2) 부분 포함 (인식 자릿수 오차 대비)
+  hit = assets.find((a) => { const n = norm(a.assetNumber); return n.length >= 8 && (n.includes(target) || target.includes(n)); });
+  return hit || null;
+}
+// 촬영 사진에서 자산번호(자산코드)를 인식한다. QR 우선, 실패 시 글자 인식(OCR).
+async function recognizeAssetNumber(dataUrl) {
+  // 1) QR코드 (가장 정확·빠름)
+  try {
+    setScanLoading("QR코드를 확인하는 중…", true);
+    const qr = await decodeLabelQR(dataUrl);
+    if (qr) {
+      const code = (String(qr).replace(/[\s-]/g, "").match(/\d{16,24}/) || [])[0];
+      if (code) return code;
+    }
+  } catch (e) { console.error("QR 인식 오류:", e); }
+  // 2) 글자 인식(OCR)
+  let worker = null;
+  try {
+    setScanLoading("글자를 인식하는 중입니다… 처음 실행은 30초~1분 걸릴 수 있어요.", true);
+    await ensureTesseract();
+    if (!window.Tesseract) return null;
+    const image = await preprocessOcrImage(dataUrl);
+    const logger = (m) => { if (m.status === "recognizing text") setScanLoading(`자산번호 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
+    let text = "";
+    if (typeof Tesseract.createWorker === "function") {
+      worker = await Tesseract.createWorker("kor+eng", 1, { logger });
+      try { await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" }); } catch {}
+      const { data } = await worker.recognize(image);
+      text = data.text || "";
+    } else {
+      const { data } = await Tesseract.recognize(image, "kor+eng", { logger });
+      text = data.text || "";
+    }
+    const code = (text.replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0];
+    if (code) return code;
+  } catch (e) {
+    console.error("자산번호 인식 오류:", e);
+  } finally {
+    if (worker) { try { await worker.terminate(); } catch {} }
+  }
+  return null;
+}
+// 사진촬영 검수 버튼 → 카메라 실행
+function startScanInspect() {
+  if (!requireLogin()) return;
+  const input = document.getElementById("scanCameraInput");
+  if (input) { input.value = ""; input.click(); }
+}
+// 카메라로 찍은 사진 처리: 자산번호 인식 → 매칭 자산의 검수 확인 화면 열기
+async function handleScanCapture(file) {
+  if (!file) return;
+  if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
+  try {
+    setScanLoading("사진을 준비하는 중…", true);
+    const raw = await fileToDataURL(file);                 // 인식용 원본(고해상도)
+    const photo = await compressImage(file, 900, 0.6);     // 검수 기록에 저장할 사진(압축)
+    const code = await recognizeAssetNumber(raw);
+    setScanLoading("", false);
+    if (!code) {
+      alert("사진에서 자산번호(QR·자산코드)를 인식하지 못했습니다.\n\n· 라벨의 QR과 자산코드가 잘리지 않게\n· 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
+      return;
+    }
+    const a = findAssetByNumber(code);
+    if (!a) {
+      alert(`인식된 자산번호와 일치하는 자산을 찾지 못했습니다.\n\n인식된 번호: ${code}\n\n등록된 자산이 맞는지 확인 후 다시 시도해 주세요.`);
+      return;
+    }
+    // 매칭 성공 → 검수 확인 화면으로 이동 (촬영 사진 첨부)
+    openInspect(a.id, photo);
+  } catch (e) {
+    console.error("사진촬영 검수 오류:", e);
+    setScanLoading("", false);
+    alert("사진 처리 중 문제가 발생했습니다. 다시 시도해 주세요.");
+  }
+}
 // 인식 텍스트에서 '자산번호(20자리)'와 '취득금액(천단위 숫자)'만 채운다.
 // (품명·비치호실 등 한글 항목은 OCR 정확도 한계로 자동입력하지 않음 — 직접 입력)
 function fillFromOcr(text) {
@@ -1481,11 +1581,15 @@ async function submitDeleteRequest() {
 }
 
 // ===== 검수 확인 =====
-function openInspect(id) {
+// openInspect 는 반드시 카메라 촬영 흐름(handleScanCapture)에서만 호출된다.
+// photo 인자가 없으면 검수를 진행하지 않는다. (사진촬영을 통해서만 검수 가능)
+function openInspect(id, photo) {
   if (!requireLogin()) return;
   const a = findAsset(id);
   if (!a) return;
+  if (!photo) { alert("검수는 ‘📷 사진촬영 검수’ 버튼으로 라벨을 촬영해야 진행할 수 있습니다."); return; }
   inspectTargetId = id;
+  inspectPhoto = photo;
   document.getElementById("inspectError").hidden = true;
   fillInspPeriod();
   document.getElementById("insp-inspector").value = myProfile?.name || "";
@@ -1495,6 +1599,13 @@ function openInspect(id) {
   affilSel.value = affil;
   document.getElementById("insp-checked").checked = true;
   document.getElementById("inspectTarget").innerHTML = `<b>${esc(a.assetName)}</b> (${esc(a.assetNumber)})`;
+  // 촬영된 검수 사진 미리보기
+  const photoRow = document.getElementById("insp-photo-row");
+  const photoPrev = document.getElementById("inspPhotoPreview");
+  if (photoRow && photoPrev) {
+    photoPrev.innerHTML = `<img src="${inspectPhoto}" alt="검수 사진" />`;
+    photoRow.hidden = false;
+  }
   document.getElementById("inspectTitle").textContent = isAdmin ? "검수 확인" : "검수 요청";
   document.getElementById("inspectSubmit").textContent = isAdmin ? "검수 확인" : "검수 요청";
   document.getElementById("inspectNote").hidden = isAdmin;
@@ -1517,18 +1628,20 @@ async function submitInspect() {
   if (!checked) { errEl.textContent = "‘검수 완료를 확인합니다’에 체크해주세요."; errEl.hidden = false; return; }
   if (!period) { errEl.textContent = "검수 회차를 선택해주세요."; errEl.hidden = false; return; }
   if (!inspector) { errEl.textContent = "검수 확인자 이름을 입력해주세요."; errEl.hidden = false; return; }
+  if (!inspectPhoto) { errEl.textContent = "검수 사진이 없습니다. ‘📷 사진촬영 검수’로 다시 촬영해주세요."; errEl.hidden = false; return; }
   const a = findAsset(inspectTargetId);
   if (!a) { hide("inspectOverlay"); return; }
+  const photo = inspectPhoto;
   const reqName = affiliation ? `${inspector} (${affiliation})` : inspector;
   const btn = document.getElementById("inspectSubmit");
   btn.disabled = true;
   try {
     if (isAdmin) {
-      await applyInspect(inspectTargetId, { periodType, period, inspector, affiliation });
+      await applyInspect(inspectTargetId, { periodType, period, inspector, affiliation, photo });
     } else {
       await submitRequest({
         action: "inspect", target_id: inspectTargetId,
-        payload: { periodType, period, inspector, affiliation, assetName: a.assetName, assetNumber: a.assetNumber },
+        payload: { periodType, period, inspector, affiliation, photo, assetName: a.assetName, assetNumber: a.assetNumber },
         requester: reqName, note: `${period} 검수 확인`,
       });
     }
@@ -1538,9 +1651,10 @@ async function submitInspect() {
   }
   btn.disabled = false;
   hide("inspectOverlay");
+  inspectPhoto = "";
   await reloadAll(); rerender();
-  if (isAdmin) { openDetail(inspectTargetId); }
-  else { hide("detailOverlay"); alert("검수 요청이 접수되었습니다. 관리자 승인 후 기록에 반영됩니다."); }
+  if (isAdmin) { openDetail(inspectTargetId); alert("검수가 완료되었습니다. 검수 사진이 기록에 추가되었습니다."); }
+  else { hide("detailOverlay"); alert("검수 승인 신청이 접수되었습니다. 관리자 승인 후 검수 사진과 함께 기록에 반영됩니다."); }
 }
 // 검수 목록을 오버레이에 저장(기존 데이터 보존)
 async function writeInspections(id, list) {
@@ -1550,10 +1664,10 @@ async function writeInspections(id, list) {
   const { error } = await sb.from("assets").upsert({ id: String(id), kind, data: { ...existing, inspections: list }, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
-async function applyInspect(id, { periodType, period, inspector, affiliation }, meta = {}) {
+async function applyInspect(id, { periodType, period, inspector, affiliation, photo }, meta = {}) {
   const current = findAsset(id);
   if (!current) throw new Error("자산 없음");
-  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", checkedAt: new Date().toISOString() };
+  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", photo: photo || "", checkedAt: new Date().toISOString() };
   const list = Array.isArray(current.inspections) ? [...current.inspections, insp] : [insp];
   await writeInspections(id, list);
   const who = inspector + (affiliation ? ` (${affiliation})` : "");
@@ -2265,8 +2379,9 @@ document.getElementById("detailDeleteBtn").addEventListener("click", () => handl
 document.getElementById("detailDownloadBtn").addEventListener("click", downloadPhoto);
 document.getElementById("detailLabelBtn").addEventListener("click", () => downloadLabelFile(detailCurrentId));
 document.getElementById("detailLabelDelBtn").addEventListener("click", () => deleteLabelFile(detailCurrentId));
-document.getElementById("detailInspectBtn").addEventListener("click", () => openInspect(detailCurrentId));
 document.getElementById("detailBody").addEventListener("click", (e) => {
+  const thumb = e.target.closest(".insp-thumb");
+  if (thumb) { openLightbox(thumb.src); return; }
   const img = e.target.closest(".detail-photo img");
   if (img) { openLightbox(img.src); return; }
   const saveUser = e.target.closest("#detailUserSaveBtn");
@@ -2276,6 +2391,8 @@ document.getElementById("detailBody").addEventListener("click", (e) => {
 });
 document.getElementById("inspectSubmit").addEventListener("click", submitInspect);
 document.getElementById("inspectForm").addEventListener("submit", (e) => { e.preventDefault(); submitInspect(); });
+document.getElementById("scanInspectBtn").addEventListener("click", startScanInspect);
+document.getElementById("scanCameraInput").addEventListener("change", (e) => { handleScanCapture(e.target.files && e.target.files[0]); });
 document.getElementById("lightbox").addEventListener("click", closeLightbox);
 
 document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files));
@@ -2396,7 +2513,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 
 // 모달 닫기
 const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay"];
-document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => ALL_MODALS.forEach(hide)));
+document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });
 

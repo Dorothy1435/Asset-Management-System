@@ -934,6 +934,58 @@ body {
   border-radius: 8px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
 }
+
+/* 사진촬영 검수 — 인식 로딩 */
+.scan-loading {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2100;
+  padding: 24px;
+}
+.scan-loading[hidden] { display: none; }
+.scan-loading-box {
+  background: #fff;
+  border-radius: 14px;
+  padding: 28px 26px;
+  max-width: 340px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.35);
+}
+.scan-spinner {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 16px;
+  border: 4px solid #e0f2fe;
+  border-top-color: #0284c7;
+  border-radius: 50%;
+  animation: scan-spin 0.9s linear infinite;
+}
+@keyframes scan-spin { to { transform: rotate(360deg); } }
+.scan-loading-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.scan-loading-msg { font-size: 13px; color: var(--text-light); line-height: 1.5; }
+
+/* 검수 사진 미리보기 / 썸네일 */
+.insp-photo-preview img {
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+  display: block;
+}
+.insp-thumb {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: zoom-in;
+}
 .req-meta { font-size: 12px; color: var(--text-light); }
 .req-summary { font-size: 14px; margin-bottom: 10px; }
 .req-fields {
