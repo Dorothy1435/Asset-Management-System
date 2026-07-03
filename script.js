@@ -1459,7 +1459,7 @@ async function recognizeAssetNumber(dataUrl) {
     await ensureTesseract();
     if (!window.Tesseract) return null;
     const image = await preprocessOcrImage(dataUrl);
-    const logger = (m) => { if (m.status === "recognizing text") setScanLoading(`자산번호 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
+    const logger = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
     const codeOf = (t) => (String(t || "").replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0] || null;
     if (typeof Tesseract.createWorker === "function") {
       worker = await Tesseract.createWorker("kor+eng", 1, { logger });
@@ -1469,7 +1469,7 @@ async function recognizeAssetNumber(dataUrl) {
       let code = codeOf(data.text);
       if (code) return code;
       // 2차: 숫자만 인식 — 자산번호(숫자) 정확도 향상
-      setScanLoading("자산번호(숫자)를 다시 확인하는 중…", true);
+      setScanLoading("자산을 다시 확인하는 중…", true);
       try { await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "6" }); } catch {}
       ({ data } = await worker.recognize(image));
       code = codeOf(data.text);
