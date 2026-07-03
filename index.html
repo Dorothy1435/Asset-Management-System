@@ -627,6 +627,31 @@
     <img id="lightboxImg" src="" alt="확대 이미지" />
   </div>
 
+  <!-- 검수 촬영 안내 -->
+  <div class="modal-overlay" id="scanGuideOverlay" hidden>
+    <div class="modal modal-narrow scan-guide" role="dialog" aria-modal="true">
+      <div class="scan-guide-hero">
+        <div class="scan-guide-frame">
+          <span class="sg-corner tl"></span><span class="sg-corner tr"></span>
+          <span class="sg-corner bl"></span><span class="sg-corner br"></span>
+          <span class="scan-guide-emoji">🏷️</span>
+          <span class="scan-guide-line"></span>
+        </div>
+      </div>
+      <h2 class="scan-guide-title">자산 검수 촬영</h2>
+      <p class="scan-guide-sub">라벨의 <b>QR코드</b>와 <b>자산코드 20자리</b>가<br />또렷하게 보이도록 촬영해 주세요.</p>
+      <ul class="scan-guide-list">
+        <li><span class="sg-ic">📱</span> <span>휴대폰을 <b>세로</b>로 들고 촬영하세요.</span></li>
+        <li><span class="sg-ic">🔍</span> <span>QR·자산코드가 화면에 <b>크고 반듯하게</b> 담기도록.</span></li>
+        <li><span class="sg-ic">💡</span> <span><b>밝은 곳</b>에서 그림자·흔들림 없이.</span></li>
+      </ul>
+      <div class="scan-guide-actions">
+        <button class="btn btn-primary btn-lg" id="scanGuideStart">📷 촬영 시작</button>
+        <button class="btn btn-secondary" id="scanGuideCancel">취소</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 검수 사진 인식 로딩 -->
   <div class="scan-loading" id="scanLoading" hidden>
     <div class="scan-loading-box">

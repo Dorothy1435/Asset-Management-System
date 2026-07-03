@@ -1492,10 +1492,14 @@ async function recognizeAssetNumber(dataUrl) {
   }
   return null;
 }
-// 사진촬영 검수 버튼 → 카메라 실행
+// 사진촬영 검수 버튼 → 촬영 안내 모달 표시
 function startScanInspect() {
   if (!requireLogin()) return;
-  alert("📷 촬영 안내\n\n· 휴대폰을 세로로 들고 찍어주세요. (가로로 찍으면 인식이 잘 안 됩니다.)\n· 라벨의 ‘자산코드 20자리’가 화면에 크고 반듯하게 담기도록\n· 밝은 곳에서 흔들림 없이 촬영해 주세요.");
+  show("scanGuideOverlay");
+}
+// 안내 모달의 '촬영 시작' → 실제 카메라 실행 (사용자 제스처 내에서 호출해야 카메라가 열림)
+function launchScanCamera() {
+  hide("scanGuideOverlay");
   const input = document.getElementById("scanCameraInput");
   if (input) { input.value = ""; input.click(); }
 }
@@ -2472,6 +2476,9 @@ document.getElementById("detailBody").addEventListener("click", (e) => {
 document.getElementById("inspectSubmit").addEventListener("click", submitInspect);
 document.getElementById("inspectForm").addEventListener("submit", (e) => { e.preventDefault(); submitInspect(); });
 document.getElementById("scanInspectBtn").addEventListener("click", startScanInspect);
+document.getElementById("scanGuideStart").addEventListener("click", launchScanCamera);
+document.getElementById("scanGuideCancel").addEventListener("click", () => hide("scanGuideOverlay"));
+document.getElementById("scanGuideOverlay").addEventListener("click", (e) => { if (e.target.id === "scanGuideOverlay") hide("scanGuideOverlay"); });
 document.getElementById("scanCameraInput").addEventListener("change", (e) => { handleScanCapture(e.target.files && e.target.files[0]); });
 document.getElementById("lightbox").addEventListener("click", closeLightbox);
 
@@ -2592,7 +2599,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });
