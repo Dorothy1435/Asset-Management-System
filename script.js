@@ -1266,7 +1266,22 @@ function _qrFromCanvas(canvas) {
     return r ? r.data : null;
   } catch { return null; }
 }
-// QR코드를 이미지에서 읽어 문자열 반환 (없으면 null). 전체 → 실패 시 오른쪽 아래(QR 위치) 확대 재시도
+// 캔버스를 흑백 이진화(평균 임계값)해 QR 인식률을 높인다. (그림자·저대비 라벨 대응)
+function _binarizeCanvas(canvas) {
+  try {
+    const ctx = canvas.getContext("2d");
+    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const p = d.data;
+    let sum = 0;
+    for (let i = 0; i < p.length; i += 4) { const g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; p[i] = p[i + 1] = p[i + 2] = g; sum += g; }
+    const th = sum / (p.length / 4);
+    for (let i = 0; i < p.length; i += 4) { const v = p[i] > th ? 255 : 0; p[i] = p[i + 1] = p[i + 2] = v; }
+    ctx.putImageData(d, 0, 0);
+  } catch {}
+  return canvas;
+}
+// QR코드를 이미지에서 읽어 문자열 반환 (없으면 null).
+// 전체 이미지 + QR이 있을 만한 여러 영역을 배율·이진화까지 바꿔가며 시도해 인식률을 높인다.
 async function decodeLabelQR(dataUrl) {
   try { await ensureJsQR(); } catch { return null; }
   if (!window.jsQR) return null;
@@ -1275,17 +1290,31 @@ async function decodeLabelQR(dataUrl) {
     img.onload = () => {
       const W = img.width, H = img.height;
       const crop = (sx, sy, sw, sh, dw) => {
+        sw = Math.max(1, Math.round(sw)); sh = Math.max(1, Math.round(sh));
+        dw = Math.max(1, Math.round(dw));
         const dh = Math.round(dw * sh / sw);
-        const c = document.createElement("canvas"); c.width = dw; c.height = dh;
-        c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+        const c = document.createElement("canvas"); c.width = dw; c.height = Math.max(1, dh);
+        c.getContext("2d").drawImage(img, Math.round(sx), Math.round(sy), sw, sh, 0, 0, dw, dh);
         return c;
       };
-      // 1) 전체 이미지 (최대 3000px)
-      const dw1 = Math.min(W, W >= H ? 3000 : Math.round(3000 * W / H));
-      let out = _qrFromCanvas(crop(0, 0, W, H, dw1));
-      // 2) 오른쪽 아래 영역만 크게 (라벨 QR 위치)
-      if (!out) out = _qrFromCanvas(crop(Math.round(W * 0.45), Math.round(H * 0.4), Math.round(W * 0.55), Math.round(H * 0.6), 1600));
-      resolve(out);
+      // 시도할 영역: 전체 + 라벨에서 QR이 있을 만한 부분 영역들
+      const regions = [
+        [0, 0, W, H],                                   // 전체
+        [W * 0.45, H * 0.40, W * 0.55, H * 0.60],       // 오른쪽 아래
+        [W * 0.45, 0, W * 0.55, H * 0.55],              // 오른쪽 위
+        [0, H * 0.45, W * 0.55, H * 0.55],              // 왼쪽 아래
+        [W * 0.25, H * 0.25, W * 0.50, H * 0.50],       // 중앙
+      ];
+      const scales = [2400, 1600];
+      for (const [sx, sy, sw, sh] of regions) {
+        for (const dw of scales) {
+          const canvas = crop(sx, sy, sw, sh, dw);
+          let out = _qrFromCanvas(canvas);           // 원본 그대로
+          if (!out) out = _qrFromCanvas(_binarizeCanvas(canvas)); // 이진화 후 재시도
+          if (out) { resolve(out); return; }
+        }
+      }
+      resolve(null);
     };
     img.onerror = () => resolve(null);
     img.src = dataUrl;
@@ -1368,6 +1397,23 @@ function setScanLoading(msg, show) {
   if (msg) { const m = document.getElementById("scanLoadingMsg"); if (m) m.textContent = msg; }
   el.hidden = !show;
 }
+// 두 문자열의 편집 거리(Levenshtein) — 근접 매칭용
+function _editDistance(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  let prev = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let cur = [i];
+    const ca = a.charCodeAt(i - 1);
+    for (let j = 1; j <= n; j++) {
+      const cost = ca === b.charCodeAt(j - 1) ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
 // 자산번호를 정규화(공백·하이픈 제거)해 비교하며 자산을 찾는다.
 function findAssetByNumber(code) {
   const norm = (s) => String(s || "").replace(/[\s-]/g, "");
@@ -1378,7 +1424,22 @@ function findAssetByNumber(code) {
   if (hit) return hit;
   // 2) 부분 포함 (인식 자릿수 오차 대비)
   hit = assets.find((a) => { const n = norm(a.assetNumber); return n.length >= 8 && (n.includes(target) || target.includes(n)); });
-  return hit || null;
+  if (hit) return hit;
+  // 3) 근접 매칭: 실제 등록된 자산번호 중 편집거리가 최소이면서 '유일하게 가까운' 후보만 채택.
+  //    (연속 번호는 1자리 차이라, 애매하면 채택하지 않아 오인식을 막는다.)
+  if (target.length >= 16 && target.length <= 24) {
+    let best = null, bestD = Infinity, secondD = Infinity;
+    for (const a of assets) {
+      const n = norm(a.assetNumber);
+      if (n.length < 16) continue;
+      const d = _editDistance(target, n);
+      if (d < bestD) { secondD = bestD; bestD = d; best = a; }
+      else if (d < secondD) secondD = d;
+    }
+    // 최소거리 2 이하 & 2등과 2 이상 차이 → 확실한 승자만 인정
+    if (best && bestD <= 2 && (secondD - bestD) >= 2) return best;
+  }
+  return null;
 }
 // 촬영 사진에서 자산번호(자산코드)를 인식한다. QR 우선, 실패 시 글자 인식(OCR).
 async function recognizeAssetNumber(dataUrl) {
@@ -1399,18 +1460,25 @@ async function recognizeAssetNumber(dataUrl) {
     if (!window.Tesseract) return null;
     const image = await preprocessOcrImage(dataUrl);
     const logger = (m) => { if (m.status === "recognizing text") setScanLoading(`자산번호 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
-    let text = "";
+    const codeOf = (t) => (String(t || "").replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0] || null;
     if (typeof Tesseract.createWorker === "function") {
       worker = await Tesseract.createWorker("kor+eng", 1, { logger });
       try { await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" }); } catch {}
-      const { data } = await worker.recognize(image);
-      text = data.text || "";
+      // 1차: 일반 인식(한글+영문)
+      let { data } = await worker.recognize(image);
+      let code = codeOf(data.text);
+      if (code) return code;
+      // 2차: 숫자만 인식 — 자산번호(숫자) 정확도 향상
+      setScanLoading("자산번호(숫자)를 다시 확인하는 중…", true);
+      try { await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "6" }); } catch {}
+      ({ data } = await worker.recognize(image));
+      code = codeOf(data.text);
+      if (code) return code;
     } else {
       const { data } = await Tesseract.recognize(image, "kor+eng", { logger });
-      text = data.text || "";
+      const code = codeOf(data.text);
+      if (code) return code;
     }
-    const code = (text.replace(/[.\s-]/g, "").match(/\d{16,24}/) || [])[0];
-    if (code) return code;
   } catch (e) {
     console.error("자산번호 인식 오류:", e);
   } finally {
