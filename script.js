@@ -1756,7 +1756,7 @@ async function handleScanCapture(file) {
     const code = await recognizeAssetNumber(raw);          // 인식(%)을 먼저 — 무거운 압축은 매칭 성공 후로 미룬다
     setScanLoading("", false);
     if (!code) {
-      alert("사진에서 자산코드(20자리)를 인식하지 못했습니다.\n\n· 라벨의 ‘자산코드 20자리’가 잘리지 않게\n· 크고 반듯하게, 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
+      alert("사진에서 자산번호를 인식하지 못했습니다.\n\n· 라벨의 ‘자산번호’가 잘리지 않게\n· 크고 반듯하게, 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
       return;
     }
     const a = findAssetByNumber(code);
