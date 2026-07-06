@@ -780,16 +780,18 @@ function render() {
   const showInsp = currentGroup !== GROUP_ELEC; // 검수는 2025년도 자산 전용 (전자 제외)
   const tableEl = document.querySelector(".asset-table");
   if (tableEl) { tableEl.classList.toggle("hide-insp", !showInsp); tableEl.classList.toggle("hide-check", !isAdmin); }
+  const roundFilter = document.getElementById("inspRoundFilter");
+  if (roundFilter) { roundFilter.hidden = !showInsp; roundFilter.value = inspRound; }
   const uninspBtn = document.getElementById("uninspBtn");
   if (uninspBtn) {
     uninspBtn.hidden = !showInsp;
-    uninspBtn.textContent = `🔍 ${inspRound} 미검수`;
+    uninspBtn.textContent = `🔍 미검수`;
     uninspBtn.classList.toggle("active", showInsp && inspView === "uninsp");
   }
   const inspDoneBtn = document.getElementById("inspDoneBtn");
   if (inspDoneBtn) {
     inspDoneBtn.hidden = !showInsp;
-    inspDoneBtn.textContent = `✅ ${inspRound} 검수 완료`;
+    inspDoneBtn.textContent = `✅ 검수 완료`;
     inspDoneBtn.classList.toggle("active", showInsp && inspView === "done");
   }
   const start = (currentPage - 1) * PER_PAGE;
@@ -2301,8 +2303,10 @@ function histSummary(h) {
     const bv = b[k] ?? "", av = a[k] ?? "";
     if (String(bv) !== String(av)) changes.push((k === "imageUrl" || k === "labelFile") ? `${HIST_LABELS[k]} 변경` : `${HIST_LABELS[k]}: ${esc(shortVal(bv))} → ${esc(shortVal(av))}`);
   });
-  return changes.length ? changes.join("<br>") : "변경 없음";
+  return changes.length ? changes.join(" · ") : "변경 없음";
 }
+const stripTags = (s) => String(s == null ? "" : s).replace(/<[^>]+>/g, "");
+// 결재/변경 이력 — 한 줄씩 간결한 목록으로 표시
 function renderHistory() {
   const body = document.getElementById("adminHistBody");
   if (!body) return;
@@ -2313,26 +2317,25 @@ function renderHistory() {
   if (rows.length === 0) { body.innerHTML = `<div class="empty-msg">기록이 없습니다.</div>`; return; }
   const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림", inspect: "검수" };
   const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert", inspect: "req-inspect" };
-  body.innerHTML =
-    (isSuperAdmin ? "" : `<div class="notice" style="margin-bottom:14px;">원상복구(되돌리기)와 기록 삭제는 <b>최고관리자</b>만 할 수 있습니다. 일반 관리자는 이력 조회만 가능합니다.</div>`) +
-    rows.map((h) => {
-    const meta = [h.approved_by && `결재자: ${esc(h.approved_by)}`, h.requester && `신청자: ${esc(h.requester)}`, h.note && esc(h.note)].filter(Boolean).join(" · ");
+  const notice = isSuperAdmin ? "" : `<div class="notice" style="margin-bottom:12px;">되돌리기·기록 삭제는 <b>최고관리자</b>만 할 수 있습니다.</div>`;
+  body.innerHTML = notice + `<div class="hist-list">` + rows.map((h) => {
+    const summary = histSummary(h);
+    const who = [h.approved_by && `결재 ${esc(h.approved_by)}`, h.requester && `신청 ${esc(h.requester)}`].filter(Boolean).join(" · ");
     const canRevert = h.action !== "inspect" && isSuperAdmin;
     const actions = isSuperAdmin
-      ? `${canRevert ? `<button class="btn btn-secondary btn-sm" data-revert="${h.id}">이전 상태로 되돌리기</button>` : ""}
-         <button class="btn btn-danger btn-sm" data-delhist="${h.id}">기록 삭제</button>`
+      ? `<span class="hist-actions">${canRevert ? `<button class="btn-mini btn-edit" data-revert="${h.id}">되돌리기</button>` : ""}<button class="btn-mini btn-del" data-delhist="${h.id}">삭제</button></span>`
       : "";
+    const tip = stripTags(`${h.asset_name || h.asset_id} · ${summary}${who ? " · " + who : ""}`);
     return `
-      <div class="req-card">
-        <div class="req-top">
-          <span class="req-badge ${actCls[h.action] || "badge-gray"}">${actLabel[h.action] || h.action}</span>
-          <span class="req-meta">${fmtTime(h.created_at)} · <b>${esc(h.asset_name || h.asset_id)}</b></span>
-        </div>
-        <div class="req-summary">${histSummary(h)}</div>
-        ${meta ? `<div class="req-meta" style="margin-bottom:8px;">${meta}</div>` : ""}
-        ${actions ? `<div class="req-actions">${actions}</div>` : ""}
+      <div class="hist-row" title="${esc(tip)}">
+        <span class="hist-time">${fmtTime(h.created_at)}</span>
+        <span class="req-badge ${actCls[h.action] || "badge-gray"}">${actLabel[h.action] || h.action}</span>
+        <span class="hist-asset">${esc(h.asset_name || h.asset_id)}</span>
+        <span class="hist-sum">${summary}</span>
+        ${who ? `<span class="hist-who">${who}</span>` : ""}
+        ${actions}
       </div>`;
-  }).join("");
+  }).join("") + `</div>`;
 }
 
 // ===== 회원 관리 (관리자) =====
@@ -2625,6 +2628,7 @@ document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEven
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
 document.getElementById("uninspBtn").addEventListener("click", () => { inspView = inspView === "uninsp" ? "all" : "uninsp"; applyFilter(); });
 document.getElementById("inspDoneBtn").addEventListener("click", () => { inspView = inspView === "done" ? "all" : "done"; applyFilter(); });
+document.getElementById("inspRoundFilter").addEventListener("change", (e) => { inspRound = e.target.value; renderStats(); applyFilter(); });
 document.getElementById("stats").addEventListener("change", (e) => {
   if (e.target && e.target.id === "inspRoundSel") { inspRound = e.target.value; renderStats(); applyFilter(); }
 });

@@ -888,6 +888,44 @@ body {
 .req-update { background: #dbeafe; color: #1e40af; }
 .req-delete { background: #fee2e2; color: #b91c1c; }
 .req-revert { background: #f3e8ff; color: #7c3aed; }
+.req-inspect { background: #cffafe; color: #0e7490; }
+
+/* 결재/변경 이력 — 한 줄 목록 */
+.hist-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.hist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #f0f1f3;
+  font-size: 13px;
+  min-width: 0;
+}
+.hist-row:last-child { border-bottom: none; }
+.hist-row:hover { background: #f9fafb; }
+.hist-time { color: var(--text-light); font-size: 12px; white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.hist-row .req-badge { flex-shrink: 0; }
+.hist-asset { font-weight: 700; color: var(--text); white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+.hist-sum { flex: 1 1 auto; min-width: 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-who { color: var(--text-light); font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+.hist-actions { display: inline-flex; gap: 6px; flex-shrink: 0; }
+
+/* 검수 회차 선택 + 필터 버튼 묶음 */
+.insp-filter-group { display: inline-flex; align-items: center; gap: 6px; }
+.insp-round-sel {
+  padding: 9px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+  cursor: pointer;
+  outline: none;
+}
+.insp-round-sel:focus { border-color: var(--primary); }
 
 .hist-search {
   width: 100%;
@@ -940,9 +978,11 @@ body {
 .footer-btns { display: inline-flex; gap: 8px; }
 
 /* 회원 테이블 */
+#adminMembersBody { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .member-table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 720px;
 }
 .member-table th {
   text-align: left;
@@ -1314,13 +1354,78 @@ body.pending-approval .footer { display: none !important; }
 .ocr-status.ocr-err { background: #fef2f2; color: #b91c1c; }
 
 /* 반응형 */
+/* ===== 반응형 (태블릿/모바일) ===== */
+/* 페이지 자체가 가로로 밀리지 않도록. 넓은 표는 각자의 wrap 안에서만 가로 스크롤.
+   (sticky 네비 보호를 위해 html이 아니라 body에만 적용) */
+body { max-width: 100%; overflow-x: hidden; }
+
+/* 태블릿 이하: 네비/탭은 가로 스크롤로 (줄바꿈으로 깨지지 않게) */
+@media (max-width: 860px) {
+  .header-inner, .main-nav-inner, .container { padding-left: 16px; padding-right: 16px; }
+  .main-nav-inner {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .main-nav-inner::-webkit-scrollbar { display: none; }
+  .nav-link { white-space: nowrap; padding: 13px 14px; font-size: 14px; }
+  .admin-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .admin-tabs::-webkit-scrollbar { display: none; }
+  .admin-tab { white-space: nowrap; }
+}
+
+/* 모바일 */
 @media (max-width: 640px) {
-  .container { padding: 16px; }
-  .header-inner { flex-direction: column; align-items: flex-start; }
-  .header-actions { width: 100%; }
-  .toolbar { flex-direction: column; align-items: stretch; }
-  .detail-grid { grid-template-columns: 100px 1fr; }
+  .container { padding: 14px 12px; }
+
+  /* 헤더: 제목/버튼 세로 정리 */
+  .header-inner { flex-direction: column; align-items: stretch; padding: 12px 14px; gap: 10px; }
+  .header h1 { font-size: 18px; }
+  .subtitle { font-size: 12px; }
+  .header-actions { width: 100%; gap: 6px; }
+  .header-actions .btn { padding: 7px 10px; font-size: 13px; }
+  .admin-tag { order: -1; }
+
+  /* 통계: 2열 */
+  .stats { grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .stat-card { padding: 12px; }
+  .stat-card .num { font-size: 19px; }
+
+  /* 툴바: 검색은 한 줄 전체, 버튼은 아래로 자연스럽게 */
+  .toolbar { gap: 8px; }
+  .search-box { flex: 1 1 100%; min-width: 0; }
+  .toolbar > .btn { flex: 1 1 calc(50% - 4px); font-size: 13px; padding: 9px 8px; }
+  .insp-filter-group { flex: 1 1 100%; }
+  .insp-filter-group .btn { flex: 1 1 auto; }
+  .insp-round-sel { flex: 0 0 auto; }
+  .result-count { flex-basis: 100%; }
+
+  /* 모달: 화면 꽉 차게, 여백 축소 */
+  .modal-overlay { padding: 8px; }
+  .modal { max-height: 94vh; }
+  .modal-header { padding: 14px 16px; }
+  .modal-header h2 { font-size: 16px; }
+  .modal-body { padding: 16px; }
+  .modal-footer { padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .modal-footer .btn { flex: 1 1 auto; }
+  .detail-grid { grid-template-columns: 96px 1fr; }
   .form-grid { grid-template-columns: 1fr; }
-  .landing-box { padding: 36px 24px 28px; }
-  .landing-title { font-size: 24px; }
+
+  /* 결재 내역 한 줄 목록 → 좁은 화면에선 2줄로 부드럽게 */
+  .hist-row { flex-wrap: wrap; gap: 6px 8px; }
+  .hist-asset { max-width: 55%; }
+  .hist-sum { flex-basis: 100%; order: 5; white-space: normal; }
+  .hist-actions { order: 6; margin-left: auto; }
+
+  /* 랜딩 */
+  .landing-box { padding: 32px 20px 24px; }
+  .landing-title { font-size: 22px; }
+  .landing-actions .btn-lg { font-size: 15px; }
+}
+
+/* 아주 좁은 화면 */
+@media (max-width: 380px) {
+  .stats { grid-template-columns: 1fr; }
+  .toolbar > .btn { flex-basis: 100%; }
 }

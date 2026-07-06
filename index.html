@@ -92,8 +92,20 @@
       <button class="btn btn-secondary" id="advToggle">상세 필터</button>
       <button class="btn btn-secondary" id="exportBtn">📥 엑셀 다운로드</button>
       <button class="btn btn-inspect" id="scanInspectBtn">📷 검수</button>
-      <button class="btn btn-secondary" id="uninspBtn" hidden>🔍 올해 검수 누락</button>
-      <button class="btn btn-secondary" id="inspDoneBtn" hidden>✅ 검수 완료</button>
+      <div class="insp-filter-group">
+        <select id="inspRoundFilter" class="insp-round-sel" title="검수 회차 선택" hidden>
+          <option value="1회차">1회차</option>
+          <option value="2회차">2회차</option>
+          <option value="3회차">3회차</option>
+          <option value="4회차">4회차</option>
+          <option value="5회차">5회차</option>
+          <option value="6회차">6회차</option>
+          <option value="7회차">7회차</option>
+          <option value="8회차">8회차</option>
+        </select>
+        <button class="btn btn-secondary" id="uninspBtn" hidden>🔍 미검수</button>
+        <button class="btn btn-secondary" id="inspDoneBtn" hidden>✅ 검수 완료</button>
+      </div>
       <span class="result-count" id="resultCount"></span>
       <!-- 모바일에서 바로 후면 카메라가 켜지도록 capture="environment" -->
       <input type="file" id="scanCameraInput" accept="image/*" capture="environment" hidden />
