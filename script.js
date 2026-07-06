@@ -191,7 +191,7 @@ async function renderPdfFirstPage(dataUrl) {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvasContext: ctx, viewport }).promise;
-  return canvas.toDataURL("image/jpeg", 0.85);
+  return encodeCanvas(canvas, 0.85);
 }
 
 // ===== 스냅샷 =====
@@ -343,18 +343,14 @@ async function loadData() {
   //  · assets2025add.json : 2025년도 자산에 추가 병합분(6.30 기준, 중복 자산번호 제외됨)
   //  · assets2024.json    : 2024년도 자산 메뉴 (assetGroup=GROUP_PAST 태깅됨)
   const fetchJson = (url) => fetch(url).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  // 첫 화면을 빨리 띄우려고 '기본(2025)' 데이터만 먼저 로드. 2024 자산(2천여 건)은 뒤에서 이어 로드.
   const baseP = Promise.all([
     fetchJson("assets.json"),
     fetchJson("assets2025add.json"),
-    fetchJson("assets2024.json"),
   ])
-    .then(([main, add2025, past2024]) => {
+    .then(([main, add2025]) => {
       if (!Array.isArray(main) || !main.length) throw new Error("main empty");
-      baseAssets = [
-        ...main,
-        ...(Array.isArray(add2025) ? add2025 : []),
-        ...(Array.isArray(past2024) ? past2024 : []),
-      ];
+      baseAssets = [...main, ...(Array.isArray(add2025) ? add2025 : [])];
     })
     .catch(() => {
       baseAssets = [];
@@ -369,6 +365,14 @@ async function loadData() {
   applyHashRoute();      // 목록을 최대한 빨리 렌더
   sbSubscribe();
   window.addEventListener("hashchange", applyHashRoute);
+  // 2024년도 자산은 백그라운드로 이어 로드 → 기본 화면 표시를 막지 않는다.
+  fetchJson("assets2024.json").then((past) => {
+    if (Array.isArray(past) && past.length) {
+      baseAssets = baseAssets.concat(past);
+      buildAssets();
+      rerender();
+    }
+  });
   // 배지·모달용 부가 데이터(내 신청/승인대기/이력/회원)는 백그라운드로 로드 — 목록 표시를 막지 않음
   Promise.all([sbLoadMyRequests(), sbLoadRequests(), sbLoadHistory(), sbLoadMembers()]).then(() => {
     if (currentPageName === "assets") updateUI();
@@ -1221,8 +1225,8 @@ function handleLabelFileUpload(file) {
         const canvas = document.createElement("canvas");
         canvas.width = width; canvas.height = height;
         canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-        currentLabelFile = canvas.toDataURL("image/jpeg", 0.85);
-        currentLabelFileName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+        currentLabelFile = encodeCanvas(canvas, 0.85);
+        currentLabelFileName = file.name.replace(/\.[^.]+$/, "") + (canEncodeWebp() ? ".webp" : ".jpg");
         currentLabelPreview = "";  // 이미지 라벨은 labelFile 자체가 미리보기
         renderLabelFileInfo();
       };
@@ -1257,6 +1261,22 @@ function handleLabelFileUpload(file) {
     reader.readAsDataURL(file);
   }
 }
+// 캔버스를 base64로 인코딩. WebP를 지원하면 WebP로(같은 화질에 ~30% 작음),
+// 아니면(구형 사파리 등) JPEG로 폴백한다. → 저장공간·전송량 동시 절감.
+let _canWebp;
+function canEncodeWebp() {
+  if (_canWebp === undefined) {
+    try {
+      const c = document.createElement("canvas");
+      c.width = c.height = 1;
+      _canWebp = c.toDataURL("image/webp").startsWith("data:image/webp");
+    } catch { _canWebp = false; }
+  }
+  return _canWebp;
+}
+function encodeCanvas(canvas, quality) {
+  return canEncodeWebp() ? canvas.toDataURL("image/webp", quality) : canvas.toDataURL("image/jpeg", quality);
+}
 // 이미지 1장을 압축해 base64로 변환 (Promise)
 function compressImage(file, max, quality) {
   return new Promise((resolve, reject) => {
@@ -1269,7 +1289,7 @@ function compressImage(file, max, quality) {
         const canvas = document.createElement("canvas");
         canvas.width = width; canvas.height = height;
         canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        resolve(encodeCanvas(canvas, quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -1288,7 +1308,7 @@ function resizeDataUrl(dataUrl, max, quality) {
       const canvas = document.createElement("canvas");
       canvas.width = width; canvas.height = height;
       canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL("image/jpeg", quality));
+      resolve(encodeCanvas(canvas, quality));
     };
     img.onerror = reject;
     img.src = dataUrl;
