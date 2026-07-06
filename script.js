@@ -1305,7 +1305,7 @@ async function handlePhotoUpload(files) {
   for (const f of imgs) {
     if (currentPhotos.length >= MAX_PHOTOS) { showFormError(`물품 사진은 최대 ${MAX_PHOTOS}장까지 등록할 수 있습니다.`); break; }
     try {
-      const data = await compressImage(f, 800, 0.7);
+      const data = await compressImage(f, 800, 0.62); // 저장공간 절약(무료 용량 연장)
       currentPhotos.push(data);
       renderPhotoPreview();
     } catch { /* 한 장 실패해도 나머지는 계속 */ }
@@ -1901,7 +1901,7 @@ async function handleInspExtraCapture(file) {
   if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
   if (inspectExtraPhotos.length >= INSP_EXTRA_MAX) return;
   try {
-    const data = await compressImage(file, 1000, 0.7);
+    const data = await compressImage(file, 800, 0.62); // 저장공간 절약(무료 용량 연장)
     inspectExtraPhotos.push(data);
     renderInspExtra();
   } catch (e) {
@@ -2051,11 +2051,31 @@ async function withUploadedMedia(fields) {
         (ins && typeof ins.photo === "string" && ins.photo.startsWith("data:"))
           ? { ...ins, photo: await uploadMedia(ins.photo, "inspections") } : ins));
     }
+    _storageIssueNotified = false; // 정상 업로드되면 경고 상태 해제(다음 장애 시 다시 알림)
     return out;
   } catch (e) {
-    console.warn("이미지 업로드 실패 — base64로 저장합니다. (Storage 설정 SQL 실행 여부 확인):", e?.message || e);
+    console.warn("이미지 업로드 실패 — 임시로 사진을 보존합니다:", e?.message || e);
+    notifyStorageIssue(e); // 저장공간 가득참 등 → 관리자에게 명확히 안내(조용히 넘어가지 않음)
     return fields;
   }
+}
+// 저장소 업로드 실패(용량 초과 등) 시 1회 안내. 사진은 임시 보존되지만 조치가 필요함을 알린다.
+let _storageIssueNotified = false;
+function notifyStorageIssue(err) {
+  if (_storageIssueNotified) return;
+  _storageIssueNotified = true;
+  const msg = String(err?.message || "").toLowerCase();
+  const full = msg.includes("exceed") || msg.includes("quota") || msg.includes("limit") || msg.includes("payload") || msg.includes("413");
+  setTimeout(() => {
+    alert(
+      (full
+        ? "⚠️ 사진 저장 공간이 가득 찼을 수 있습니다.\n\n"
+        : "⚠️ 사진을 클라우드 저장소에 올리지 못했습니다.\n\n") +
+      "방금 사진은 임시로 보존되었지만, 저장소 상태를 확인해 주세요.\n" +
+      "· Supabase 대시보드 → Settings → Usage 에서 Storage 사용량 확인\n" +
+      "· 용량이 가득 찼다면 요금제 업그레이드(무제한 종량제)가 필요합니다."
+    );
+  }, 200);
 }
 // 기존 base64 오버레이를 Storage로 한 번 옮긴다(관리자·세션당 1회). 실패해도 조용히 넘어감.
 let _mediaMigrated = false;
