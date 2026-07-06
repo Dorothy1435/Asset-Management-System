@@ -1367,13 +1367,14 @@ function setOcrStatus(msg, kind) {
   st.className = "ocr-status" + (kind ? " ocr-" + kind : "");
 }
 // 인식률을 높이기 위해 그레이스케일 + 대비 보정 후 캔버스로 변환
-function preprocessOcrImage(dataUrl) {
+function preprocessOcrImage(dataUrl, max, min) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       const longest = Math.max(img.width, img.height);
-      // 자산코드(숫자 20자리)는 1800~2400px면 충분 → 이 범위로 맞춰 속도·정확도 균형.
-      const s = longest > 2400 ? 2400 / longest : (longest < 1800 ? 1800 / longest : 1);
+      // max/min 인자로 해상도 조절(1차 저해상도=빠름, 2차 고해상도=정확).
+      const MAX = max || 2400, MIN = (min === undefined ? 1800 : min);
+      const s = longest > MAX ? MAX / longest : (MIN && longest < MIN ? MIN / longest : 1);
       const w = Math.round(img.width * s), h = Math.round(img.height * s);
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
@@ -1698,19 +1699,20 @@ async function recognizeAssetNumber(dataUrl) {
   const tryAlnum = (text) => { if (alnumHit) return; for (const c of extractAlnumCodes(text)) { const a = findAsset2024ByCode(c); if (a) { alnumHit = a; break; } } };
   try {
     setScanLoading("글자를 인식하는 중입니다… 처음 실행은 몇 초 걸릴 수 있어요.", true);
-    const image = await preprocessOcrImage(dataUrl);
     _numOcrProgress = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
     const worker = await getNumberOcrWorker();
     if (worker) {
-      // 1차: 숫자 전용(빠름) — 2025(20자리)는 대부분 여기서 끝난다
-      let { data } = await worker.recognize(image);
+      // 1차: 저해상도 + 숫자 전용(빠름) — 잘 찍힌 라벨은 여기서 끝. 오독은 목록 대조가 보정.
+      const low = await preprocessOcrImage(dataUrl, 1500, 0);
+      let { data } = await worker.recognize(low);
       addFrom(data.text);
-      // 매칭되는 자산이 없을 때만 넓은 인식으로 한 번 더 (오독 보정 + 2024 문자형식 인식)
+      // 매칭 실패 시에만 고해상도 + 넓은 인식으로 정밀 재시도 (+2024 문자형식)
       if (!matched()) {
         setScanLoading("자산을 다시 확인하는 중…", true);
+        const high = await preprocessOcrImage(dataUrl, 2400, 1800);
         try { await worker.setParameters({ tessedit_char_whitelist: "" }); } catch {}
         try {
-          ({ data } = await worker.recognize(image));
+          ({ data } = await worker.recognize(high));
           addFrom(data.text);
           tryAlnum(data.text); // 문자+숫자(2024) 후보도 함께 대조
         } finally {
@@ -1718,6 +1720,7 @@ async function recognizeAssetNumber(dataUrl) {
         }
       }
     } else {
+      const image = await preprocessOcrImage(dataUrl, 2400, 1800);
       const { data } = await Tesseract.recognize(image, "eng");
       addFrom(data.text);
       tryAlnum(data.text);
