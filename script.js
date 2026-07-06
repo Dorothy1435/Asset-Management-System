@@ -378,6 +378,11 @@ async function loadData() {
     if (currentPageName === "assets") updateUI();
     migrateOverlayMediaOnce(); // 관리자면 기존 base64 이미지를 Storage로 이동(1회)
   });
+  // 로그인 사용자(검수 가능자)는 인식 엔진을 유휴 시간에 미리 준비 → 첫 촬영 대기까지 제거
+  if (currentUser) {
+    const warm = () => warmupNumberOcr();
+    if (window.requestIdleCallback) requestIdleCallback(warm, { timeout: 4000 }); else setTimeout(warm, 2500);
+  }
 }
 
 // 실시간 이벤트로 받은 '바뀐 행'만 메모리 오버레이에 반영한다.
@@ -1367,25 +1372,29 @@ function preprocessOcrImage(dataUrl) {
     const img = new Image();
     img.onload = () => {
       const longest = Math.max(img.width, img.height);
-      // 글자 인식은 해상도가 클수록 유리하나, 너무 크면 인식이 느려진다.
-      // 자산코드(숫자 20자리)는 2000~2600px면 충분 → 이 범위로 맞춰 속도·정확도 균형.
-      const s = longest > 2600 ? 2600 / longest : (longest < 2000 ? 2000 / longest : 1);
+      // 자산코드(숫자 20자리)는 1800~2400px면 충분 → 이 범위로 맞춰 속도·정확도 균형.
+      const s = longest > 2400 ? 2400 / longest : (longest < 1800 ? 1800 / longest : 1);
       const w = Math.round(img.width * s), h = Math.round(img.height * s);
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d");
+      // 흑백+대비를 GPU 가속 필터로 처리(픽셀 루프보다 훨씬 빠름). 미지원 브라우저는 수동 처리로 폴백.
+      let filtered = false;
+      try { ctx.filter = "grayscale(1) contrast(1.35)"; filtered = ctx.filter && ctx.filter !== "none"; } catch {}
       ctx.drawImage(img, 0, 0, w, h);
-      try {
-        const d = ctx.getImageData(0, 0, w, h);
-        const p = d.data;
-        for (let i = 0; i < p.length; i += 4) {
-          let g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
-          g = (g - 128) * 1.35 + 128;            // 대비 강화
-          g = g < 0 ? 0 : g > 255 ? 255 : g;
-          p[i] = p[i + 1] = p[i + 2] = g;
-        }
-        ctx.putImageData(d, 0, 0);
-      } catch { /* 전처리 실패해도 원본 캔버스로 진행 */ }
+      if (!filtered) {
+        try {
+          const d = ctx.getImageData(0, 0, w, h);
+          const p = d.data;
+          for (let i = 0; i < p.length; i += 4) {
+            let g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+            g = (g - 128) * 1.35 + 128;            // 대비 강화
+            g = g < 0 ? 0 : g > 255 ? 255 : g;
+            p[i] = p[i + 1] = p[i + 2] = g;
+          }
+          ctx.putImageData(d, 0, 0);
+        } catch { /* 전처리 실패해도 원본 캔버스로 진행 */ }
+      }
       resolve(canvas);
     };
     img.onerror = reject;
@@ -1706,8 +1715,7 @@ async function handleScanCapture(file) {
   try {
     setScanLoading("사진을 준비하는 중…", true);
     const raw = await fileToDataURL(file);                 // 인식용 원본(고해상도)
-    const photo = await compressImage(file, 900, 0.6);     // 검수 기록에 저장할 사진(압축)
-    const code = await recognizeAssetNumber(raw);
+    const code = await recognizeAssetNumber(raw);          // 인식(%)을 먼저 — 무거운 압축은 매칭 성공 후로 미룬다
     setScanLoading("", false);
     if (!code) {
       alert("사진에서 자산코드(20자리)를 인식하지 못했습니다.\n\n· 라벨의 ‘자산코드 20자리’가 잘리지 않게\n· 크고 반듯하게, 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
@@ -1718,7 +1726,8 @@ async function handleScanCapture(file) {
       alert(`인식된 자산번호와 일치하는 자산을 찾지 못했습니다.\n\n인식된 번호: ${code}\n\n등록된 자산이 맞는지 확인 후 다시 시도해 주세요.`);
       return;
     }
-    // 매칭 성공 → 검수 확인 화면으로 이동 (촬영 사진 첨부)
+    // 매칭 성공 → 이제서야 검수 기록용 사진을 압축하고 검수 확인 화면으로
+    const photo = await compressImage(file, 900, 0.6);
     openInspect(a.id, photo);
   } catch (e) {
     console.error("사진촬영 검수 오류:", e);
@@ -2893,6 +2902,7 @@ document.getElementById("adminMembersBody").addEventListener("click", (e) => {
 });
 
 // 건의 게시판
+document.getElementById("homeTitle").addEventListener("click", () => navTo("2025")); // 제목 클릭 → 메인
 document.getElementById("boardBtn").addEventListener("click", () => navTo("board"));
 document.querySelectorAll(".main-nav .nav-link").forEach((btn) => btn.addEventListener("click", () => navTo(btn.dataset.route)));
 document.getElementById("boardWriteBtn").addEventListener("click", openPostForm);

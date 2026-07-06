@@ -39,7 +39,10 @@ body {
   font-size: 22px;
   color: var(--primary-dark);
   font-weight: 700;
+  cursor: pointer;
+  display: inline-block;
 }
+.header h1:hover { color: var(--primary); }
 .subtitle {
   color: var(--text-light);
   font-size: 13px;
