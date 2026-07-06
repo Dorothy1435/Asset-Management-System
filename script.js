@@ -1627,6 +1627,40 @@ function extractAssetCodes(text) {
   cand.sort((a, b) => (b.length === 20) - (a.length === 20) || b.length - a.length);
   return [...new Set(cand)];
 }
+// 2024년도 자산번호(예: G20250019-0001)처럼 '문자+숫자(+하이픈)' 형식 후보를 뽑는다.
+function extractAlnumCodes(text) {
+  if (!text) return [];
+  const runs = [];
+  String(text).split(/[\r\n]+/).forEach((line) => {
+    const cleaned = line.toUpperCase().replace(/[.\s]/g, ""); // 대문자화, 공백·점만 제거(하이픈 유지)
+    const m = cleaned.match(/[A-Z0-9][A-Z0-9-]{5,}/g);        // 6자 이상 영숫자 덩어리
+    if (m) runs.push(...m);
+  });
+  // 문자와 숫자가 모두 있는 것만(순수 숫자는 위 숫자 경로에서 처리)
+  return [...new Set(runs)].filter((r) => /[A-Z]/.test(r) && /\d/.test(r));
+}
+// 2024 메뉴 자산 중에서 코드(문자+숫자)로 자산을 찾는다. 정확→부분포함→근접(유일승자) 순.
+function findAsset2024ByCode(code) {
+  const norm = (s) => String(s || "").toUpperCase().replace(/[\s-]/g, "");
+  const target = norm(code);
+  if (target.length < 6) return null;
+  const pool = assets.filter((a) => groupOf(a) === GROUP_PAST);
+  let hit = pool.find((a) => norm(a.assetNumber) === target);
+  if (hit) return hit;
+  hit = pool.find((a) => { const n = norm(a.assetNumber); return n.length >= 6 && (n.includes(target) || target.includes(n)); });
+  if (hit) return hit;
+  // 근접 매칭: 편집거리 최소이면서 2등과 2 이상 차이나는 확실한 승자만
+  let best = null, bestD = Infinity, secondD = Infinity;
+  for (const a of pool) {
+    const n = norm(a.assetNumber);
+    if (Math.abs(n.length - target.length) > 3) continue;
+    const d = _editDistance(target, n);
+    if (d < bestD) { secondD = bestD; bestD = d; best = a; }
+    else if (d < secondD) secondD = d;
+  }
+  if (best && bestD <= 2 && (secondD - bestD) >= 2) return best;
+  return null;
+}
 // 단일 자산코드 (라벨 등록 폼 자동채우기용)
 function extractAssetCode(text) { return extractAssetCodes(text)[0] || null; }
 // 촬영 사진에서 자산코드(20자리)를 인식한다.
@@ -1660,22 +1694,25 @@ async function recognizeAssetNumber(dataUrl) {
   const candidates = [];
   const addFrom = (text) => { extractAssetCodes(text).forEach((c) => { if (!candidates.includes(c)) candidates.push(c); }); };
   const matched = () => candidates.find((c) => findAssetByNumber(c));
+  let alnumHit = null; // 2024 형식(G20250019-0001 등) 매칭 자산
+  const tryAlnum = (text) => { if (alnumHit) return; for (const c of extractAlnumCodes(text)) { const a = findAsset2024ByCode(c); if (a) { alnumHit = a; break; } } };
   try {
     setScanLoading("글자를 인식하는 중입니다… 처음 실행은 몇 초 걸릴 수 있어요.", true);
     const image = await preprocessOcrImage(dataUrl);
     _numOcrProgress = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
     const worker = await getNumberOcrWorker();
     if (worker) {
-      // 1차: 숫자 전용(빠름) — 대부분 여기서 끝난다
+      // 1차: 숫자 전용(빠름) — 2025(20자리)는 대부분 여기서 끝난다
       let { data } = await worker.recognize(image);
       addFrom(data.text);
-      // 매칭되는 자산이 없을 때만 넓은 인식으로 한 번 더 (오독 보정)
+      // 매칭되는 자산이 없을 때만 넓은 인식으로 한 번 더 (오독 보정 + 2024 문자형식 인식)
       if (!matched()) {
         setScanLoading("자산을 다시 확인하는 중…", true);
         try { await worker.setParameters({ tessedit_char_whitelist: "" }); } catch {}
         try {
           ({ data } = await worker.recognize(image));
           addFrom(data.text);
+          tryAlnum(data.text); // 문자+숫자(2024) 후보도 함께 대조
         } finally {
           try { await worker.setParameters({ tessedit_char_whitelist: "0123456789" }); } catch {}
         }
@@ -1683,16 +1720,17 @@ async function recognizeAssetNumber(dataUrl) {
     } else {
       const { data } = await Tesseract.recognize(image, "eng");
       addFrom(data.text);
+      tryAlnum(data.text);
     }
   } catch (e) {
     console.error("자산번호 인식 오류:", e);
   } finally {
     _numOcrProgress = null;
   }
-  // 후보 중 실제 등록된 자산과 매칭되는 것을 우선 (20자리 후보부터 검사됨)
+  // 우선순위: 숫자(20자리) 매칭 → 2024 문자형식 매칭 → 표시용 후보
   const hit = matched();
   if (hit) return hit;
-  // 매칭이 없으면 20자리(있으면) 또는 첫 후보를 돌려줘 안내에 표시
+  if (alnumHit) return alnumHit.assetNumber; // 정확한 자산번호를 돌려주면 handleScanCapture가 그대로 매칭
   return candidates.find((c) => c.length === 20) || candidates[0] || null;
 }
 // 사진촬영 검수 버튼 → 촬영 안내 모달 표시
