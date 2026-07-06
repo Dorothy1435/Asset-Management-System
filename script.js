@@ -45,7 +45,8 @@ const groupOf = (a) => {
   return g;
 };
 let currentGroup = GROUP_2024;
-let currentPageName = "assets"; // "assets" | "board"
+let currentPageName = "assets"; // "assets" | "board" | "admin"
+let currentAdminTab = "review"; // "review" | "hist" | "members"
 // 라우트별 자산 그룹 매핑
 const ROUTES = { "2025": GROUP_2024, "past": GROUP_PAST, "elec": GROUP_ELEC };
 const GROUP_TO_ROUTE = { [GROUP_2024]: "2025", [GROUP_PAST]: "past", [GROUP_ELEC]: "elec" };
@@ -279,11 +280,17 @@ function rerender() {
 function parseHash() {
   const h = (location.hash || "").replace(/^#\/?/, "").trim();
   if (h === "board") return { page: "board" };
+  if (h === "admin" || h.startsWith("admin/")) {
+    const tab = h.split("/")[1] || "review";
+    return { page: "admin", tab: ["review", "hist", "members"].includes(tab) ? tab : "review" };
+  }
   if (ROUTES[h]) return { page: "assets", group: ROUTES[h] };
   return { page: "assets", group: GROUP_2024 };
 }
 function applyHashRoute() {
   const r = parseHash();
+  // 관리자 아닌데 관리자 페이지로 접근하면 자산 목록으로
+  if (r.page === "admin" && authInited && !isAdmin) { navTo("2025"); return; }
   currentPageName = r.page;
   if (r.page === "assets") {
     currentGroup = r.group;
@@ -297,14 +304,17 @@ function applyHashRoute() {
   showPage(r.page);
   if (authInited) {
     if (r.page === "board") openBoardPage();
+    else if (r.page === "admin") openAdminPage(r.tab);
     else rerender();
   }
 }
 function showPage(page) {
   const assetsEl = document.getElementById("page-assets");
   const boardEl = document.getElementById("page-board");
+  const adminEl = document.getElementById("page-admin");
   if (assetsEl) assetsEl.hidden = page !== "assets";
   if (boardEl) boardEl.hidden = page !== "board";
+  if (adminEl) adminEl.hidden = page !== "admin";
   // 자산 페이지에서만 의미있는 버튼 노출 제어
   const addBtn = document.getElementById("addBtn");
   if (addBtn) addBtn.style.display = page === "assets" ? "" : "none";
@@ -319,6 +329,7 @@ function renderNav() {
     const route = btn.dataset.route;
     let active = false;
     if (route === "board") active = currentPageName === "board";
+    else if (route === "admin") active = currentPageName === "admin";
     else active = currentPageName === "assets" && GROUP_TO_ROUTE[currentGroup] === route;
     btn.classList.toggle("active", active);
     const cnt = btn.querySelector(".nav-count");
@@ -390,7 +401,7 @@ function sbSubscribe() {
     })
     .on("postgres_changes", { event: "*", schema: "public", table: "requests" }, async () => {
       await sbLoadMyRequests(); await sbLoadRequests(); rerender();
-      if (!document.getElementById("reviewOverlay").hidden) renderReview();
+      if (currentPageName === "admin" && currentAdminTab === "review") renderReview();
       if (!document.getElementById("myReqOverlay").hidden) renderMyRequests();
     })
     .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, async () => {
@@ -633,10 +644,15 @@ function updateUI() {
   g("reviewBtn").hidden = !isAdmin;
   g("histBtn").hidden = !isAdmin;
   g("membersBtn").hidden = !isAdmin; // 가입 승인은 관리자도 가능 (권한변경·삭제는 최고관리자만)
-  const mpc = g("memberPendingCount");
+  const navAdmin = g("navAdmin");
+  if (navAdmin) navAdmin.hidden = !isAdmin;
   const pendingMembers = members.filter((m) => (m.status || "pending") === "pending").length;
-  mpc.textContent = pendingMembers;
-  mpc.hidden = pendingMembers === 0;
+  const setBadge = (id, n) => { const el = g(id); if (el) { el.textContent = n; el.hidden = !n; } };
+  setBadge("memberPendingCount", pendingMembers);
+  setBadge("adminMemberCount", pendingMembers);      // 관리자 페이지 '회원 관리' 탭 배지
+  setBadge("adminReviewCount", requests.length);     // 관리자 페이지 '승인 대기' 탭 배지
+  // 관리자 네비 링크 배지 = 승인대기 + 회원승인대기
+  setBadge("navAdminCount", (requests.length || 0) + pendingMembers);
 
   if (loggedIn) {
     const uname = myProfile?.name || myProfile?.username || (currentUser.email || "").split("@")[0];
@@ -2182,10 +2198,30 @@ function renderMyRequests() {
   }).join("");
 }
 
-// ===== 승인 대기 (관리자) =====
-function openReview() { renderReview(); show("reviewOverlay"); }
+// ===== 관리자 페이지 (승인 대기 · 결재 내역 · 회원 관리) =====
+// 관리자 페이지를 열고 데이터를 최신화한 뒤 선택 탭을 렌더링한다.
+async function openAdminPage(tab) {
+  if (!isAdmin) { navTo("2025"); return; }
+  currentAdminTab = ["review", "hist", "members"].includes(tab) ? tab : "review";
+  renderNav();
+  setAdminTab(currentAdminTab);        // 먼저 화면 틀을 보여주고
+  // 최신 데이터 로드 후 다시 렌더 (탭 전환도 빠르게 보이도록)
+  await Promise.all([sbLoadRequests(), sbLoadHistory(), sbLoadMembers()]);
+  updateUI();
+  setAdminTab(currentAdminTab);
+}
+// 탭 전환: 활성 표시 + 패널 노출 + 해당 목록 렌더
+function setAdminTab(tab) {
+  currentAdminTab = tab;
+  document.querySelectorAll(".admin-tab").forEach((b) => b.classList.toggle("active", b.dataset.atab === tab));
+  ["review", "hist", "members"].forEach((t) => { const el = document.getElementById("admin-" + t); if (el) el.hidden = t !== tab; });
+  if (tab === "review") renderReview();
+  else if (tab === "hist") renderHistory();
+  else if (tab === "members") renderMembers();
+}
 function renderReview() {
-  const body = document.getElementById("reviewBody");
+  const body = document.getElementById("adminReviewBody");
+  if (!body) return;
   if (requests.length === 0) { body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`; return; }
   const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청", inspect: "검수 요청" };
   const actionCls = { create: "req-create", update: "req-update", delete: "req-delete", inspect: "req-inspect" };
@@ -2257,15 +2293,11 @@ function histSummary(h) {
   });
   return changes.length ? changes.join("<br>") : "변경 없음";
 }
-async function openHistory() {
-  await sbLoadHistory();
-  document.getElementById("histSearch").value = "";
-  renderHistory();
-  show("histOverlay");
-}
 function renderHistory() {
-  const body = document.getElementById("histBody");
-  const kw = document.getElementById("histSearch").value.trim().toLowerCase();
+  const body = document.getElementById("adminHistBody");
+  if (!body) return;
+  const searchEl = document.getElementById("adminHistSearch");
+  const kw = (searchEl ? searchEl.value : "").trim().toLowerCase();
   let rows = history;
   if (kw) rows = rows.filter((h) => `${h.asset_name} ${h.asset_id}`.toLowerCase().includes(kw));
   if (rows.length === 0) { body.innerHTML = `<div class="empty-msg">기록이 없습니다.</div>`; return; }
@@ -2294,11 +2326,6 @@ function renderHistory() {
 }
 
 // ===== 회원 관리 (관리자) =====
-async function openMembers() {
-  await sbLoadMembers();
-  renderMembers();
-  show("membersOverlay");
-}
 function roleBadge(role) {
   if (role === "superadmin") return `<span class="badge badge-normal">최고관리자</span>`;
   if (role === "admin") return `<span class="badge badge-normal">관리자</span>`;
@@ -2311,7 +2338,8 @@ function memberStatusBadge(status) {
   return `<span class="badge badge-gray">승인대기</span>`;
 }
 function renderMembers() {
-  const body = document.getElementById("membersBody");
+  const body = document.getElementById("adminMembersBody");
+  if (!body) return;
   if (members.length === 0) { body.innerHTML = `<div class="empty-msg">회원이 없습니다.</div>`; return; }
   const myId = currentUser?.id;
   // 승인 대기 회원을 맨 위로 정렬
@@ -2728,28 +2756,30 @@ document.getElementById("myReqBody").addEventListener("click", (e) => {
   else if (del) deleteMyRequest(del.dataset.delreq);
 });
 
-// 승인 대기
-document.getElementById("reviewBtn").addEventListener("click", openReview);
-document.getElementById("reviewBody").addEventListener("click", (e) => {
+// 관리자 페이지 — 헤더 버튼/탭은 해당 탭으로 이동(해시 라우팅)
+document.getElementById("reviewBtn").addEventListener("click", () => navTo("admin/review"));
+document.getElementById("histBtn").addEventListener("click", () => navTo("admin/hist"));
+document.getElementById("membersBtn").addEventListener("click", () => navTo("admin/members"));
+document.getElementById("adminBackBtn").addEventListener("click", () => navTo("2025"));
+document.querySelectorAll(".admin-tab").forEach((b) => b.addEventListener("click", () => navTo("admin/" + b.dataset.atab)));
+
+// 승인 대기 목록
+document.getElementById("adminReviewBody").addEventListener("click", (e) => {
   const ap = e.target.closest("button[data-approve]");
   const rj = e.target.closest("button[data-reject]");
   if (ap) approveRequest(ap.dataset.approve);
   else if (rj) rejectRequest(rj.dataset.reject);
 });
-
-// 이력
-document.getElementById("histBtn").addEventListener("click", openHistory);
-document.getElementById("histSearch").addEventListener("input", renderHistory);
-document.getElementById("histBody").addEventListener("click", (e) => {
+// 결재/변경 이력
+document.getElementById("adminHistSearch").addEventListener("input", renderHistory);
+document.getElementById("adminHistBody").addEventListener("click", (e) => {
   const rv = e.target.closest("button[data-revert]");
   const dl = e.target.closest("button[data-delhist]");
   if (rv) revertHistory(rv.dataset.revert);
   else if (dl) deleteHistory(dl.dataset.delhist);
 });
-
 // 회원 관리
-document.getElementById("membersBtn").addEventListener("click", openMembers);
-document.getElementById("membersBody").addEventListener("click", (e) => {
+document.getElementById("adminMembersBody").addEventListener("click", (e) => {
   const statusBtn = e.target.closest("button[data-setstatus]");
   const roleBtn = e.target.closest("button[data-role]");
   const delBtn = e.target.closest("button[data-delmember]");
@@ -2779,7 +2809,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "reviewOverlay", "histOverlay", "membersOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });

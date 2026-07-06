@@ -72,6 +72,7 @@
       <button class="nav-link" data-route="past">2024년도 자산 <span class="nav-count">0</span></button>
       <button class="nav-link" data-route="elec">전자 <span class="nav-count">0</span></button>
       <button class="nav-link" data-route="board">건의 게시판</button>
+      <button class="nav-link nav-admin" data-route="admin" id="navAdmin" hidden>🛠 관리자 <span class="count-badge" id="navAdminCount" hidden>0</span></button>
     </div>
   </nav>
 
@@ -159,6 +160,29 @@
        <button class="btn btn-primary" id="boardWriteBtn">✏️ 글쓰기</button>
      </div>
      <div id="boardBody"></div>
+   </section>
+
+   <!-- 관리자 페이지 : 승인 대기 · 결재 내역 · 회원 관리 (목록식) -->
+   <section id="page-admin" hidden>
+     <div class="board-page-head">
+       <h2 class="board-page-title">🛠 관리자</h2>
+       <button class="btn btn-secondary" id="adminBackBtn">← 자산 목록으로</button>
+     </div>
+     <div class="admin-tabs">
+       <button class="admin-tab" data-atab="review">승인 대기 <span class="tab-badge" id="adminReviewCount" hidden>0</span></button>
+       <button class="admin-tab" data-atab="hist">결재 내역</button>
+       <button class="admin-tab" data-atab="members">회원 관리 <span class="tab-badge" id="adminMemberCount" hidden>0</span></button>
+     </div>
+     <div class="admin-panel" id="admin-review" hidden>
+       <div id="adminReviewBody"></div>
+     </div>
+     <div class="admin-panel" id="admin-hist" hidden>
+       <input type="text" id="adminHistSearch" class="hist-search" placeholder="자산명 또는 자산번호로 검색..." autocomplete="off" />
+       <div id="adminHistBody"></div>
+     </div>
+     <div class="admin-panel" id="admin-members" hidden>
+       <div id="adminMembersBody"></div>
+     </div>
    </section>
   </main>
 
@@ -404,32 +428,7 @@
     </div>
   </div>
 
-  <!-- 승인 대기 모달 (관리자) -->
-  <div class="modal-overlay" id="reviewOverlay" hidden>
-    <div class="modal modal-wide" role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <h2>승인 대기 목록</h2>
-        <button class="modal-close" data-close>✕</button>
-      </div>
-      <div class="modal-body" id="reviewBody"></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
-    </div>
-  </div>
-
-  <!-- 결재/변경 이력 모달 (관리자) -->
-  <div class="modal-overlay" id="histOverlay" hidden>
-    <div class="modal modal-wide" role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <h2>결재 / 변경 이력</h2>
-        <button class="modal-close" data-close>✕</button>
-      </div>
-      <div class="modal-body">
-        <input type="text" id="histSearch" class="hist-search" placeholder="자산명 또는 자산번호로 검색..." autocomplete="off" />
-        <div id="histBody"></div>
-      </div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
-    </div>
-  </div>
+  <!-- 승인 대기 · 결재 내역은 '관리자 페이지'(#page-admin)로 이동함 -->
 
   <!-- 일괄 수정 모달 (관리자) -->
   <div class="modal-overlay" id="bulkEditOverlay" hidden>
@@ -508,17 +507,7 @@
     </div>
   </div>
 
-  <!-- 회원 관리 모달 (관리자) -->
-  <div class="modal-overlay" id="membersOverlay" hidden>
-    <div class="modal modal-xwide" role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <h2>회원 관리</h2>
-        <button class="modal-close" data-close>✕</button>
-      </div>
-      <div class="modal-body" id="membersBody"></div>
-      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
-    </div>
-  </div>
+  <!-- 회원 관리는 '관리자 페이지'(#page-admin)로 이동함 -->
 
   <!-- 검수 확인 모달 -->
   <div class="modal-overlay" id="inspectOverlay" hidden>
