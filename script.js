@@ -195,8 +195,8 @@ async function renderPdfFirstPage(dataUrl) {
 }
 
 // ===== 스냅샷 =====
-const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "imageUrls", "regDate", "assetGroup", "rentDate", "returnDate"];
-const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "imageUrls", "assetGroup", "rentDate", "returnDate"];
+const SNAP_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "imageUrls", "thumbUrl", "regDate", "assetGroup", "rentDate", "returnDate"];
+const DATA_FIELDS = ["assetName", "assetNumber", "labelSticker", "labelFile", "labelFileName", "labelPreview", "status", "location", "manager", "dept", "model", "spec", "maker", "acquireCost", "note", "imageUrl", "imageUrls", "thumbUrl", "assetGroup", "rentDate", "returnDate"];
 function snapshotOf(a) {
   if (!a) return null;
   const o = {};
@@ -393,9 +393,14 @@ function applyOverlayChange(payload) {
   if (i >= 0) overlay[i] = row; else overlay.push(row);
 }
 let _rtInitialSynced = false;
+let _realtimeChannel = null;
+let _lastFocusRefresh = 0;
+// 실시간 구독은 '로그인 사용자'에게만 연다. 익명 방문자가 대량으로 몰려도
+// 실시간 동시연결 한도를 소모하지 않는다(익명은 새로고침/포커스 시 최신화).
 function sbSubscribe() {
-  if (!sb) return;
-  sb.channel("realtime-all")
+  if (!sb || !currentUser || _realtimeChannel) return;
+  _rtInitialSynced = false;
+  _realtimeChannel = sb.channel("realtime-all")
     .on("postgres_changes", { event: "*", schema: "public", table: "assets" }, (payload) => {
       applyOverlayChange(payload); buildAssets(); rerender();
     })
@@ -422,6 +427,17 @@ function sbSubscribe() {
       sbLoadOverlay().then(() => { buildAssets(); rerender(); }).catch(() => {});
     });
 }
+function sbUnsubscribe() {
+  if (_realtimeChannel) { try { sb.removeChannel(_realtimeChannel); } catch {} _realtimeChannel = null; _rtInitialSynced = false; }
+}
+// 실시간을 안 여는 익명 방문자를 위해: 탭이 다시 보이면 최대 60초에 한 번 목록을 최신화.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || !sb || !authInited || _realtimeChannel || currentPageName !== "assets") return;
+  const now = Date.now();
+  if (now - _lastFocusRefresh < 60000) return;
+  _lastFocusRefresh = now;
+  sbLoadOverlay().then(() => { buildAssets(); rerender(); }).catch(() => {});
+});
 
 // ===== 인증 =====
 async function initAuth() {
@@ -431,6 +447,8 @@ async function initAuth() {
   sb.auth.onAuthStateChange(async (event, session) => {
     if (event === "PASSWORD_RECOVERY") show("pwOverlay");
     await applySession(session);
+    // 로그인하면 실시간 구독을 열고, 로그아웃하면 닫아 연결을 반납한다.
+    if (currentUser) sbSubscribe(); else sbUnsubscribe();
     if (!authInited) return;
     await reloadAll();
     rerender();
@@ -803,7 +821,8 @@ function render() {
     if (li) tag += ` <span class="tag tag-inspected">검수 ${esc(li.period || "완료")}</span>`;
     if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
     const inspDate = li ? fmtDate(li.checkedAt) : "—";
-    const thumb = a.imageUrl ? `<img class="thumb" src="${a.imageUrl}" alt="" loading="lazy" />` : "";
+    const thumbSrc = a.thumbUrl || a.imageUrl; // 목록은 가벼운 썸네일 우선(없으면 원본)
+    const thumb = thumbSrc ? `<img class="thumb" src="${thumbSrc}" alt="" loading="lazy" decoding="async" />` : "";
     // 모바일 카드에서 빈 값은 숨기기 위한 표식(m-empty). 데스크톱 표에는 영향 없음.
     const labelHtml = labelCell(a);
     const mE = (v) => (!String(v == null ? "" : v).trim() ? " m-empty" : "");
@@ -1259,6 +1278,23 @@ function compressImage(file, max, quality) {
     reader.readAsDataURL(file);
   });
 }
+// data:URL(base64) 이미지를 작게 리사이즈한 base64를 반환 (목록용 썸네일 생성).
+function resizeDataUrl(dataUrl, max, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > max || height > max) { const r = Math.min(max / width, max / height); width = Math.round(width * r); height = Math.round(height * r); }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+const MAX_PHOTOS = 8; // 자산당 물품 사진 최대 장수 (저장공간 보호)
 async function handlePhotoUpload(files) {
   const list = Array.from(files || []).filter(Boolean);
   if (!list.length) return;
@@ -1267,6 +1303,7 @@ async function handlePhotoUpload(files) {
   }
   const imgs = list.filter((f) => f.type.startsWith("image/"));
   for (const f of imgs) {
+    if (currentPhotos.length >= MAX_PHOTOS) { showFormError(`물품 사진은 최대 ${MAX_PHOTOS}장까지 등록할 수 있습니다.`); break; }
     try {
       const data = await compressImage(f, 800, 0.7);
       currentPhotos.push(data);
@@ -1994,6 +2031,15 @@ async function uploadMedia(dataUrl, folder) {
 async function withUploadedMedia(fields) {
   try {
     const out = { ...fields };
+    // 목록용 썸네일: 대표(첫) 사진이 '새 이미지(base64)'면 작은 썸네일을 만들어 따로 저장.
+    // 목록에서 원본 대신 이 썸네일을 불러오므로 전송량이 크게 준다.
+    const firstPhoto = out.imageUrl || (Array.isArray(out.imageUrls) && out.imageUrls[0]) || "";
+    if (typeof firstPhoto === "string" && firstPhoto.startsWith("data:")) {
+      try { out.thumbUrl = await uploadMedia(await resizeDataUrl(firstPhoto, 240, 0.55), "thumbs"); }
+      catch (e) { /* 썸네일 실패 시 목록은 원본으로 대체 */ }
+    } else if (("imageUrl" in out || "imageUrls" in out) && !firstPhoto) {
+      out.thumbUrl = ""; // 사진을 모두 지운 경우 썸네일도 제거
+    }
     if (out.imageUrl) out.imageUrl = await uploadMedia(out.imageUrl, "photos");
     if (Array.isArray(out.imageUrls)) out.imageUrls = await Promise.all(out.imageUrls.map((u) => uploadMedia(u, "photos")));
     if (out.labelFile) out.labelFile = await uploadMedia(out.labelFile, "labels");
