@@ -584,6 +584,7 @@ body {
 .col-insp { white-space: nowrap; text-align: center; color: #64748b; }
 .asset-table.hide-insp .col-insp { display: none; }
 #uninspBtn.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+#inspDoneBtn.active { background: #16a34a; border-color: #16a34a; color: #fff; }
 .stat-insp .rate { font-size: 0.7em; color: #1d4ed8; }
 .stat-sel { font-size: 12px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; cursor: pointer; }
 

@@ -24,7 +24,7 @@ let assets = [];
 let filtered = [];
 let currentPage = 1;
 let selectedIds = new Set(); // 일괄 수정용 선택 자산 id (관리자)
-let inspFilter = false; // 선택 회차 미검수만 보기 (2025년도 자산 전용)
+let inspView = "all"; // 선택 회차 검수 필터: "all"(전체) | "uninsp"(미검수) | "done"(검수 완료) — 2025/2024 자산 전용
 let inspRound = "1회차"; // 대시보드/필터 기준 검수 회차
 const PER_PAGE = 20;
 
@@ -298,7 +298,7 @@ function applyHashRoute() {
     const si = document.getElementById("searchInput");
     if (si) si.value = "";
     ["deptFilter", "statusFilter", "minCost", "maxCost"].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
-    inspFilter = false;
+    inspView = "all";
     currentPage = 1;
   }
   showPage(r.page);
@@ -717,10 +717,14 @@ function applyFilter(resetPage = true) {
   const minCost = Number(document.getElementById("minCost").value) || 0;
   const maxCostRaw = document.getElementById("maxCost").value;
   const maxCost = maxCostRaw === "" ? Infinity : Number(maxCostRaw);
-  const inspActive = inspFilter && currentGroup !== GROUP_ELEC;
+  const inspActive = inspView !== "all" && currentGroup !== GROUP_ELEC;
   filtered = assets.filter((a) => {
     if (groupOf(a) !== currentGroup) return false;
-    if (inspActive && inspectedRound(a, inspRound)) return false;
+    if (inspActive) {
+      const done = inspectedRound(a, inspRound);
+      if (inspView === "uninsp" && done) return false;   // 미검수만
+      if (inspView === "done" && !done) return false;     // 검수 완료만
+    }
     if (dept && a.dept !== dept) return false;
     if (status && a.status !== status) return false;
     const cost = a.acquireCost || 0;
@@ -780,7 +784,13 @@ function render() {
   if (uninspBtn) {
     uninspBtn.hidden = !showInsp;
     uninspBtn.textContent = `🔍 ${inspRound} 미검수`;
-    uninspBtn.classList.toggle("active", showInsp && inspFilter);
+    uninspBtn.classList.toggle("active", showInsp && inspView === "uninsp");
+  }
+  const inspDoneBtn = document.getElementById("inspDoneBtn");
+  if (inspDoneBtn) {
+    inspDoneBtn.hidden = !showInsp;
+    inspDoneBtn.textContent = `✅ ${inspRound} 검수 완료`;
+    inspDoneBtn.classList.toggle("active", showInsp && inspView === "done");
   }
   const start = (currentPage - 1) * PER_PAGE;
   const pageItems = filtered.slice(start, start + PER_PAGE);
@@ -2613,7 +2623,8 @@ document.getElementById("advReset").addEventListener("click", () => {
 });
 document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEventListener("click", () => setSort(th.dataset.key)));
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
-document.getElementById("uninspBtn").addEventListener("click", () => { inspFilter = !inspFilter; applyFilter(); });
+document.getElementById("uninspBtn").addEventListener("click", () => { inspView = inspView === "uninsp" ? "all" : "uninsp"; applyFilter(); });
+document.getElementById("inspDoneBtn").addEventListener("click", () => { inspView = inspView === "done" ? "all" : "done"; applyFilter(); });
 document.getElementById("stats").addEventListener("change", (e) => {
   if (e.target && e.target.id === "inspRoundSel") { inspRound = e.target.value; renderStats(); applyFilter(); }
 });
