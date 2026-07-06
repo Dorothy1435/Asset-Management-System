@@ -1437,6 +1437,30 @@ function _editDistance(a, b) {
   }
   return prev[n];
 }
+// OCR에서 서로 자주 혼동되는 숫자쌍(인쇄 라벨 기준). 정렬한 2글자 키로 저장.
+//  3↔8 이 대표적이고, 8을 중심으로 0·5·6·9, 그리고 1↔7 등이 흔하다.
+const OCR_CONFUSE_PAIRS = new Set(["38", "08", "58", "68", "89", "06", "56", "17"]);
+const isConfusablePair = (a, b) => OCR_CONFUSE_PAIRS.has(a < b ? a + b : b + a);
+// 인식 숫자열이 '혼동 가능한 숫자쌍으로만' 어긋나는 실제 자산을 찾는다.
+// 예) 3을 8로 오독한 경우처럼, 틀린 자리가 모두 알려진 혼동쌍이고 유일한 후보면 그 자산으로 보정.
+function confusableAssetMatch(target, norm) {
+  if (target.length < 16 || target.length > 24 || !/^\d+$/.test(target)) return null;
+  let best = null, bestMis = Infinity, tie = false;
+  for (const a of assets) {
+    const n = norm(a.assetNumber);
+    if (n.length !== target.length || !/^\d+$/.test(n)) continue;
+    let mis = 0, ok = true;
+    for (let i = 0; i < n.length; i++) {
+      if (n[i] === target[i]) continue;
+      if (!isConfusablePair(n[i], target[i]) || ++mis > 4) { ok = false; break; }
+    }
+    if (!ok || mis === 0) continue;
+    if (mis < bestMis) { bestMis = mis; best = a; tie = false; }
+    else if (mis === bestMis) tie = true;
+  }
+  // 유일하게 가장 적게 어긋난 후보만 인정 (동점이면 애매하므로 보정하지 않음)
+  return best && !tie ? best : null;
+}
 // 자산번호를 정규화(공백·하이픈 제거)해 비교하며 자산을 찾는다.
 function findAssetByNumber(code) {
   const norm = (s) => String(s || "").replace(/[\s-]/g, "");
@@ -1448,7 +1472,10 @@ function findAssetByNumber(code) {
   // 2) 부분 포함 (인식 자릿수 오차 대비)
   hit = assets.find((a) => { const n = norm(a.assetNumber); return n.length >= 8 && (n.includes(target) || target.includes(n)); });
   if (hit) return hit;
-  // 3) 근접 매칭: 실제 등록된 자산번호 중 편집거리가 최소이면서 '유일하게 가까운' 후보만 채택.
+  // 3) 혼동쌍 보정: 3↔8 처럼 OCR이 헷갈리는 숫자로만 어긋난 유일한 자산이면 그것으로 인정.
+  hit = confusableAssetMatch(target, norm);
+  if (hit) return hit;
+  // 4) 근접 매칭: 실제 등록된 자산번호 중 편집거리가 최소이면서 '유일하게 가까운' 후보만 채택.
   //    (연속 번호는 1자리 차이라, 애매하면 채택하지 않아 오인식을 막는다.)
   if (target.length >= 16 && target.length <= 24) {
     let best = null, bestD = Infinity, secondD = Infinity;
