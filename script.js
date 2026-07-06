@@ -1256,8 +1256,9 @@ function preprocessOcrImage(dataUrl) {
     const img = new Image();
     img.onload = () => {
       const longest = Math.max(img.width, img.height);
-      // 글자 인식은 해상도가 클수록 유리 (원본 사용 시 최대 3200px까지)
-      const s = longest > 3200 ? 3200 / longest : (longest < 2000 ? 2000 / longest : 1);
+      // 글자 인식은 해상도가 클수록 유리하나, 너무 크면 인식이 느려진다.
+      // 자산코드(숫자 20자리)는 2000~2600px면 충분 → 이 범위로 맞춰 속도·정확도 균형.
+      const s = longest > 2600 ? 2600 / longest : (longest < 2000 ? 2000 / longest : 1);
       const w = Math.round(img.width * s), h = Math.round(img.height * s);
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
@@ -1482,41 +1483,63 @@ function extractAssetCodes(text) {
 // 단일 자산코드 (라벨 등록 폼 자동채우기용)
 function extractAssetCode(text) { return extractAssetCodes(text)[0] || null; }
 // 촬영 사진에서 자산코드(20자리)를 인식한다.
+// 자산코드 인식용 Tesseract 워커를 '한 번만' 만들어 세션 내내 재사용한다.
+// (검수는 자산을 연달아 촬영하므로, 매번 워커를 새로 만들면 WASM·언어 초기화 비용이 반복돼 느리다.)
+// 자산코드는 숫자 20자리뿐이라 무거운 한글 모델 없이 영문(eng)+숫자 화이트리스트만 쓴다 → 로드·인식 모두 빠름.
+let _numOcrWorkerPromise = null;
+let _numOcrProgress = null; // 진행률 콜백(스캔마다 교체)
+async function getNumberOcrWorker() {
+  await ensureTesseract();
+  if (!window.Tesseract || typeof Tesseract.createWorker !== "function") return null;
+  if (!_numOcrWorkerPromise) {
+    _numOcrWorkerPromise = (async () => {
+      const w = await Tesseract.createWorker("eng", 1, {
+        logger: (m) => { if (_numOcrProgress) _numOcrProgress(m); },
+      });
+      try { await w.setParameters({ tessedit_pageseg_mode: "6", tessedit_char_whitelist: "0123456789" }); } catch {}
+      return w;
+    })().catch((e) => { _numOcrWorkerPromise = null; throw e; });
+  }
+  return _numOcrWorkerPromise;
+}
 // QR은 읽지 않고, 라벨에 인쇄된 '자산코드 20자리'를 글자 인식(OCR)으로 읽는다.
-// 일반 인식과 숫자 전용 인식에서 나온 20자리 후보를 모두 모아,
-// 실제 등록된 자산과 일치하는 후보를 우선 선택한다.
+// 숫자 전용 1패스로 먼저 빠르게 시도하고, 매칭 자산이 없을 때만 넓은 인식(2패스)으로 보강한다.
 async function recognizeAssetNumber(dataUrl) {
-  let worker = null;
   const candidates = [];
   const addFrom = (text) => { extractAssetCodes(text).forEach((c) => { if (!candidates.includes(c)) candidates.push(c); }); };
+  const matched = () => candidates.find((c) => findAssetByNumber(c));
   try {
-    setScanLoading("글자를 인식하는 중입니다… 처음 실행은 30초~1분 걸릴 수 있어요.", true);
-    await ensureTesseract();
-    if (!window.Tesseract) return null;
+    setScanLoading("글자를 인식하는 중입니다… 처음 실행은 몇 초 걸릴 수 있어요.", true);
     const image = await preprocessOcrImage(dataUrl);
-    const logger = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
-    if (typeof Tesseract.createWorker === "function") {
-      worker = await Tesseract.createWorker("kor+eng", 1, { logger });
-      try { await worker.setParameters({ tessedit_pageseg_mode: "6", preserve_interword_spaces: "1" }); } catch {}
-      // 1차: 일반 인식(한글+영문)
+    _numOcrProgress = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
+    const worker = await getNumberOcrWorker();
+    if (worker) {
+      // 1차: 숫자 전용(빠름) — 대부분 여기서 끝난다
       let { data } = await worker.recognize(image);
       addFrom(data.text);
-      // 2차: 숫자만 인식 — 자산코드(숫자) 정확도 향상
-      setScanLoading("자산을 다시 확인하는 중…", true);
-      try { await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "6" }); } catch {}
-      ({ data } = await worker.recognize(image));
-      addFrom(data.text);
+      // 매칭되는 자산이 없을 때만 넓은 인식으로 한 번 더 (오독 보정)
+      if (!matched()) {
+        setScanLoading("자산을 다시 확인하는 중…", true);
+        try { await worker.setParameters({ tessedit_char_whitelist: "" }); } catch {}
+        try {
+          ({ data } = await worker.recognize(image));
+          addFrom(data.text);
+        } finally {
+          try { await worker.setParameters({ tessedit_char_whitelist: "0123456789" }); } catch {}
+        }
+      }
     } else {
-      const { data } = await Tesseract.recognize(image, "kor+eng", { logger });
+      const { data } = await Tesseract.recognize(image, "eng");
       addFrom(data.text);
     }
   } catch (e) {
     console.error("자산번호 인식 오류:", e);
   } finally {
-    if (worker) { try { await worker.terminate(); } catch {} }
+    _numOcrProgress = null;
   }
   // 후보 중 실제 등록된 자산과 매칭되는 것을 우선 (20자리 후보부터 검사됨)
-  for (const c of candidates) { if (findAssetByNumber(c)) return c; }
+  const hit = matched();
+  if (hit) return hit;
   // 매칭이 없으면 20자리(있으면) 또는 첫 후보를 돌려줘 안내에 표시
   return candidates.find((c) => c.length === 20) || candidates[0] || null;
 }
