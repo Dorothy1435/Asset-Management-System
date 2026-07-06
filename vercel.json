@@ -7,6 +7,18 @@
       ]
     },
     {
+      "source": "/assets2024.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=86400" }
+      ]
+    },
+    {
+      "source": "/assets2025add.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=86400" }
+      ]
+    },
+    {
       "source": "/logo.png",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=86400" }

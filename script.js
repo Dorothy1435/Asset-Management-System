@@ -365,11 +365,28 @@ async function loadData() {
   });
 }
 
+// 실시간 이벤트로 받은 '바뀐 행'만 메모리 오버레이에 반영한다.
+// (예전엔 자산 하나만 바뀌어도 접속자 전원이 오버레이 전체를 다시 내려받아 전송량이 폭증했다.)
+function applyOverlayChange(payload) {
+  if (!payload) return;
+  if (payload.eventType === "DELETE") {
+    const id = payload.old && payload.old.id;
+    if (id == null) return;
+    overlay = overlay.filter((o) => String(o.id) !== String(id));
+    return;
+  }
+  const nu = payload.new;
+  if (!nu || nu.id == null) return; // 페이로드에 행 정보가 없으면 무시(다음 재동기화에서 반영)
+  const row = { id: nu.id, kind: nu.kind, data: nu.data, updated_at: nu.updated_at };
+  const i = overlay.findIndex((o) => String(o.id) === String(row.id));
+  if (i >= 0) overlay[i] = row; else overlay.push(row);
+}
+let _rtInitialSynced = false;
 function sbSubscribe() {
   if (!sb) return;
   sb.channel("realtime-all")
-    .on("postgres_changes", { event: "*", schema: "public", table: "assets" }, async () => {
-      await sbLoadOverlay(); buildAssets(); rerender();
+    .on("postgres_changes", { event: "*", schema: "public", table: "assets" }, (payload) => {
+      applyOverlayChange(payload); buildAssets(); rerender();
     })
     .on("postgres_changes", { event: "*", schema: "public", table: "requests" }, async () => {
       await sbLoadMyRequests(); await sbLoadRequests(); rerender();
@@ -386,7 +403,13 @@ function sbSubscribe() {
         if (p) renderPostView(p);
       }
     })
-    .subscribe();
+    .subscribe((status) => {
+      // 최초 구독은 loadData가 이미 오버레이를 받아왔으니 건너뛴다.
+      // 이후 재연결(SUBSCRIBED 재발생) 때는 그 사이 놓친 변경을 전체 재동기화로 보정.
+      if (status !== "SUBSCRIBED") return;
+      if (!_rtInitialSynced) { _rtInitialSynced = true; return; }
+      sbLoadOverlay().then(() => { buildAssets(); rerender(); }).catch(() => {});
+    });
 }
 
 // ===== 인증 =====
@@ -1874,7 +1897,14 @@ async function writeInspections(id, list, photoFields) {
 async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos }, meta = {}) {
   const current = findAsset(id);
   if (!current) throw new Error("자산 없음");
-  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", photo: photo || "", checkedAt: new Date().toISOString() };
+  // 검수 사진은 Storage에 올리고 DB에는 URL만 저장한다.
+  // (base64로 DB에 넣으면 모든 접속자가 목록 로드마다 통째로 내려받아 전송량이 폭증한다.)
+  let photoStored = photo || "";
+  if (photoStored && photoStored.startsWith("data:")) {
+    try { photoStored = await uploadMedia(photoStored, "inspections"); }
+    catch (e) { console.warn("검수 사진 업로드 실패 — base64로 저장합니다:", e?.message || e); }
+  }
+  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", photo: photoStored || "", checkedAt: new Date().toISOString() };
   const list = Array.isArray(current.inspections) ? [...current.inspections, insp] : [insp];
   // 이어 찍은 물품 사진(최대 3장)이 있으면 기존 자산 사진 뒤에 병합해 함께 저장
   const extra = Array.isArray(photos) ? photos.filter(Boolean) : [];
@@ -1938,6 +1968,12 @@ async function withUploadedMedia(fields) {
     if (out.labelFile) out.labelFile = await uploadMedia(out.labelFile, "labels");
     if (out.labelPreview) out.labelPreview = await uploadMedia(out.labelPreview, "labels");
     if (Array.isArray(out.imageUrls) && out.imageUrls.length) out.imageUrl = out.imageUrls[0];
+    // 검수 기록 안의 base64 사진도 Storage로 (있을 때만)
+    if (Array.isArray(out.inspections)) {
+      out.inspections = await Promise.all(out.inspections.map(async (ins) =>
+        (ins && typeof ins.photo === "string" && ins.photo.startsWith("data:"))
+          ? { ...ins, photo: await uploadMedia(ins.photo, "inspections") } : ins));
+    }
     return out;
   } catch (e) {
     console.warn("이미지 업로드 실패 — base64로 저장합니다. (Storage 설정 SQL 실행 여부 확인):", e?.message || e);
@@ -1949,7 +1985,9 @@ let _mediaMigrated = false;
 function hasInlineMedia(d) {
   if (!d) return false;
   const is64 = (v) => typeof v === "string" && v.startsWith("data:");
-  return is64(d.imageUrl) || is64(d.labelFile) || is64(d.labelPreview) || (Array.isArray(d.imageUrls) && d.imageUrls.some(is64));
+  return is64(d.imageUrl) || is64(d.labelFile) || is64(d.labelPreview)
+    || (Array.isArray(d.imageUrls) && d.imageUrls.some(is64))
+    || (Array.isArray(d.inspections) && d.inspections.some((ins) => ins && is64(ins.photo)));
 }
 async function migrateOverlayMediaOnce() {
   if (_mediaMigrated || !isAdmin || !sb) return;
