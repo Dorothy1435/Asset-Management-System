@@ -804,18 +804,21 @@ function render() {
     if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
     const inspDate = li ? fmtDate(li.checkedAt) : "—";
     const thumb = a.imageUrl ? `<img class="thumb" src="${a.imageUrl}" alt="" loading="lazy" />` : "";
+    // 모바일 카드에서 빈 값은 숨기기 위한 표식(m-empty). 데스크톱 표에는 영향 없음.
+    const labelHtml = labelCell(a);
+    const mE = (v) => (!String(v == null ? "" : v).trim() ? " m-empty" : "");
     return `
     <tr>
       <td class="col-check"><input type="checkbox" class="row-check" data-id="${esc(a.id)}" ${selectedIds.has(String(a.id)) ? "checked" : ""} /></td>
       <td class="cell-name" title="${esc(a.assetName)}"><div class="name-wrap">${thumb}<span>${esc(a.assetName)} ${tag}</span></div></td>
-      <td class="cell-num">${esc(a.assetNumber)}</td>
-      <td>${labelCell(a)}</td>
-      <td class="cell-loc" title="${esc(a.location)}">${esc(val(a.location))}</td>
-      <td>${esc(val(a.manager))}</td>
-      <td>${esc(val(a.dept))}</td>
-      <td>${statusBadge(a.status)}</td>
-      <td>${esc(val(a.regDate))}</td>
-      <td class="col-insp cell-insp">${inspDate}</td>
+      <td class="cell-num" data-label="자산번호">${esc(a.assetNumber)}</td>
+      <td data-label="라벨" class="${labelHtml === "-" ? "m-empty" : ""}">${labelHtml}</td>
+      <td class="cell-loc${mE(a.location)}" data-label="위치" title="${esc(a.location)}">${esc(val(a.location))}</td>
+      <td data-label="사용자" class="${mE(a.manager).trim()}">${esc(val(a.manager))}</td>
+      <td data-label="부서" class="${mE(a.dept).trim()}">${esc(val(a.dept))}</td>
+      <td data-label="상태">${statusBadge(a.status)}</td>
+      <td data-label="등재일">${esc(val(a.regDate))}</td>
+      <td class="col-insp cell-insp${li ? "" : " m-empty"}" data-label="검수일">${inspDate}</td>
       <td class="cell-actions">
         <button class="btn-mini btn-view" data-id="${esc(a.id)}">상세</button>
         <button class="btn-mini btn-edit" data-id="${esc(a.id)}">${isAdmin ? "수정" : "수정요청"}</button>

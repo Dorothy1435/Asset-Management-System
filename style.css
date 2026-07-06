@@ -1412,6 +1412,77 @@ body { max-width: 100%; overflow-x: hidden; }
   .detail-grid { grid-template-columns: 96px 1fr; }
   .form-grid { grid-template-columns: 1fr; }
 
+  /* ===== 자산 목록: 표 → 카드형 (모바일) ===== */
+  .table-wrap { overflow-x: visible; border: none; background: transparent; }
+  .asset-table { min-width: 0; width: 100%; }
+  .asset-table thead { display: none; }
+  .asset-table, .asset-table tbody { display: block; }
+  .asset-table tr {
+    display: block;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .asset-table tbody tr:hover { background: #fff; }
+  .asset-table tbody tr:last-child td { border-bottom: none; }
+  /* 일반 셀: '항목명 ─ 값' 한 줄 */
+  .asset-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 5px 0;
+    border: none;
+    font-size: 13.5px;
+    text-align: right;
+    max-width: none;
+  }
+  .asset-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--text-light);
+    font-size: 12px;
+    text-align: left;
+    flex-shrink: 0;
+  }
+  /* 값이 없거나 라벨 없는 특수 셀은 라벨 숨김 */
+  .asset-table .col-check { display: none; }        /* 체크박스 열 숨김 */
+  .asset-table td.m-empty { display: none; }         /* 빈 값 항목은 카드에서 숨김 */
+  .asset-table .cell-name, .asset-table .cell-actions { display: block; text-align: left; }
+  .asset-table .cell-name::before, .asset-table .cell-actions::before { display: none; }
+  /* 자산명 = 카드 제목 (크게) */
+  .asset-table .cell-name { padding: 0 0 6px; }
+  .cell-name .name-wrap { align-items: center; gap: 10px; }
+  .cell-name .name-wrap > span { font-size: 15.5px; font-weight: 700; line-height: 1.35; }
+  .asset-table .thumb { width: 46px; height: 46px; border-radius: 6px; }
+  /* 자산번호 = 부제 (제목 아래, 옅게) + 아래 구분선 */
+  .asset-table .cell-num {
+    display: block;
+    text-align: left;
+    padding: 0 0 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #f0f1f3;
+    font-size: 12.5px;
+  }
+  .asset-table .cell-num::before {
+    content: "자산번호";
+    display: inline;
+    margin-right: 6px;
+  }
+  .cell-loc { color: var(--text); }
+  /* 관리 버튼: 라벨 없이 아래에 꽉 차게 */
+  .asset-table .cell-actions {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #f0f1f3;
+    display: flex;
+    gap: 6px;
+  }
+  .asset-table .cell-actions .btn-mini { flex: 1; margin: 0; padding: 8px 4px; font-size: 13px; }
+
   /* 결재 내역 한 줄 목록 → 좁은 화면에선 2줄로 부드럽게 */
   .hist-row { flex-wrap: wrap; gap: 6px 8px; }
   .hist-asset { max-width: 55%; }
