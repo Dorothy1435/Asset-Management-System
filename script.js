@@ -1494,6 +1494,8 @@ async function getNumberOcrWorker() {
   if (!_numOcrWorkerPromise) {
     _numOcrWorkerPromise = (async () => {
       const w = await Tesseract.createWorker("eng", 1, {
+        // fast 언어모델(약 2MB) — 표준(약 11MB)보다 다운로드·초기화·인식이 모두 빠르다. 숫자 인식엔 충분.
+        langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
         logger: (m) => { if (_numOcrProgress) _numOcrProgress(m); },
       });
       try { await w.setParameters({ tessedit_pageseg_mode: "6", tessedit_char_whitelist: "0123456789" }); } catch {}
@@ -1502,6 +1504,9 @@ async function getNumberOcrWorker() {
   }
   return _numOcrWorkerPromise;
 }
+// OCR 워커를 미리 초기화(예열)해 둔다. 검수 안내창을 여는 순간 백그라운드로 준비 →
+// 사용자가 안내를 읽고 카메라를 조준하는 사이 초기화가 끝나, 첫 촬영 후 대기 시간이 사라진다.
+function warmupNumberOcr() { try { getNumberOcrWorker().catch(() => {}); } catch {} }
 // QR은 읽지 않고, 라벨에 인쇄된 '자산코드 20자리'를 글자 인식(OCR)으로 읽는다.
 // 숫자 전용 1패스로 먼저 빠르게 시도하고, 매칭 자산이 없을 때만 넓은 인식(2패스)으로 보강한다.
 async function recognizeAssetNumber(dataUrl) {
@@ -1547,10 +1552,12 @@ async function recognizeAssetNumber(dataUrl) {
 function startScanInspect() {
   if (!requireLogin()) return;
   show("scanGuideOverlay");
+  warmupNumberOcr(); // 안내창을 읽는 동안 인식 엔진을 미리 준비 → 첫 촬영 대기 최소화
 }
 // 안내 모달의 '촬영 시작' → 실제 카메라 실행 (사용자 제스처 내에서 호출해야 카메라가 열림)
 function launchScanCamera() {
   hide("scanGuideOverlay");
+  warmupNumberOcr(); // (안내창을 건너뛴 경우 대비) 카메라 여는 동안에도 예열
   const input = document.getElementById("scanCameraInput");
   if (input) { input.value = ""; input.click(); }
 }
