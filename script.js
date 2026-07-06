@@ -29,20 +29,26 @@ let inspRound = "1회차"; // 대시보드/필터 기준 검수 회차
 const PER_PAGE = 20;
 
 // ===== 메뉴(자산 그룹) / 페이지 라우팅 =====
-const GROUP_2024 = "2025년도 자산";
+const GROUP_2024 = "2025년도 자산";   // 메인(현재) 메뉴 — 값은 레거시 이름 그대로 유지
 const GROUP_ELEC = "전자";
-const GROUPS = [GROUP_2024, GROUP_ELEC];
-// assetGroup 값이 없거나 옛 이름('2024년도 자산')인 기존 자산은 모두 기본 자산 메뉴로 간주
+const GROUP_PAST = "2024자산";        // 2024년도 자산 메뉴 (내부값; 레거시 '2024년도 자산' 문자열과 구분)
+const GROUPS = [GROUP_2024, GROUP_PAST, GROUP_ELEC];
+// 화면에 보이는 메뉴 이름 (내부값 → 표시 라벨)
+const GROUP_LABELS = { [GROUP_2024]: "2025년도 자산", [GROUP_PAST]: "2024년도 자산", [GROUP_ELEC]: "전자" };
+const groupLabel = (g) => GROUP_LABELS[g] || g;
+// assetGroup 값이 없거나 옛 이름('2024년도 자산')인 기존 자산은 모두 기본(2025) 메뉴로 간주.
+// 새 2024 메뉴는 별도 내부값(GROUP_PAST)을 쓰므로 레거시와 섞이지 않는다.
 const groupOf = (a) => {
   const g = a.assetGroup;
+  if (g === GROUP_PAST) return GROUP_PAST;
   if (!g || g === "2024년도 자산") return GROUP_2024;
   return g;
 };
 let currentGroup = GROUP_2024;
 let currentPageName = "assets"; // "assets" | "board"
-// 라우트별 자산 그룹 매핑 (옛 해시 '2024'도 호환)
-const ROUTES = { "2025": GROUP_2024, "2024": GROUP_2024, "elec": GROUP_ELEC };
-const GROUP_TO_ROUTE = { [GROUP_2024]: "2025", [GROUP_ELEC]: "elec" };
+// 라우트별 자산 그룹 매핑
+const ROUTES = { "2025": GROUP_2024, "past": GROUP_PAST, "elec": GROUP_ELEC };
+const GROUP_TO_ROUTE = { [GROUP_2024]: "2025", [GROUP_PAST]: "past", [GROUP_ELEC]: "elec" };
 // 운영 부서 표준 목록 (폼/필터 공통)
 const DEPTS = ["기획사무국", "지역혁신국", "교육혁신국", "산업혁신국", "현장캠퍼스"];
 
@@ -89,6 +95,8 @@ let isApproved = false;
 let detailCurrentId = null;
 let inspectTargetId = null;
 let inspectPhoto = "";   // 검수 사진(촬영본) — 카메라 검수 시에만 채워짐
+let inspectExtraPhotos = []; // 검수 화면에서 이어서 촬영한 '물품 사진'(최대 3장, base64) — 자산 사진에 병합
+const INSP_EXTRA_MAX = 3;
 let posts = [];          // 게시판 글
 let postComments = [];   // 현재 보고 있는 글의 댓글
 let currentPostId = null;
@@ -319,10 +327,24 @@ function renderNav() {
 }
 
 async function loadData() {
-  // assets.json 다운로드와 로그인 세션 확인을 동시에 진행 (서로 독립적)
-  const baseP = fetch("assets.json")
-    .then((r) => r.json())
-    .then((d) => { baseAssets = d; })
+  // 베이스 자산(읽기 전용)은 3개 파일에서 합쳐 읽는다.
+  //  · assets.json        : 2025년도 자산(메인)
+  //  · assets2025add.json : 2025년도 자산에 추가 병합분(6.30 기준, 중복 자산번호 제외됨)
+  //  · assets2024.json    : 2024년도 자산 메뉴 (assetGroup=GROUP_PAST 태깅됨)
+  const fetchJson = (url) => fetch(url).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  const baseP = Promise.all([
+    fetchJson("assets.json"),
+    fetchJson("assets2025add.json"),
+    fetchJson("assets2024.json"),
+  ])
+    .then(([main, add2025, past2024]) => {
+      if (!Array.isArray(main) || !main.length) throw new Error("main empty");
+      baseAssets = [
+        ...main,
+        ...(Array.isArray(add2025) ? add2025 : []),
+        ...(Array.isArray(past2024) ? past2024 : []),
+      ];
+    })
     .catch(() => {
       baseAssets = [];
       document.getElementById("assetTbody").innerHTML =
@@ -627,7 +649,7 @@ function renderStats() {
     ? `<div class="stat-card stat-insp"><div class="num">${inspectedCnt.toLocaleString()}/${total.toLocaleString()} <span class="rate">(${inspRate}%)</span></div><div class="label">${roundSel} 검수 완료</div></div>`
     : "";
   document.getElementById("stats").innerHTML = `
-    <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">${esc(currentGroup)}</div></div>
+    <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">${esc(groupLabel(currentGroup))}</div></div>
     <div class="stat-card"><div class="num">${(totalCost / 100000000).toFixed(1)}억</div><div class="label">총 취득금액</div></div>
     <div class="stat-card"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
     <div class="stat-card"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>
@@ -893,7 +915,7 @@ function openDetail(id) {
     : "";
   const isElec = groupOf(a) === GROUP_ELEC;
   const rows = [
-    ["메뉴", groupOf(a)],
+    ["메뉴", groupLabel(groupOf(a))],
     ["자산명", a.assetName], ["자산번호", a.assetNumber], ["라벨스티커", a.labelSticker],
     ["라벨 파일", a.labelFile ? (a.labelFileName || "첨부됨") : ""],
     ["모델명", a.model], ["규격", a.spec], ["제작회사", a.maker],
@@ -1675,6 +1697,8 @@ function openInspect(id, photo) {
   if (!a) return;
   inspectTargetId = id;
   inspectPhoto = photo || "";
+  inspectExtraPhotos = [];
+  renderInspExtra();
   document.getElementById("inspectError").hidden = true;
   fillInspPeriod();
   document.getElementById("insp-inspector").value = myProfile?.name || "";
@@ -1707,6 +1731,36 @@ function fillInspPeriod() {
   const opts = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`);
   sel.innerHTML = opts.map((o) => `<option value="${o}">${o}</option>`).join("");
 }
+// 검수 화면에서 이어 찍은 '물품 사진' 미리보기/버튼 상태 갱신
+function renderInspExtra() {
+  const grid = document.getElementById("inspExtraPreview");
+  const btn = document.getElementById("inspExtraBtn");
+  const hint = document.getElementById("inspExtraHint");
+  if (!grid || !btn) return;
+  grid.innerHTML = inspectExtraPhotos.map((src, i) =>
+    `<div class="insp-extra-thumb"><img src="${src}" alt="물품 사진 ${i + 1}" /><button type="button" class="insp-extra-del" data-insp-extra="${i}" title="이 사진 제거">✕</button></div>`
+  ).join("");
+  const full = inspectExtraPhotos.length >= INSP_EXTRA_MAX;
+  btn.hidden = full;
+  btn.textContent = inspectExtraPhotos.length ? `📷 물품 사진 더 찍기 (${inspectExtraPhotos.length}/${INSP_EXTRA_MAX})` : "📷 물품 사진 촬영";
+  if (hint) hint.textContent = full
+    ? `물품 사진 ${INSP_EXTRA_MAX}장을 모두 찍었어요. ‘검수 확인’을 누르면 함께 저장됩니다.`
+    : "검수한 자산의 실물 사진을 최대 3장까지 이어서 찍을 수 있어요. 원하는 만큼만 찍고 ‘검수 확인’을 누르면 함께 저장됩니다.";
+}
+// 물품 사진 1장 촬영 처리 (최대 3장)
+async function handleInspExtraCapture(file) {
+  if (!file) return;
+  if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
+  if (inspectExtraPhotos.length >= INSP_EXTRA_MAX) return;
+  try {
+    const data = await compressImage(file, 1000, 0.7);
+    inspectExtraPhotos.push(data);
+    renderInspExtra();
+  } catch (e) {
+    console.error("물품 사진 처리 오류:", e);
+    alert("사진 처리 중 문제가 발생했습니다. 다시 시도해 주세요.");
+  }
+}
 async function submitInspect() {
   const periodType = "회차";
   const period = document.getElementById("insp-period").value.trim();
@@ -1721,46 +1775,61 @@ async function submitInspect() {
   const a = findAsset(inspectTargetId);
   if (!a) { hide("inspectOverlay"); return; }
   const photo = inspectPhoto;
+  const photos = inspectExtraPhotos.slice(); // 이어 찍은 물품 사진(최대 3장)
   const reqName = affiliation ? `${inspector} (${affiliation})` : inspector;
   const btn = document.getElementById("inspectSubmit");
+  const origLabel = btn.textContent;
   btn.disabled = true;
+  if (photos.length) btn.textContent = "사진 저장 중…";
   try {
     if (isAdmin) {
-      await applyInspect(inspectTargetId, { periodType, period, inspector, affiliation, photo });
+      await applyInspect(inspectTargetId, { periodType, period, inspector, affiliation, photo, photos });
     } else {
       await submitRequest({
         action: "inspect", target_id: inspectTargetId,
-        payload: { periodType, period, inspector, affiliation, photo, assetName: a.assetName, assetNumber: a.assetNumber },
-        requester: reqName, note: `${period} 검수 확인`,
+        payload: { periodType, period, inspector, affiliation, photo, photos, assetName: a.assetName, assetNumber: a.assetNumber },
+        requester: reqName, note: `${period} 검수 확인${photos.length ? ` · 물품사진 ${photos.length}장` : ""}`,
       });
     }
   } catch (e) {
-    console.error(e); btn.disabled = false;
+    console.error(e); btn.disabled = false; btn.textContent = origLabel;
     errEl.textContent = "처리에 실패했습니다. 잠시 후 다시 시도해주세요."; errEl.hidden = false; return;
   }
-  btn.disabled = false;
+  btn.disabled = false; btn.textContent = origLabel;
   hide("inspectOverlay");
   inspectPhoto = "";
+  inspectExtraPhotos = [];
   await reloadAll(); rerender();
-  if (isAdmin) { openDetail(inspectTargetId); alert(photo ? "검수가 완료되었습니다. 검수 사진이 기록에 추가되었습니다." : "검수가 완료되었습니다."); }
-  else { hide("detailOverlay"); alert(photo ? "검수 승인 신청이 접수되었습니다. 관리자 승인 후 검수 사진과 함께 기록에 반영됩니다." : "검수 승인 신청이 접수되었습니다. 관리자 승인 후 기록에 반영됩니다."); }
+  const photoMsg = photos.length ? `물품 사진 ${photos.length}장이 자산에 추가되었습니다. ` : "";
+  if (isAdmin) { openDetail(inspectTargetId); alert(`검수가 완료되었습니다. ${photoMsg}${photo ? "검수 사진이 기록에 추가되었습니다." : ""}`.trim()); }
+  else { hide("detailOverlay"); alert(`검수 승인 신청이 접수되었습니다. 관리자 승인 후 ${photos.length ? "물품 사진과 함께 " : ""}${photo ? "검수 사진과 함께 " : ""}기록에 반영됩니다.`); }
 }
-// 검수 목록을 오버레이에 저장(기존 데이터 보존)
-async function writeInspections(id, list) {
+// 검수 목록(+선택적으로 병합된 물품 사진)을 오버레이에 저장(기존 데이터 보존)
+// photoFields: { imageUrl, imageUrls } 가 있으면 자산 사진도 함께 갱신한다.
+async function writeInspections(id, list, photoFields) {
   const isAdded = String(id).startsWith("u");
   const kind = isAdded ? "added" : "override";
   const existing = overlay.find((o) => String(o.id) === String(id) && o.kind === kind)?.data || {};
-  const { error } = await sb.from("assets").upsert({ id: String(id), kind, data: { ...existing, inspections: list }, updated_at: new Date().toISOString() });
+  const data = { ...existing, inspections: list, ...(photoFields || {}) };
+  const { error } = await sb.from("assets").upsert({ id: String(id), kind, data, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
-async function applyInspect(id, { periodType, period, inspector, affiliation, photo }, meta = {}) {
+async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos }, meta = {}) {
   const current = findAsset(id);
   if (!current) throw new Error("자산 없음");
   const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", photo: photo || "", checkedAt: new Date().toISOString() };
   const list = Array.isArray(current.inspections) ? [...current.inspections, insp] : [insp];
-  await writeInspections(id, list);
+  // 이어 찍은 물품 사진(최대 3장)이 있으면 기존 자산 사진 뒤에 병합해 함께 저장
+  const extra = Array.isArray(photos) ? photos.filter(Boolean) : [];
+  let photoFields = null;
+  if (extra.length) {
+    const merged = [...photosOf(current), ...extra];
+    photoFields = await withUploadedMedia({ imageUrls: merged });
+  }
+  await writeInspections(id, list, photoFields);
   const who = inspector + (affiliation ? ` (${affiliation})` : "");
-  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${period} · 확인자: ${who}` });
+  const photoNote = extra.length ? ` · 물품사진 ${extra.length}장 추가` : "";
+  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${period} · 확인자: ${who}${photoNote}` });
 }
 async function removeInspection(assetId, inspId) {
   const current = findAsset(assetId);
@@ -2394,7 +2463,7 @@ async function exportExcel() {
   if (filtered.length === 0) { alert("내보낼 자산이 없습니다."); return; }
   try { await ensureXlsx(); } catch { alert("엑셀 모듈을 불러오지 못했습니다. 인터넷 연결을 확인해주세요."); return; }
   const rows = filtered.map((a) => ({
-    "메뉴": groupOf(a),
+    "메뉴": groupLabel(groupOf(a)),
     "자산명": a.assetName || "", "자산번호": a.assetNumber || "", "라벨스티커": a.labelSticker || "", "라벨파일": a.labelFile ? (a.labelFileName || "있음") : "",
     "모델명": a.model || "", "규격": a.spec || "", "제작회사": a.maker || "",
     "단가": a.unitPrice || 0, "수량": a.qty || 0, "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "",
@@ -2406,7 +2475,7 @@ async function exportExcel() {
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "자산목록");
-  XLSX.writeFile(wb, `${currentGroup}_자산목록_${todayStr()}.xlsx`);
+  XLSX.writeFile(wb, `${groupLabel(currentGroup)}_자산목록_${todayStr()}.xlsx`);
 }
 
 // ===== 이벤트 =====
@@ -2486,6 +2555,16 @@ document.getElementById("scanGuideStart").addEventListener("click", launchScanCa
 document.getElementById("scanGuideCancel").addEventListener("click", () => hide("scanGuideOverlay"));
 document.getElementById("scanGuideOverlay").addEventListener("click", (e) => { if (e.target.id === "scanGuideOverlay") hide("scanGuideOverlay"); });
 document.getElementById("scanCameraInput").addEventListener("change", (e) => { handleScanCapture(e.target.files && e.target.files[0]); });
+// 검수 화면: 물품 사진 이어 찍기(최대 3장)
+document.getElementById("inspExtraBtn").addEventListener("click", () => {
+  const input = document.getElementById("inspExtraInput");
+  if (input) { input.value = ""; input.click(); }
+});
+document.getElementById("inspExtraInput").addEventListener("change", (e) => { handleInspExtraCapture(e.target.files && e.target.files[0]); });
+document.getElementById("inspExtraPreview").addEventListener("click", (e) => {
+  const del = e.target.closest("button[data-insp-extra]");
+  if (del) { inspectExtraPhotos.splice(Number(del.dataset.inspExtra), 1); renderInspExtra(); }
+});
 document.getElementById("lightbox").addEventListener("click", closeLightbox);
 
 document.getElementById("f-image").addEventListener("change", (e) => handlePhotoUpload(e.target.files));

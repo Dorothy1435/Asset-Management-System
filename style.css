@@ -1025,6 +1025,46 @@ body {
   object-fit: contain;
   display: block;
 }
+/* 검수 화면: 이어 찍는 물품 사진(최대 3장) */
+.insp-extra-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.insp-extra-grid:empty { display: none; }
+.insp-extra-thumb { position: relative; }
+.insp-extra-thumb img {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.insp-extra-del {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: #dc2626;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.insp-extra-hint {
+  font-size: 12px;
+  color: var(--text-light);
+  margin-top: 6px;
+  line-height: 1.5;
+}
 .insp-thumb {
   width: 44px;
   height: 44px;

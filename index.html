@@ -69,6 +69,7 @@
   <nav class="main-nav">
     <div class="main-nav-inner">
       <button class="nav-link" data-route="2025">2025년도 자산 <span class="nav-count">0</span></button>
+      <button class="nav-link" data-route="past">2024년도 자산 <span class="nav-count">0</span></button>
       <button class="nav-link" data-route="elec">전자 <span class="nav-count">0</span></button>
       <button class="nav-link" data-route="board">건의 게시판</button>
     </div>
@@ -195,6 +196,7 @@
             <label>메뉴(구분) <span class="req">*</span></label>
             <select id="f-assetGroup">
               <option value="2025년도 자산">2025년도 자산</option>
+              <option value="2024자산">2024년도 자산</option>
               <option value="전자">전자</option>
             </select>
           </div>
@@ -530,6 +532,13 @@
         <div class="form-row" id="insp-photo-row" style="margin-bottom:12px;" hidden>
           <label>검수 사진 (촬영됨)</label>
           <div class="insp-photo-preview" id="inspPhotoPreview"></div>
+        </div>
+        <div class="form-row" id="insp-extra-row" style="margin-bottom:12px;">
+          <label>물품 사진 추가 <span class="label-hint">(선택 · 최대 3장)</span></label>
+          <div class="insp-extra-grid" id="inspExtraPreview"></div>
+          <input type="file" id="inspExtraInput" accept="image/*" capture="environment" hidden />
+          <button type="button" class="btn btn-secondary btn-sm" id="inspExtraBtn">📷 물품 사진 촬영</button>
+          <p class="insp-extra-hint" id="inspExtraHint">검수한 자산의 실물 사진을 최대 3장까지 이어서 찍을 수 있어요. 원하는 만큼만 찍고 <b>‘검수 확인’</b>을 누르면 함께 저장됩니다.</p>
         </div>
         <div class="form-row" style="margin-bottom:12px;">
           <label>검수 회차</label>
