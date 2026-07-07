@@ -1690,33 +1690,40 @@ async function getNumberOcrWorker() {
 // 사용자가 안내를 읽고 카메라를 조준하는 사이 초기화가 끝나, 첫 촬영 후 대기 시간이 사라진다.
 function warmupNumberOcr() { try { getNumberOcrWorker().catch(() => {}); } catch {} }
 // QR은 읽지 않고, 라벨에 인쇄된 '자산코드 20자리'를 글자 인식(OCR)으로 읽는다.
-// 숫자 전용 1패스로 먼저 빠르게 시도하고, 매칭 자산이 없을 때만 넓은 인식(2패스)으로 보강한다.
-async function recognizeAssetNumber(dataUrl) {
+// 지금 보고 있는 메뉴에 맞는 인식을 1차부터 사용해 한 번에 끝낸다(빠름+정확).
+//  · 2025/전자: 숫자 전용   · 2024: 문자+숫자(G형식)
+// 1차에서 못 맞추면(형식 애매 등) 고해상도 넓은 인식으로 한 번만 정밀 재시도.
+const OCR_WL_DIGIT = "0123456789";
+const OCR_WL_ALNUM = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-";
+async function recognizeAssetNumber(dataUrl, mode) {
+  const alnumMode = mode === "alnum";
   const candidates = [];
   const addFrom = (text) => { extractAssetCodes(text).forEach((c) => { if (!candidates.includes(c)) candidates.push(c); }); };
   const matched = () => candidates.find((c) => findAssetByNumber(c));
   let alnumHit = null; // 2024 형식(G20250019-0001 등) 매칭 자산
   const tryAlnum = (text) => { if (alnumHit) return; for (const c of extractAlnumCodes(text)) { const a = findAsset2024ByCode(c); if (a) { alnumHit = a; break; } } };
+  const done = () => !!matched() || !!alnumHit;
   try {
     setScanLoading("글자를 인식하는 중입니다… 처음 실행은 몇 초 걸릴 수 있어요.", true);
     _numOcrProgress = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
     const worker = await getNumberOcrWorker();
     if (worker) {
-      // 1차: 저해상도 + 숫자 전용(빠름) — 잘 찍힌 라벨은 여기서 끝. 오독은 목록 대조가 보정.
-      const low = await preprocessOcrImage(dataUrl, 1500, 0);
-      let { data } = await worker.recognize(low);
-      addFrom(data.text);
-      // 매칭 실패 시에만 고해상도 + 넓은 인식으로 정밀 재시도 (+2024 문자형식)
-      if (!matched()) {
+      // 1차: 메뉴에 맞는 화이트리스트 + 중간 해상도 (한 번에 끝나도록)
+      try { await worker.setParameters({ tessedit_char_whitelist: alnumMode ? OCR_WL_ALNUM : OCR_WL_DIGIT }); } catch {}
+      const first = await preprocessOcrImage(dataUrl, alnumMode ? 1800 : 1500, 0);
+      let { data } = await worker.recognize(first);
+      addFrom(data.text); if (alnumMode) tryAlnum(data.text);
+      // 1차 실패 시에만 고해상도 + 넓은 인식으로 정밀 재시도 (양쪽 형식 모두)
+      if (!done()) {
         setScanLoading("자산을 다시 확인하는 중…", true);
         const high = await preprocessOcrImage(dataUrl, 2400, 1800);
         try { await worker.setParameters({ tessedit_char_whitelist: "" }); } catch {}
         try {
           ({ data } = await worker.recognize(high));
           addFrom(data.text);
-          tryAlnum(data.text); // 문자+숫자(2024) 후보도 함께 대조
+          tryAlnum(data.text);
         } finally {
-          try { await worker.setParameters({ tessedit_char_whitelist: "0123456789" }); } catch {}
+          try { await worker.setParameters({ tessedit_char_whitelist: OCR_WL_DIGIT }); } catch {}
         }
       }
     } else {
@@ -1756,7 +1763,9 @@ async function handleScanCapture(file) {
   try {
     setScanLoading("사진을 준비하는 중…", true);
     const raw = await fileToDataURL(file);                 // 인식용 원본(고해상도)
-    const code = await recognizeAssetNumber(raw);          // 인식(%)을 먼저 — 무거운 압축은 매칭 성공 후로 미룬다
+    // 지금 메뉴가 2024면 문자+숫자(G형식) 우선 인식, 아니면 숫자(20자리) 우선
+    const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
+    const code = await recognizeAssetNumber(raw, mode);    // 인식(%)을 먼저 — 무거운 압축은 매칭 성공 후로 미룬다
     setScanLoading("", false);
     if (!code) {
       alert("사진에서 자산번호를 인식하지 못했습니다.\n\n· 라벨의 ‘자산번호’가 잘리지 않게\n· 크고 반듯하게, 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
