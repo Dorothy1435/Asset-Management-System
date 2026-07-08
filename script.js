@@ -482,7 +482,13 @@ async function applySession(session) {
   // 로그인 전에는 시작 화면 / 승인 전에는 대기 화면 / 승인 후에는 자산관리 시스템
   document.body.classList.toggle("authed", !!currentUser && isApproved);
   document.body.classList.toggle("pending-approval", !!currentUser && !isApproved);
-  if (currentUser && isApproved) ALL_MODALS.forEach(hide); // 로그인 성공 시 열려있던 로그인 모달 등 닫기
+  // 로그인 성공 순간(로그인 창이 떠 있을 때)만 열린 모달을 정리한다.
+  // 모바일에서 사진/카메라 선택창을 다녀오면 토큰 갱신 이벤트로 applySession이 다시 불리는데,
+  // 그때 검수 창 등 작업 중인 모달이 강제로 닫히지 않도록 로그인 창이 열려있을 때로 한정한다.
+  if (currentUser && isApproved) {
+    const auth = document.getElementById("authOverlay");
+    if (auth && !auth.hidden) ALL_MODALS.forEach(hide);
+  }
 }
 
 function idToEmail(input, forceDomain) {
@@ -1868,55 +1874,61 @@ async function handleBatchFiles(files) {
   batchApplyMsg = "";
   setBatchBusy(true);
   warmupNumberOcr();
-  const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
-  const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
-  const period = document.getElementById("batch-period").value;
-  batchRunTotal = list.length; batchRunDone = 0;
   let newDup = 0;
-  for (const file of list) {
-    const item = { name: file.name || "사진", file, thumb: "", photoData: "", code: null, asset: null, status: "processing", overwrite: false };
-    // 같은 사진(파일)을 또 고른 경우 — 인식 없이 '이미 올린 사진'으로 표시해 헷갈리지 않게 한다.
-    const sig = `${file.name || ""}|${file.size || 0}|${file.lastModified || 0}`;
-    if (batchFileSigs.has(sig)) {
-      item.status = "samephoto";
+  try {
+    const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
+    const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
+    const period = document.getElementById("batch-period").value;
+    batchRunTotal = list.length; batchRunDone = 0;
+    for (const file of list) {
+      const item = { name: file.name || "사진", file, thumb: "", photoData: "", code: null, asset: null, status: "processing", overwrite: false };
+      // 같은 사진(파일)을 또 고른 경우 — 인식 없이 '이미 올린 사진'으로 표시해 헷갈리지 않게 한다.
+      const sig = `${file.name || ""}|${file.size || 0}|${file.lastModified || 0}`;
+      if (batchFileSigs.has(sig)) {
+        item.status = "samephoto";
+        batchItems.push(item);
+        batchRunDone++;
+        renderBatchList();
+        continue;
+      }
+      batchFileSigs.add(sig);
       batchItems.push(item);
+      renderBatchList();
+      try {
+        const raw = await fileToDataURL(file);
+        // 목록에서 어떤 사진인지 바로 알아볼 수 있도록 모든 사진에 작은 썸네일을 만든다(실패 사진 확인용).
+        try { item.thumb = await resizeDataUrl(raw, 160, 0.5); } catch {}
+        renderBatchList();
+        const { asset, code } = await recognizeAssetInPool(raw, mode, pool);
+        item.code = code || null;
+        if (!asset) {
+          item.status = "nomatch";
+        } else {
+          item.asset = asset;
+          item.photoData = await compressImage(file, 900, 0.6); // 검수 증빙 사진(압축). 덮어쓰기 대비 미리 준비.
+          item.status = classifyBatchItem(item, asset, period);
+          if (item.status !== "matched") newDup++;
+        }
+      } catch (e) {
+        console.error("일괄 검수 인식 오류:", e);
+        item.status = "error";
+      }
       batchRunDone++;
       renderBatchList();
-      continue;
     }
-    batchFileSigs.add(sig);
-    batchItems.push(item);
-    renderBatchList();
-    try {
-      const raw = await fileToDataURL(file);
-      // 목록에서 어떤 사진인지 바로 알아볼 수 있도록 모든 사진에 작은 썸네일을 만든다(실패 사진 확인용).
-      try { item.thumb = await resizeDataUrl(raw, 160, 0.5); } catch {}
-      renderBatchList();
-      const { asset, code } = await recognizeAssetInPool(raw, mode, pool);
-      item.code = code || null;
-      if (!asset) {
-        item.status = "nomatch";
-      } else {
-        item.asset = asset;
-        item.photoData = await compressImage(file, 900, 0.6); // 검수 증빙 사진(압축). 덮어쓰기 대비 미리 준비.
-        item.status = classifyBatchItem(item, asset, period);
-        if (item.status !== "matched") newDup++;
-      }
-    } catch (e) {
-      console.error("일괄 검수 인식 오류:", e);
-      item.status = "error";
-    }
-    batchRunDone++;
+  } catch (e) {
+    console.error("일괄 업로드 처리 오류:", e);
+  } finally {
+    // 무슨 일이 있어도 상태를 풀어 다음 업로드가 막히지 않게 한다.
+    batchProcessing = false;
+    batchRunTotal = 0;
+    batchSuppressScan = false;
+    setScanLoading("", false); // 혹시 남아있을 단일 검수 오버레이 정리
+    setBatchBusy(false);
     renderBatchList();
   }
-  batchProcessing = false;
-  batchRunTotal = 0;
-  batchSuppressScan = false;
-  setScanLoading("", false); // 혹시 남아있을 단일 검수 오버레이 정리
-  setBatchBusy(false);
-  renderBatchList();
   if (newDup) {
-    alert(`자산번호가 중복되는 사진이 ${newDup}장 있습니다.\n(같은 번호가 여러 장이거나, 이미 이번 회차에 검수된 자산)\n\n목록에서 각 항목의 ‘건너뛰기 / 덮어쓰기’를 선택하세요. 기본값은 건너뛰기입니다.`);
+    alert(`자산번호가 중복되는 사진이 ${newDup}장 있습니다.\n(같은 번호가 여러 장이거나, 이미 이번 회차에 검수된 자산)\n\n화면 아래 ‘⏭️ 건너뛰고 완료’ 또는 ‘🔁 덮어쓰기 완료’ 버튼으로 처리 방법을 한 번에 선택하세요.`);
   }
 }
 const BATCH_STATUS = {
@@ -3326,8 +3338,15 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 // 모달 닫기
 const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
-document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });
+// 배경(어두운 부분) 클릭 시 닫기 — 단, 여러 장 검수 창은 실수로 닫히면 인식한 사진이 날아가므로 제외(‘닫기’ 버튼으로만)
+document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov && ov.id !== "batchInspectOverlay") ov.hidden = true; }));
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  closeLightbox();
+  const batch = document.getElementById("batchInspectOverlay");
+  const keepBatch = batch && !batch.hidden; // 여러 장 검수 창은 Esc로 닫지 않는다(‘닫기’ 버튼 사용)
+  ALL_MODALS.forEach((id) => { if (id === "batchInspectOverlay" && keepBatch) return; hide(id); });
+});
 
 // 시작
 loadData();
