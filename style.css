@@ -1603,6 +1603,10 @@ body { max-width: 100%; overflow-x: hidden; }
 .batch-row.b-dup .batch-badge { background: #ffedd5; color: #c2410c; }
 .batch-row.b-err .batch-badge { background: #fee2e2; color: #b91c1c; }
 .batch-row.b-done .batch-badge { background: #dbeafe; color: #1d4ed8; }
+.batch-thumb-click { cursor: zoom-in; }
+.batch-retry { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
+.batch-retry:hover { background: #fef3c7; }
+#batchInspectOverlay .modal.batch-drag { outline: 3px dashed #0284c7; outline-offset: -8px; background: #f0f9ff; }
 @media (max-width: 560px) {
   .batch-filters { grid-template-columns: 1fr; }
 }

@@ -297,7 +297,7 @@ function applyHashRoute() {
     // 그룹이 바뀌면 검색/필터/페이지 초기화
     const si = document.getElementById("searchInput");
     if (si) si.value = "";
-    ["deptFilter", "statusFilter", "minCost", "maxCost"].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+    ["deptFilter", "statusFilter", "minCost", "maxCost", "nameFilter", "locFilter"].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
     inspView = "all";
     currentPage = 1;
   }
@@ -739,6 +739,8 @@ function initFilters() {
 }
 function applyFilter(resetPage = true) {
   const kw = document.getElementById("searchInput").value.trim().toLowerCase();
+  const nameKw = (document.getElementById("nameFilter")?.value || "").trim().toLowerCase();
+  const locKw = (document.getElementById("locFilter")?.value || "").trim().toLowerCase();
   const dept = document.getElementById("deptFilter").value;
   const status = document.getElementById("statusFilter").value;
   const minCost = Number(document.getElementById("minCost").value) || 0;
@@ -754,6 +756,9 @@ function applyFilter(resetPage = true) {
     }
     if (dept && a.dept !== dept) return false;
     if (status && a.status !== status) return false;
+    // 자산명·위치는 각각 따로 좁힐 수 있다 (둘 다 넣으면 두 조건 모두 만족).
+    if (nameKw && !String(a.assetName || "").toLowerCase().includes(nameKw)) return false;
+    if (locKw && !String(a.location || "").toLowerCase().includes(locKw)) return false;
     const cost = a.acquireCost || 0;
     if (cost < minCost || cost > maxCost) return false;
     if (!kw) return true;
@@ -1792,6 +1797,7 @@ async function handleScanCapture(file) {
 let batchItems = [];       // { name, photoData, code, asset, status, overwrite } — status: matched|dup|already|samephoto|nomatch|error
 let batchProcessing = false;
 let batchFileSigs = new Set(); // 이미 올린 사진(파일) 식별자 — 같은 사진을 다시 고르면 '이미 올린 사진'으로 표시
+let batchRunTotal = 0, batchRunDone = 0; // 이번 업로드 진행률(인식 X/Y)
 // 지금 메뉴 + (선택)위치·자산명으로 좁힌 매칭 후보 풀. 필터 결과가 비면 메뉴 전체로 되돌린다.
 function buildInspectPool(locStr, nameStr) {
   const g = currentGroup;
@@ -1812,6 +1818,13 @@ async function recognizeAssetInPool(dataUrl, mode, pool) {
   const a = findAssetByNumber(code, pool) || findAsset2024ByCode(code, pool)
         || findAssetByNumber(code) || findAsset2024ByCode(code);
   return { asset: a || null, code };
+}
+// 인식된 자산의 상태 판정: 이번 업로드 안 중복 / 이미 이번 회차 검수됨 / 새로 검수 준비됨
+function classifyBatchItem(item, asset, period) {
+  const dupInBatch = batchItems.some((x) => x !== item && x.asset && String(x.asset.id) === String(asset.id));
+  if (dupInBatch) return "dup";
+  if (inspectedRound(asset, period)) return "already";
+  return "matched";
 }
 function openBatchInspect() {
   if (!requireLogin()) return;
@@ -1847,14 +1860,16 @@ async function handleBatchFiles(files) {
   const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
   const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
   const period = document.getElementById("batch-period").value;
+  batchRunTotal = list.length; batchRunDone = 0;
   let newDup = 0;
   for (const file of list) {
-    const item = { name: file.name || "사진", photoData: "", code: null, asset: null, status: "processing", overwrite: false };
+    const item = { name: file.name || "사진", file, thumb: "", photoData: "", code: null, asset: null, status: "processing", overwrite: false };
     // 같은 사진(파일)을 또 고른 경우 — 인식 없이 '이미 올린 사진'으로 표시해 헷갈리지 않게 한다.
     const sig = `${file.name || ""}|${file.size || 0}|${file.lastModified || 0}`;
     if (batchFileSigs.has(sig)) {
       item.status = "samephoto";
       batchItems.push(item);
+      batchRunDone++;
       renderBatchList();
       continue;
     }
@@ -1863,6 +1878,9 @@ async function handleBatchFiles(files) {
     renderBatchList();
     try {
       const raw = await fileToDataURL(file);
+      // 목록에서 어떤 사진인지 바로 알아볼 수 있도록 모든 사진에 작은 썸네일을 만든다(실패 사진 확인용).
+      try { item.thumb = await resizeDataUrl(raw, 160, 0.5); } catch {}
+      renderBatchList();
       const { asset, code } = await recognizeAssetInPool(raw, mode, pool);
       item.code = code || null;
       if (!asset) {
@@ -1870,18 +1888,18 @@ async function handleBatchFiles(files) {
       } else {
         item.asset = asset;
         item.photoData = await compressImage(file, 900, 0.6); // 검수 증빙 사진(압축). 덮어쓰기 대비 미리 준비.
-        const dupInBatch = batchItems.some((x) => x !== item && x.asset && String(x.asset.id) === String(asset.id));
-        if (dupInBatch) { item.status = "dup"; newDup++; }         // 이번 업로드 안에서 같은 자산번호가 또 나옴
-        else if (inspectedRound(asset, period)) { item.status = "already"; newDup++; } // DB에 이미 이번 회차 검수됨
-        else item.status = "matched";
+        item.status = classifyBatchItem(item, asset, period);
+        if (item.status !== "matched") newDup++;
       }
     } catch (e) {
       console.error("일괄 검수 인식 오류:", e);
       item.status = "error";
     }
+    batchRunDone++;
     renderBatchList();
   }
   batchProcessing = false;
+  batchRunTotal = 0;
   setBatchBusy(false);
   renderBatchList();
   if (newDup) {
@@ -1909,19 +1927,22 @@ function renderBatchList() {
   const applyBtn = document.getElementById("batchInspectApply");
   if (!grid) return;
   if (!batchItems.length) {
-    grid.innerHTML = `<div class="batch-empty">아직 올린 사진이 없습니다. <b>‘사진 선택’</b>을 눌러 라벨 사진을 여러 장 한꺼번에 선택하세요.</div>`;
+    grid.innerHTML = `<div class="batch-empty">아직 올린 사진이 없습니다. <b>‘사진 선택’</b>을 눌러 라벨 사진을 여러 장 한꺼번에 선택하거나,<br>이 창으로 사진을 <b>끌어다 놓으세요</b>. (PC)</div>`;
   } else {
     grid.innerHTML = batchItems.map((it, i) => {
       const dupType = it.status === "dup" || it.status === "already";
+      const failed = it.status === "nomatch" || it.status === "error";
       const s = dupType && it.overwrite ? { cls: "b-ok", label: "덮어쓰기" } : (BATCH_STATUS[it.status] || BATCH_STATUS.processing);
-      const thumb = it.photoData ? `<img src="${it.photoData}" alt="" />` : `<span class="batch-thumb-ph">${it.status === "processing" ? "…" : "🏷️"}</span>`;
+      const src = it.thumb || it.photoData;
+      const thumb = src ? `<img src="${src}" alt="" />` : `<span class="batch-thumb-ph">${it.status === "processing" ? "…" : "🏷️"}</span>`;
       const title = it.asset ? esc(it.asset.assetName) : (it.code ? `인식: ${esc(it.code)}` : "인식되지 않음");
       const sub = it.asset ? esc(it.asset.assetNumber) : esc(it.name);
-      // 중복/이미검수 항목엔 건너뛰기 ↔ 덮어쓰기 토글 버튼을 준다.
-      const toggle = dupType
-        ? `<button type="button" class="batch-toggle" data-batch-toggle="${i}">${it.overwrite ? "건너뛰기로" : "덮어쓰기로"}</button>`
-        : "";
-      return `<div class="batch-row ${s.cls}"><div class="batch-thumb">${thumb}</div><div class="batch-info"><div class="batch-title">${title}</div><div class="batch-sub">${sub}</div></div>${toggle}<div class="batch-badge">${s.label}</div></div>`;
+      // 중복/이미검수 항목엔 건너뛰기 ↔ 덮어쓰기 토글, 실패 항목엔 재시도 버튼을 준다.
+      let action = "";
+      if (dupType) action = `<button type="button" class="batch-toggle" data-batch-toggle="${i}">${it.overwrite ? "건너뛰기로" : "덮어쓰기로"}</button>`;
+      else if (failed && it.file) action = `<button type="button" class="batch-toggle batch-retry" data-batch-retry="${i}">↻ 재시도</button>`;
+      const clickable = src ? ' batch-thumb-click" data-batch-preview="' + i + '"' : '"';
+      return `<div class="batch-row ${s.cls}" data-idx="${i}"><div class="batch-thumb${clickable}>${thumb}</div><div class="batch-info"><div class="batch-title">${title}</div><div class="batch-sub">${sub}</div></div>${action}<div class="batch-badge">${s.label}</div></div>`;
     }).join("");
   }
   const ready = batchItems.filter(batchWillApply).length;
@@ -1929,9 +1950,13 @@ function renderBatchList() {
   const skip = batchItems.filter((it) => (it.status === "dup" || it.status === "already") && !it.overwrite).length;
   const samePhoto = batchItems.filter((it) => it.status === "samephoto").length;
   if (summary) {
-    summary.innerHTML = batchItems.length
-      ? `총 <b>${batchItems.length}</b>장 · 검수 준비 <b class="b-ok-t">${ready}</b> · 건너뜀 <b>${skip}</b>${samePhoto ? ` · 이미 올림 <b>${samePhoto}</b>` : ""} · 실패 <b class="b-err-t">${nomatch}</b>`
-      : "";
+    if (batchProcessing && batchRunTotal) {
+      summary.innerHTML = `🔎 인식 중… <b>${Math.min(batchRunDone + 1, batchRunTotal)}/${batchRunTotal}</b> (사진이 많으면 몇 분 걸릴 수 있어요)`;
+    } else {
+      summary.innerHTML = batchItems.length
+        ? `총 <b>${batchItems.length}</b>장 · 검수 준비 <b class="b-ok-t">${ready}</b> · 건너뜀 <b>${skip}</b>${samePhoto ? ` · 이미 올림 <b>${samePhoto}</b>` : ""} · 실패 <b class="b-err-t">${nomatch}</b>`
+        : "";
+    }
   }
   if (applyBtn) {
     applyBtn.disabled = ready === 0 || batchProcessing;
@@ -1943,6 +1968,45 @@ function setBatchBusy(busy) {
   const spin = document.getElementById("batchSpinner");
   if (pick) pick.disabled = busy;
   if (spin) spin.hidden = !busy;
+}
+// 인식 실패 사진 다시 인식 (보관해 둔 원본 파일로 재시도. 위치·자산명 필터를 고쳤다면 그 값으로 다시 시도)
+async function retryBatchItem(index) {
+  if (batchProcessing) return;
+  const it = batchItems[index];
+  if (!it || !it.file) return;
+  batchProcessing = true; setBatchBusy(true);
+  it.status = "processing"; renderBatchList();
+  const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
+  const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
+  const period = document.getElementById("batch-period").value;
+  try {
+    const raw = await fileToDataURL(it.file);
+    if (!it.thumb) { try { it.thumb = await resizeDataUrl(raw, 160, 0.5); } catch {} }
+    const { asset, code } = await recognizeAssetInPool(raw, mode, pool);
+    it.code = code || null;
+    if (!asset) { it.status = "nomatch"; }
+    else {
+      it.asset = asset;
+      it.photoData = await compressImage(it.file, 900, 0.6);
+      it.status = classifyBatchItem(it, asset, period);
+    }
+  } catch (e) {
+    console.error("재시도 인식 오류:", e);
+    it.status = "error";
+  }
+  batchProcessing = false; setBatchBusy(false); renderBatchList();
+  if (it.status === "nomatch" || it.status === "error") {
+    alert("이 사진은 여전히 자산번호를 인식하지 못했어요.\n\n· 위치·자산명 칸을 채우면 범위가 좁아져 잘 잡혀요\n· 라벨이 크고 반듯하게 나온 사진으로 바꿔 보세요\n· 그래도 안 되면 그 자산은 상세 화면에서 직접 검수하세요.");
+  }
+}
+// 목록의 사진을 크게 확대해 확인 (원본 파일에서 즉석 생성 → 메모리 절약)
+async function previewBatchItem(index) {
+  const it = batchItems[index];
+  if (!it) return;
+  try {
+    const big = it.file ? await compressImage(it.file, 1400, 0.8) : (it.photoData || it.thumb);
+    if (big) openLightbox(big);
+  } catch { if (it.thumb || it.photoData) openLightbox(it.thumb || it.photoData); }
 }
 // 준비된 항목을 일괄 검수 처리 (관리자: 즉시 반영 / 일반: 승인 요청)
 async function applyBatchInspect() {
@@ -2969,9 +3033,9 @@ document.getElementById("searchInput").addEventListener("input", applyFilter);
 document.getElementById("clearBtn").addEventListener("click", () => { document.getElementById("searchInput").value = ""; applyFilter(); });
 document.getElementById("advToggle").addEventListener("click", () => { const p = document.getElementById("advPanel"); p.hidden = !p.hidden; });
 ["deptFilter", "statusFilter"].forEach((id) => document.getElementById(id).addEventListener("change", applyFilter));
-["minCost", "maxCost"].forEach((id) => document.getElementById(id).addEventListener("input", applyFilter));
+["minCost", "maxCost", "nameFilter", "locFilter"].forEach((id) => document.getElementById(id).addEventListener("input", applyFilter));
 document.getElementById("advReset").addEventListener("click", () => {
-  ["deptFilter", "statusFilter", "minCost", "maxCost"].forEach((id) => (document.getElementById(id).value = ""));
+  ["deptFilter", "statusFilter", "minCost", "maxCost", "nameFilter", "locFilter"].forEach((id) => (document.getElementById(id).value = ""));
   applyFilter();
 });
 document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEventListener("click", () => setSort(th.dataset.key)));
@@ -3052,11 +3116,29 @@ document.getElementById("batchPickBtn").addEventListener("click", () => {
 document.getElementById("batchInspectInput").addEventListener("change", (e) => { handleBatchFiles(e.target.files); });
 document.getElementById("batchInspectApply").addEventListener("click", applyBatchInspect);
 document.getElementById("batchInspectList").addEventListener("click", (e) => {
-  const t = e.target.closest("button[data-batch-toggle]");
-  if (!t) return;
-  const it = batchItems[Number(t.dataset.batchToggle)];
-  if (it) { it.overwrite = !it.overwrite; renderBatchList(); }
+  const toggle = e.target.closest("button[data-batch-toggle]");
+  if (toggle) { const it = batchItems[Number(toggle.dataset.batchToggle)]; if (it) { it.overwrite = !it.overwrite; renderBatchList(); } return; }
+  const retry = e.target.closest("button[data-batch-retry]");
+  if (retry) { retryBatchItem(Number(retry.dataset.batchRetry)); return; }
+  const prev = e.target.closest("[data-batch-preview]");
+  if (prev) { previewBatchItem(Number(prev.dataset.batchPreview)); return; }
 });
+// 창에 사진을 끌어다 놓으면(드래그&드롭) 한 번에 추가 (PC에서 여러 장 골라 끌어오기 편함)
+(function () {
+  const modal = document.querySelector("#batchInspectOverlay .modal");
+  if (!modal) return;
+  ["dragenter", "dragover"].forEach((ev) => modal.addEventListener(ev, (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes("Files")) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = "copy"; modal.classList.add("batch-drag");
+  }));
+  ["dragleave", "dragend"].forEach((ev) => modal.addEventListener(ev, (e) => { if (e.target === modal) modal.classList.remove("batch-drag"); }));
+  modal.addEventListener("drop", (e) => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (!files || !files.length) return;
+    e.preventDefault(); modal.classList.remove("batch-drag");
+    handleBatchFiles(files);
+  });
+})();
 // 검수 화면: 물품 사진 이어 찍기(최대 3장)
 document.getElementById("inspExtraBtn").addEventListener("click", () => {
   const input = document.getElementById("inspExtraInput");
