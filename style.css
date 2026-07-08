@@ -1664,8 +1664,8 @@ body { max-width: 100%; overflow-x: hidden; }
 .bulkphoto-preview:empty { display: none; }
 .bulkphoto-preview img { max-width: 100%; max-height: 240px; border-radius: 10px; border: 1px solid var(--border); }
 .bulkphoto-check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; cursor: pointer; }
-#bulkPhotoBtn { width: 100%; margin-top: 4px; }
-@media (min-width: 561px) { #bulkPhotoBtn { width: auto; } }
+#bulkPhotoBtn, #bulkEditAllBtn { width: 100%; margin-top: 4px; }
+@media (min-width: 561px) { #bulkPhotoBtn, #bulkEditAllBtn { width: auto; } }
 @media (max-width: 560px) {
   .batch-filters { grid-template-columns: 1fr; }
   .batch-fields { grid-template-columns: 1fr; }

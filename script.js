@@ -700,6 +700,7 @@ function updateUI() {
 
   g("addBtn").textContent = isAdmin ? "+ 자산 등록" : "+ 자산 등록 요청";
   const bpb = g("bulkPhotoBtn"); if (bpb) bpb.hidden = !loggedIn; // 검색결과 사진 일괄 적용(로그인 사용자 · 비관리자는 승인 요청)
+  const beb = g("bulkEditAllBtn"); if (beb) beb.hidden = !isAdmin; // 검색결과 전체 일괄 수정(관리자)
 
   const notice = g("userNotice");
   if (isAdmin) notice.hidden = true;
@@ -896,6 +897,14 @@ function toggleSelectPage(on) {
   const start = (currentPage - 1) * PER_PAGE;
   filtered.slice(start, start + PER_PAGE).forEach((a) => { if (on) selectedIds.add(String(a.id)); else selectedIds.delete(String(a.id)); });
   render();
+}
+// 검색결과(모든 페이지) 전체를 선택해 바로 일괄 수정 — 페이지별로 체크할 필요 없음
+function openBulkEditAll() {
+  if (!isAdmin) return;
+  if (!filtered.length) { alert("먼저 상세 필터·검색으로 자산을 찾은 뒤 사용하세요."); return; }
+  selectedIds = new Set(filtered.map((a) => String(a.id)));
+  render();
+  openBulkEdit();
 }
 function openBulkEdit() {
   if (!isAdmin || selectedIds.size === 0) return;
@@ -3346,6 +3355,7 @@ document.getElementById("bulkEditForm").addEventListener("change", (e) => {
   if (input) { input.disabled = !c.checked; if (c.checked) input.focus(); }
 });
 // 검색결과에 사진 일괄 적용
+document.getElementById("bulkEditAllBtn").addEventListener("click", openBulkEditAll);
 document.getElementById("bulkPhotoBtn").addEventListener("click", openBulkPhoto);
 document.getElementById("bulkPhotoPickBtn").addEventListener("click", () => { const i = document.getElementById("bulkPhotoInput"); i.value = ""; i.click(); });
 document.getElementById("bulkPhotoInput").addEventListener("change", (e) => handleBulkPhotoPick(e.target.files && e.target.files[0]));
