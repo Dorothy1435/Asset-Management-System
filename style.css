@@ -874,6 +874,33 @@ body {
   padding: 14px 16px;
   margin-bottom: 12px;
 }
+.req-card.req-checked { border-color: var(--primary); background: #f5f9ff; }
+/* 일괄 결재/반려 바 */
+.req-bulkbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafbfc;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.req-selall { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; cursor: pointer; }
+.req-total { color: var(--text-light); font-weight: normal; font-size: 13px; }
+.req-selcount { font-size: 13px; color: var(--primary-dark); font-weight: 600; }
+.req-prog { font-size: 13px; color: var(--primary-dark); }
+.req-bulk-actions { display: flex; gap: 8px; margin-left: auto; }
+.req-check { display: flex; align-items: center; }
+.req-check input { width: 18px; height: 18px; }
+@media (max-width: 560px) {
+  .req-bulk-actions { margin-left: 0; width: 100%; }
+  .req-bulk-actions .btn { flex: 1; }
+}
 .req-top {
   display: flex;
   align-items: center;

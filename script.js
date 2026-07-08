@@ -2869,10 +2869,25 @@ function setAdminTab(tab) {
 function renderReview() {
   const body = document.getElementById("adminReviewBody");
   if (!body) return;
-  if (requests.length === 0) { body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`; return; }
+  if (requests.length === 0) { selectedReqIds.clear(); body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`; return; }
+  // 유효한 선택만 유지
+  const validIds = new Set(requests.map((r) => String(r.id)));
+  selectedReqIds.forEach((id) => { if (!validIds.has(id)) selectedReqIds.delete(id); });
   const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청", inspect: "검수 요청" };
   const actionCls = { create: "req-create", update: "req-update", delete: "req-delete", inspect: "req-inspect" };
-  body.innerHTML = requests.map((r) => {
+  const allChecked = requests.length > 0 && requests.every((r) => selectedReqIds.has(String(r.id)));
+  const selCount = selectedReqIds.size;
+  const bar = `
+    <div class="req-bulkbar">
+      <label class="req-selall"><input type="checkbox" id="reqSelectAll" ${allChecked ? "checked" : ""} /> 전체 선택 <span class="req-total">(${requests.length}건)</span></label>
+      <span class="req-selcount">${selCount ? `${selCount}건 선택됨` : ""}</span>
+      <span class="form-info req-prog" id="reqBulkProgress" hidden></span>
+      <span class="req-bulk-actions">
+        <button class="btn btn-primary btn-sm" id="reqBulkApprove" ${selCount ? "" : "disabled"}>✅ 선택 결재</button>
+        <button class="btn btn-danger btn-sm" id="reqBulkReject" ${selCount ? "" : "disabled"}>✖ 선택 반려</button>
+      </span>
+    </div>`;
+  body.innerHTML = bar + requests.map((r) => {
     const p = r.payload || {};
     let summary;
     if (r.action === "inspect") summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")}) · 검수 회차: <b>${esc(p.period || "-")}</b> · 확인자: ${esc(p.inspector || "-")}${p.affiliation ? ` (${esc(p.affiliation)})` : ""}`;
@@ -2888,8 +2903,9 @@ function renderReview() {
          </div>`;
     const meta = [`요청일시: ${fmtTime(r.created_at)}`, r.requester && `신청자: ${esc(r.requester)}`, r.note && `사유: ${esc(r.note)}`].filter(Boolean).join(" · ");
     return `
-      <div class="req-card">
+      <div class="req-card${selectedReqIds.has(String(r.id)) ? " req-checked" : ""}">
         <div class="req-top">
+          <label class="req-check"><input type="checkbox" data-reqcheck="${r.id}" ${selectedReqIds.has(String(r.id)) ? "checked" : ""} /></label>
           <span class="req-badge ${actionCls[r.action]}">${actionLabel[r.action]}</span>
           ${meta ? `<span class="req-meta">${meta}</span>` : ""}
         </div>
@@ -2901,18 +2917,21 @@ function renderReview() {
       </div>`;
   }).join("");
 }
+// 요청 1건 승인 처리(적용 + 상태 갱신)만 수행 — 목록 새로고침은 호출부에서.
+async function approveRequestCore(r) {
+  const meta = { requester: r.requester, note: r.note };
+  if (r.action === "create") await applyCreate(r.payload, meta);
+  else if (r.action === "update") await applyUpdate(r.target_id, r.payload, meta);
+  else if (r.action === "delete") await applyDelete(r.target_id, meta);
+  else if (r.action === "inspect") await applyInspect(r.target_id, r.payload, meta);
+  const { error } = await sb.from("requests").update({ status: "approved", decided_at: new Date().toISOString() }).eq("id", r.id);
+  if (error) throw error;
+}
 async function approveRequest(reqId) {
   const r = requests.find((x) => String(x.id) === String(reqId));
   if (!r) return;
-  const meta = { requester: r.requester, note: r.note };
-  try {
-    if (r.action === "create") await applyCreate(r.payload, meta);
-    else if (r.action === "update") await applyUpdate(r.target_id, r.payload, meta);
-    else if (r.action === "delete") await applyDelete(r.target_id, meta);
-    else if (r.action === "inspect") await applyInspect(r.target_id, r.payload, meta);
-    const { error } = await sb.from("requests").update({ status: "approved", decided_at: new Date().toISOString() }).eq("id", reqId);
-    if (error) throw error;
-  } catch (e) { console.error(e); alert("승인 처리에 실패했습니다."); return; }
+  try { await approveRequestCore(r); }
+  catch (e) { console.error(e); alert("승인 처리에 실패했습니다."); return; }
   await reloadAll(); rerender(); renderReview();
 }
 async function rejectRequest(reqId) {
@@ -2921,6 +2940,48 @@ async function rejectRequest(reqId) {
     if (error) throw error;
   } catch (e) { console.error(e); alert("반려 처리에 실패했습니다."); return; }
   await reloadAll(); rerender(); renderReview();
+}
+// ===== 일괄 결재/반려 (관리자) =====
+let selectedReqIds = new Set();
+let reqBulkBusy = false;
+function setReqProgress(msg) { const el = document.getElementById("reqBulkProgress"); if (el) { el.textContent = msg || ""; el.hidden = !msg; } }
+async function bulkApproveSelected() {
+  if (reqBulkBusy) return;
+  const ids = [...selectedReqIds].filter((id) => requests.some((r) => String(r.id) === String(id)));
+  if (!ids.length) { alert("결재할 요청을 먼저 선택하세요."); return; }
+  if (!confirm(`선택한 ${ids.length}건을 모두 결재(승인)합니다.\n계속할까요?`)) return;
+  reqBulkBusy = true;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    setReqProgress(`결재 중… ${ok + fail + 1}/${ids.length}`);
+    const r = requests.find((x) => String(x.id) === String(id));
+    if (!r) { continue; }
+    try { await approveRequestCore(r); ok++; }
+    catch (e) { console.error("일괄 결재 실패:", id, e); fail++; }
+  }
+  selectedReqIds.clear();
+  setReqProgress("");
+  reqBulkBusy = false;
+  await reloadAll(); rerender(); renderReview();
+  alert(`일괄 결재 완료: ${ok}건${fail ? ` · ${fail}건 실패` : ""}`);
+}
+async function bulkRejectSelected() {
+  if (reqBulkBusy) return;
+  const ids = [...selectedReqIds].filter((id) => requests.some((r) => String(r.id) === String(id)));
+  if (!ids.length) { alert("반려할 요청을 먼저 선택하세요."); return; }
+  if (!confirm(`선택한 ${ids.length}건을 모두 반려합니다.\n계속할까요?`)) return;
+  reqBulkBusy = true;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    setReqProgress(`반려 중… ${ok + fail + 1}/${ids.length}`);
+    try { const { error } = await sb.from("requests").update({ status: "rejected", decided_at: new Date().toISOString() }).eq("id", id); if (error) throw error; ok++; }
+    catch (e) { console.error("일괄 반려 실패:", id, e); fail++; }
+  }
+  selectedReqIds.clear();
+  setReqProgress("");
+  reqBulkBusy = false;
+  await reloadAll(); rerender(); renderReview();
+  alert(`일괄 반려 완료: ${ok}건${fail ? ` · ${fail}건 실패` : ""}`);
 }
 
 // ===== 결재/변경 이력 (관리자) =====
@@ -3457,8 +3518,24 @@ document.querySelectorAll(".admin-tab").forEach((b) => b.addEventListener("click
 document.getElementById("adminReviewBody").addEventListener("click", (e) => {
   const ap = e.target.closest("button[data-approve]");
   const rj = e.target.closest("button[data-reject]");
-  if (ap) approveRequest(ap.dataset.approve);
-  else if (rj) rejectRequest(rj.dataset.reject);
+  if (ap) { approveRequest(ap.dataset.approve); return; }
+  if (rj) { rejectRequest(rj.dataset.reject); return; }
+  if (e.target.closest("#reqBulkApprove")) { bulkApproveSelected(); return; }
+  if (e.target.closest("#reqBulkReject")) { bulkRejectSelected(); return; }
+});
+document.getElementById("adminReviewBody").addEventListener("change", (e) => {
+  const chk = e.target.closest("input[data-reqcheck]");
+  if (chk) {
+    const id = String(chk.dataset.reqcheck);
+    if (chk.checked) selectedReqIds.add(id); else selectedReqIds.delete(id);
+    renderReview();
+    return;
+  }
+  if (e.target.id === "reqSelectAll") {
+    if (e.target.checked) requests.forEach((r) => selectedReqIds.add(String(r.id)));
+    else selectedReqIds.clear();
+    renderReview();
+  }
 });
 // 결재/변경 이력
 document.getElementById("adminHistSearch").addEventListener("input", renderHistory);
