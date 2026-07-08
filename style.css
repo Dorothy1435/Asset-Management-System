@@ -873,6 +873,8 @@ body {
 .bulk-insp-row label { font-size: 12px; font-weight: 600; color: var(--text-light); }
 .bulk-insp-row input, .bulk-insp-row select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
 @media (max-width: 560px) { .bulk-insp-fields { grid-template-columns: 1fr; } }
+.bulk-photo-fields { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 10px; }
+.bulk-photo-fields .bulkphoto-preview img { max-width: 100%; max-height: 200px; border-radius: 10px; border: 1px solid var(--border); }
 .bulk-progress { font-size: 13px; color: var(--primary-dark); margin-top: 8px; }
 .member-table th, .member-table td { white-space: nowrap; }
 

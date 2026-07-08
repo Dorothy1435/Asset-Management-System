@@ -495,6 +495,15 @@
           <input type="text" id="bulk-note" placeholder="새 비고" disabled />
         </div>
         <div class="bulk-field bulk-insp-block">
+          <label class="bulk-check"><input type="checkbox" id="bulk-photo-on" /> 📷 자산 사진 추가 (라벨 아님)</label>
+          <div class="bulk-photo-fields" id="bulk-photo-fields" hidden>
+            <input type="file" id="bulk-photo-input" accept="image/*" hidden />
+            <button type="button" class="btn btn-secondary btn-sm" id="bulk-photo-pick">🖼️ 사진 선택</button>
+            <div class="bulkphoto-preview" id="bulk-photo-preview"></div>
+            <label class="bulkphoto-check"><input type="checkbox" id="bulk-photo-replace" /> 기존 물품 사진은 모두 지우고 이 사진만 넣기</label>
+          </div>
+        </div>
+        <div class="bulk-field bulk-insp-block">
           <label class="bulk-check"><input type="checkbox" id="bulk-insp-on" /> ✅ 검수 처리 (선택 자산 전체 검수 완료)</label>
           <div class="bulk-insp-fields" id="bulk-insp-fields" hidden>
             <div class="bulk-insp-row"><label>검수 회차</label><select id="bulk-insp-period"></select></div>

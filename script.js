@@ -918,6 +918,13 @@ function openBulkEdit() {
     const input = document.getElementById("bulk-" + c.dataset.bulk);
     if (input) { input.disabled = true; if (input.tagName === "INPUT") input.value = ""; }
   });
+  // 자산 사진 추가 섹션 초기화
+  bulkEditPhotoData = "";
+  document.getElementById("bulk-photo-on").checked = false;
+  document.getElementById("bulk-photo-fields").hidden = true;
+  document.getElementById("bulk-photo-replace").checked = false;
+  document.getElementById("bulk-photo-input").value = "";
+  document.getElementById("bulk-photo-preview").innerHTML = "";
   // 검수 처리 섹션 초기화
   document.getElementById("bulk-insp-on").checked = false;
   document.getElementById("bulk-insp-fields").hidden = true;
@@ -930,6 +937,7 @@ function openBulkEdit() {
   baffil.value = myProfile?.affiliation || "";
   show("bulkEditOverlay");
 }
+let bulkEditPhotoData = ""; // 일괄 수정에서 추가할 자산 사진(base64)
 // 한 자산에 '필드 수정 + 검수 기록'을 한 번의 저장으로 반영(따로 저장하면 서로 덮어써서 유실됨)
 async function bulkApplyOne(a, fields, insp) {
   const id = String(a.id);
@@ -967,19 +975,39 @@ async function applyBulkEdit() {
     if (!inspector) { errEl.textContent = "검수자 이름을 입력해주세요."; errEl.hidden = false; return; }
     insp = { period, inspector, affiliation };
   }
-  if (Object.keys(fields).length === 0 && !inspOn) { errEl.textContent = "변경할 항목을 체크하거나 ‘검수 처리’를 선택해주세요."; errEl.hidden = false; return; }
+  // 자산 사진 추가 옵션
+  const photoOn = document.getElementById("bulk-photo-on").checked;
+  const photoReplace = document.getElementById("bulk-photo-replace").checked;
+  if (photoOn && !bulkEditPhotoData) { errEl.textContent = "추가할 자산 사진을 선택해주세요."; errEl.hidden = false; return; }
+  if (Object.keys(fields).length === 0 && !inspOn && !photoOn) { errEl.textContent = "변경할 항목을 체크하거나 사진/검수 처리를 선택해주세요."; errEl.hidden = false; return; }
   const ids = [...selectedIds];
   const btn = document.getElementById("bulkEditSave");
   const prog = document.getElementById("bulkProgress");
   btn.disabled = true; prog.hidden = false;
+  // 사진은 딱 한 번만 업로드해 URL을 모든 자산에 붙인다(용량·속도 절약).
+  let photoUrl = "", thumbUrl = "";
+  if (photoOn) {
+    prog.textContent = "사진 올리는 중…";
+    try {
+      photoUrl = await uploadMedia(bulkEditPhotoData, "photos");
+      try { thumbUrl = await uploadMedia(await resizeDataUrl(bulkEditPhotoData, 240, 0.55), "thumbs"); } catch {}
+    } catch (e) { console.warn("사진 업로드 실패 — base64로 진행:", e?.message || e); photoUrl = bulkEditPhotoData; }
+  }
   let done = 0, failed = 0;
   for (const id of ids) {
     prog.textContent = `적용 중… ${done + failed + 1}/${ids.length}`;
     try {
       const a = findAsset(id);
       if (!a) { failed++; continue; }
-      if (insp) await bulkApplyOne(a, fields, insp);        // 필드+검수 한 번에
-      else await applyUpdate(id, fields, { note: "일괄 수정" }); // 필드만 (기존 로직: 스냅샷·미디어 처리)
+      const perFields = { ...fields };
+      if (photoOn) {
+        const existing = photosOf(a).filter((u) => u && u !== photoUrl);
+        perFields.imageUrls = photoReplace ? [photoUrl] : [photoUrl, ...existing].slice(0, MAX_PHOTOS);
+        perFields.imageUrl = photoUrl;
+        perFields.thumbUrl = thumbUrl || "";
+      }
+      if (insp || photoOn) await bulkApplyOne(a, perFields, insp);   // 필드+사진+검수 한 번에
+      else await applyUpdate(id, perFields, { note: "일괄 수정" });    // 필드만 (기존 로직)
       done++;
     } catch (e) { console.error("일괄 수정 실패:", id, e); failed++; }
   }
@@ -987,7 +1015,8 @@ async function applyBulkEdit() {
   hide("bulkEditOverlay");
   selectedIds.clear();
   await reloadAll(); rerender();
-  alert(`일괄 처리 완료: ${done}건 적용${failed ? `, ${failed}건 실패` : ""}${insp ? " (검수 포함)" : ""}`);
+  const extra = [photoOn ? "사진" : "", insp ? "검수" : ""].filter(Boolean).join("·");
+  alert(`일괄 처리 완료: ${done}건 적용${failed ? `, ${failed}건 실패` : ""}${extra ? ` (${extra} 포함)` : ""}`);
 }
 // ===== 검색결과에 사진 1장 일괄 적용 (관리자) =====
 let bulkPhotoData = ""; // 선택한 사진(base64)
@@ -3398,10 +3427,24 @@ document.getElementById("bulkEditForm").addEventListener("change", (e) => {
     if (e.target.checked) document.getElementById("bulk-insp-inspector").focus();
     return;
   }
+  if (e.target.id === "bulk-photo-on") {
+    document.getElementById("bulk-photo-fields").hidden = !e.target.checked;
+    return;
+  }
   const c = e.target.closest("input[data-bulk]");
   if (!c) return;
   const input = document.getElementById("bulk-" + c.dataset.bulk);
   if (input) { input.disabled = !c.checked; if (c.checked) input.focus(); }
+});
+document.getElementById("bulk-photo-pick").addEventListener("click", () => { const i = document.getElementById("bulk-photo-input"); i.value = ""; i.click(); });
+document.getElementById("bulk-photo-input").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
+  try {
+    bulkEditPhotoData = await compressImage(file, 1000, 0.65);
+    document.getElementById("bulk-photo-preview").innerHTML = `<img src="${bulkEditPhotoData}" alt="선택한 사진" />`;
+  } catch (err) { console.error("사진 처리 오류:", err); alert("사진 처리 중 문제가 발생했습니다."); }
 });
 // 검색결과에 사진 일괄 적용
 document.getElementById("bulkEditAllBtn").addEventListener("click", openBulkEditAll);
