@@ -511,6 +511,12 @@
             <div class="bulk-insp-row"><label>소속</label><select id="bulk-insp-affil"></select></div>
           </div>
         </div>
+        <div class="bulk-field bulk-insp-block">
+          <label class="bulk-check"><input type="checkbox" id="bulk-inspcancel-on" /> 🗑 검수 취소 (선택 회차 검수 기록 삭제 · 되돌리기)</label>
+          <div class="bulk-insp-fields" id="bulk-inspcancel-fields" hidden>
+            <div class="bulk-insp-row"><label>취소할 회차</label><select id="bulk-inspcancel-period"></select></div>
+          </div>
+        </div>
         <p class="form-error" id="bulkEditError" hidden></p>
         <div class="bulk-progress" id="bulkProgress" hidden></div>
       </form>

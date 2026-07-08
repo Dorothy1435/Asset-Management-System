@@ -886,6 +886,8 @@ body {
   margin-bottom: 12px;
 }
 .req-card.req-checked { border-color: var(--primary); background: #f5f9ff; }
+.req-card.req-group { border-color: #c7d2fe; background: #eef2ff; border-left: 4px solid #6366f1; }
+.req-groupcount { font-size: 12.5px; font-weight: 700; color: #4338ca; }
 /* 일괄 결재/반려 바 */
 .req-bulkbar {
   display: flex;

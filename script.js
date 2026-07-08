@@ -154,6 +154,8 @@ function inspectedRound(a, round) {
 }
 function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
+// 일괄 작업 묶음 식별자 (요청/기록을 한 작업으로 묶어 한 번에 승인·거절·되돌리기)
+function newBatchId() { return "bt" + Date.now() + Math.floor(Math.random() * 1000); }
 const findAsset = (id) => assets.find((x) => String(x.id) === String(id));
 const isImageData = (f) => /^data:image\//i.test(f || "");
 // 목록 '라벨' 칸: 무거운 미리보기 이미지를 목록에서 바로 불러오면 느려지므로,
@@ -926,35 +928,46 @@ function openBulkEdit() {
   document.getElementById("bulk-photo-input").value = "";
   document.getElementById("bulk-photo-preview").innerHTML = "";
   // 검수 처리 섹션 초기화
+  const roundOpts = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`).map((o) => `<option value="${o}">${o}</option>`).join("");
   document.getElementById("bulk-insp-on").checked = false;
   document.getElementById("bulk-insp-fields").hidden = true;
   const bperiod = document.getElementById("bulk-insp-period");
-  bperiod.innerHTML = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`).map((o) => `<option value="${o}">${o}</option>`).join("");
+  bperiod.innerHTML = roundOpts;
   bperiod.value = inspRound || "1회차";
   document.getElementById("bulk-insp-inspector").value = myProfile?.name || "";
   const baffil = document.getElementById("bulk-insp-affil");
   baffil.innerHTML = deptOptionsHtml(myProfile?.affiliation || "");
   baffil.value = myProfile?.affiliation || "";
+  // 검수 취소 섹션 초기화
+  document.getElementById("bulk-inspcancel-on").checked = false;
+  document.getElementById("bulk-inspcancel-fields").hidden = true;
+  const bcp = document.getElementById("bulk-inspcancel-period");
+  bcp.innerHTML = roundOpts;
+  bcp.value = inspRound || "1회차";
   show("bulkEditOverlay");
 }
 let bulkEditPhotoData = ""; // 일괄 수정에서 추가할 자산 사진(base64)
-// 한 자산에 '필드 수정 + 검수 기록'을 한 번의 저장으로 반영(따로 저장하면 서로 덮어써서 유실됨)
-async function bulkApplyOne(a, fields, insp) {
+// 한 자산에 '필드 수정 + 검수 추가/취소'를 한 번의 저장으로 반영(따로 저장하면 서로 덮어써서 유실됨)
+async function bulkApplyOne(a, fields, insp, cancelPeriod) {
   const id = String(a.id);
   const kind = id.startsWith("u") ? "added" : "override";
   const existing = overlay.find((o) => String(o.id) === id && o.kind === kind)?.data || {};
   const data = { ...existing, ...cleanFields(fields) };
+  let list = Array.isArray(a.inspections) ? a.inspections.slice() : [];
+  let touchedInsp = false;
+  if (cancelPeriod) { list = list.filter((ins) => ins.period !== cancelPeriod); touchedInsp = true; } // 해당 회차 기록 삭제(되돌리기)
   if (insp) {
-    const rec = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: "회차", period: insp.period, inspector: insp.inspector, affiliation: insp.affiliation, photo: "", checkedAt: new Date().toISOString() };
-    const cur = Array.isArray(a.inspections) ? a.inspections : [];
-    data.inspections = [...cur, rec];
+    list.push({ id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: "회차", period: insp.period, inspector: insp.inspector, affiliation: insp.affiliation, photo: "", checkedAt: new Date().toISOString() });
+    touchedInsp = true;
   }
+  if (touchedInsp) data.inspections = list;
   const { error } = await sb.from("assets").upsert({ id, kind, data, updated_at: new Date().toISOString() });
   if (error) throw error;
   const notes = [];
   if (Object.keys(fields).length) notes.push("일괄 수정");
+  if (cancelPeriod) notes.push(`검수 취소 · ${cancelPeriod}`);
   if (insp) notes.push(`검수 확인 · ${insp.period} · 확인자: ${insp.inspector}${insp.affiliation ? ` (${insp.affiliation})` : ""}`);
-  await logHistory({ asset_id: id, asset_name: a.assetName, action: insp ? "inspect" : "update", before: null, after: null, requester: insp ? (insp.inspector + (insp.affiliation ? ` (${insp.affiliation})` : "")) : "", note: notes.join(" · ") });
+  await logHistory({ asset_id: id, asset_name: a.assetName, action: (insp || cancelPeriod) ? "inspect" : "update", before: null, after: null, requester: insp ? (insp.inspector + (insp.affiliation ? ` (${insp.affiliation})` : "")) : "", note: notes.join(" · ") || "일괄 처리" });
 }
 async function applyBulkEdit() {
   if (!isAdmin) return;
@@ -979,7 +992,12 @@ async function applyBulkEdit() {
   const photoOn = document.getElementById("bulk-photo-on").checked;
   const photoReplace = document.getElementById("bulk-photo-replace").checked;
   if (photoOn && !bulkEditPhotoData) { errEl.textContent = "추가할 자산 사진을 선택해주세요."; errEl.hidden = false; return; }
-  if (Object.keys(fields).length === 0 && !inspOn && !photoOn) { errEl.textContent = "변경할 항목을 체크하거나 사진/검수 처리를 선택해주세요."; errEl.hidden = false; return; }
+  // 검수 취소(되돌리기) 옵션
+  const cancelOn = document.getElementById("bulk-inspcancel-on").checked;
+  const cancelPeriod = cancelOn ? document.getElementById("bulk-inspcancel-period").value.trim() : "";
+  if (inspOn && cancelOn && insp.period === cancelPeriod) { errEl.textContent = "같은 회차를 검수 처리와 취소 둘 다 선택할 수 없습니다."; errEl.hidden = false; return; }
+  if (Object.keys(fields).length === 0 && !inspOn && !photoOn && !cancelOn) { errEl.textContent = "변경할 항목을 체크하거나 사진/검수 처리/검수 취소를 선택해주세요."; errEl.hidden = false; return; }
+  if (cancelOn && !confirm(`선택한 자산들의 ‘${cancelPeriod}’ 검수 기록을 삭제(되돌리기)합니다.\n계속할까요?`)) return;
   const ids = [...selectedIds];
   const btn = document.getElementById("bulkEditSave");
   const prog = document.getElementById("bulkProgress");
@@ -1006,7 +1024,7 @@ async function applyBulkEdit() {
         perFields.imageUrl = photoUrl;
         perFields.thumbUrl = thumbUrl || "";
       }
-      if (insp || photoOn) await bulkApplyOne(a, perFields, insp);   // 필드+사진+검수 한 번에
+      if (insp || photoOn || cancelOn) await bulkApplyOne(a, perFields, insp, cancelPeriod); // 필드+사진+검수(추가/취소) 한 번에
       else await applyUpdate(id, perFields, { note: "일괄 수정" });    // 필드만 (기존 로직)
       done++;
     } catch (e) { console.error("일괄 수정 실패:", id, e); failed++; }
@@ -1015,7 +1033,7 @@ async function applyBulkEdit() {
   hide("bulkEditOverlay");
   selectedIds.clear();
   await reloadAll(); rerender();
-  const extra = [photoOn ? "사진" : "", insp ? "검수" : ""].filter(Boolean).join("·");
+  const extra = [photoOn ? "사진" : "", insp ? "검수" : "", cancelOn ? "검수취소" : ""].filter(Boolean).join("·");
   alert(`일괄 처리 완료: ${done}건 적용${failed ? `, ${failed}건 실패` : ""}${extra ? ` (${extra} 포함)` : ""}`);
 }
 // ===== 검색결과에 사진 1장 일괄 적용 (관리자) =====
@@ -1081,6 +1099,7 @@ async function applyBulkPhoto() {
     photoUrl = bulkPhotoData; // 업로드 실패 시 base64로라도 적용
   }
   let done = 0, failed = 0;
+  const bid = newBatchId(); // 비관리자 요청을 한 작업으로 묶기
   for (const a of targets) {
     const id = String(a.id);
     prog.textContent = `${isAdmin ? "적용" : "요청"} 중… ${done + failed + 1}/${ids.length}`;
@@ -1092,10 +1111,10 @@ async function applyBulkPhoto() {
         // 이미 URL이므로 재업로드 없음. 대표사진·썸네일도 함께 지정.
         await applyUpdate(id, fields, { note: "사진 일괄 적용" });
       } else {
-        // 비관리자: 자산별 '수정 요청'으로 접수 → 관리자 승인 시 반영
+        // 비관리자: 자산별 '수정 요청'으로 접수 → 관리자 승인 시 반영 (batch로 묶음 승인 가능)
         await submitRequest({
           action: "update", target_id: id,
-          payload: { ...fields, assetName: a.assetName, assetNumber: a.assetNumber },
+          payload: { ...fields, assetName: a.assetName, assetNumber: a.assetNumber, batch: bid, batchLabel: "사진 일괄 적용" },
           note: "사진 일괄 적용 요청",
         });
       }
@@ -2309,6 +2328,7 @@ async function applyBatchInspect(policy) {
   setBatchBusy(true);
   renderBatchList(); // 완료 버튼 비활성화 + 진행 표시
   const verb = isAdmin ? "검수" : "검수 신청";
+  const bid = newBatchId(); // 비관리자 검수 신청을 한 작업으로 묶기
   let ok = 0, fail = 0;
   for (const it of targets) {
     batchApplyMsg = `💾 ${verb} 처리 중… <b class="batch-prog">${ok + fail + 1}/${targets.length}</b>`;
@@ -2320,7 +2340,7 @@ async function applyBatchInspect(policy) {
       } else {
         await submitRequest({
           action: "inspect", target_id: it.asset.id,
-          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: true, assetName: it.asset.assetName, assetNumber: it.asset.assetNumber },
+          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: true, assetName: it.asset.assetName, assetNumber: it.asset.assetNumber, batch: bid, batchLabel: "여러 장 검수" },
           requester: reqName, note: `${period} 검수 확인 · 여러 장 검수`,
         });
       }
@@ -2597,7 +2617,7 @@ async function writeInspections(id, list, photoFields) {
   const { error } = await sb.from("assets").upsert({ id: String(id), kind, data, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
-async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos, label }, meta = {}) {
+async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos, label, batch }, meta = {}) {
   const current = findAsset(id);
   if (!current) throw new Error("자산 없음");
   // 검수 사진은 Storage에 올리고 DB에는 URL만 저장한다.
@@ -2607,7 +2627,7 @@ async function applyInspect(id, { periodType, period, inspector, affiliation, ph
     try { photoStored = await uploadMedia(photoStored, "inspections"); }
     catch (e) { console.warn("검수 사진 업로드 실패 — base64로 저장합니다:", e?.message || e); }
   }
-  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", photo: photoStored || "", checkedAt: new Date().toISOString() };
+  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", photo: photoStored || "", checkedAt: new Date().toISOString(), ...(batch ? { batch } : {}) };
   const list = Array.isArray(current.inspections) ? [...current.inspections, insp] : [insp];
   let mediaFields = {};
   // 이어 찍은 물품 사진(최대 3장)이 있으면 기존 자산 사진 뒤에 병합해 함께 저장
@@ -2956,47 +2976,79 @@ function renderReview() {
   selectedReqIds.forEach((id) => { if (!validIds.has(id)) selectedReqIds.delete(id); });
   const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청", inspect: "검수 요청" };
   const actionCls = { create: "req-create", update: "req-update", delete: "req-delete", inspect: "req-inspect" };
-  const allChecked = requests.length > 0 && requests.every((r) => selectedReqIds.has(String(r.id)));
+  // 묶음(batch) 요청은 하나의 그룹 카드로, 나머지는 개별 카드로
+  const groups = new Map();
+  const singles = [];
+  requests.forEach((r) => {
+    const b = r.payload && r.payload.batch;
+    if (b) {
+      let g = groups.get(b);
+      if (!g) { g = { batch: b, label: (r.payload.batchLabel || "일괄 작업"), action: r.action, requester: r.requester, created: r.created_at, items: [] }; groups.set(b, g); }
+      g.items.push(r);
+    } else singles.push(r);
+  });
+  const allChecked = singles.length > 0 && singles.every((r) => selectedReqIds.has(String(r.id)));
   const selCount = selectedReqIds.size;
-  const bar = `
+  const bar = singles.length ? `
     <div class="req-bulkbar">
-      <label class="req-selall"><input type="checkbox" id="reqSelectAll" ${allChecked ? "checked" : ""} /> 전체 선택 <span class="req-total">(${requests.length}건)</span></label>
+      <label class="req-selall"><input type="checkbox" id="reqSelectAll" ${allChecked ? "checked" : ""} /> 개별 전체 선택 <span class="req-total">(${singles.length}건)</span></label>
       <span class="req-selcount">${selCount ? `${selCount}건 선택됨` : ""}</span>
       <span class="form-info req-prog" id="reqBulkProgress" hidden></span>
       <span class="req-bulk-actions">
         <button class="btn btn-primary btn-sm" id="reqBulkApprove" ${selCount ? "" : "disabled"}>✅ 선택 결재</button>
         <button class="btn btn-danger btn-sm" id="reqBulkReject" ${selCount ? "" : "disabled"}>✖ 선택 반려</button>
       </span>
-    </div>`;
-  body.innerHTML = bar + requests.map((r) => {
-    const p = r.payload || {};
-    let summary;
-    if (r.action === "inspect") summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")}) · 검수 회차: <b>${esc(p.period || "-")}</b> · 확인자: ${esc(p.inspector || "-")}${p.affiliation ? ` (${esc(p.affiliation)})` : ""}`;
-    else summary = r.action === "delete"
-      ? `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})`
-      : `<div class="req-fields">
-            <span><b>${esc(p.assetName || "")}</b></span>
-            <span>자산번호: ${esc(p.assetNumber || "-")}</span>
-            <span>위치: ${esc(p.location || "-")}</span>
-            <span>사용자: ${esc(p.manager || "-")}</span>
-            <span>상태: ${esc(p.status || "-")}</span>
-            ${p.dept ? `<span>부서: ${esc(p.dept)}</span>` : ""}
-         </div>`;
-    const meta = [`요청일시: ${fmtTime(r.created_at)}`, r.requester && `신청자: ${esc(r.requester)}`, r.note && `사유: ${esc(r.note)}`].filter(Boolean).join(" · ");
+    </div>` : `<div class="req-bulkbar"><span class="form-info req-prog" id="reqBulkProgress" hidden></span></div>`;
+  // 묶음 그룹 카드
+  const groupHtml = [...groups.values()].map((g) => {
+    const meta = [`요청일시: ${fmtTime(g.created)}`, g.requester && `신청자: ${esc(g.requester)}`].filter(Boolean).join(" · ");
+    const names = g.items.slice(0, 5).map((r) => esc((r.payload || {}).assetName || "")).filter(Boolean).join(", ");
     return `
-      <div class="req-card${selectedReqIds.has(String(r.id)) ? " req-checked" : ""}">
+      <div class="req-card req-group">
         <div class="req-top">
-          <label class="req-check"><input type="checkbox" data-reqcheck="${r.id}" ${selectedReqIds.has(String(r.id)) ? "checked" : ""} /></label>
-          <span class="req-badge ${actionCls[r.action]}">${actionLabel[r.action]}</span>
+          <span class="req-badge ${actionCls[g.action] || ""}">${esc(g.label)}</span>
+          <span class="req-groupcount">📦 ${g.items.length}건 묶음</span>
           ${meta ? `<span class="req-meta">${meta}</span>` : ""}
         </div>
-        <div class="req-summary">${summary}</div>
+        <div class="req-summary">${names}${g.items.length > 5 ? ` 외 ${g.items.length - 5}건` : ""}</div>
         <div class="req-actions">
-          <button class="btn btn-primary btn-sm" data-approve="${r.id}">결재</button>
-          <button class="btn btn-danger btn-sm" data-reject="${r.id}">반려</button>
+          <button class="btn btn-primary btn-sm" data-approvebatch="${g.batch}">✅ 묶음 전체 결재 (${g.items.length})</button>
+          <button class="btn btn-danger btn-sm" data-rejectbatch="${g.batch}">✖ 묶음 전체 반려</button>
         </div>
       </div>`;
   }).join("");
+  const singleHtml = singles.map((r) => renderReqCard(r, actionLabel, actionCls)).join("");
+  body.innerHTML = bar + groupHtml + singleHtml;
+}
+// 개별 요청 카드 1개 렌더
+function renderReqCard(r, actionLabel, actionCls) {
+  const p = r.payload || {};
+  let summary;
+  if (r.action === "inspect") summary = `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")}) · 검수 회차: <b>${esc(p.period || "-")}</b> · 확인자: ${esc(p.inspector || "-")}${p.affiliation ? ` (${esc(p.affiliation)})` : ""}`;
+  else summary = r.action === "delete"
+    ? `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})`
+    : `<div class="req-fields">
+          <span><b>${esc(p.assetName || "")}</b></span>
+          <span>자산번호: ${esc(p.assetNumber || "-")}</span>
+          <span>위치: ${esc(p.location || "-")}</span>
+          <span>사용자: ${esc(p.manager || "-")}</span>
+          <span>상태: ${esc(p.status || "-")}</span>
+          ${p.dept ? `<span>부서: ${esc(p.dept)}</span>` : ""}
+       </div>`;
+  const meta = [`요청일시: ${fmtTime(r.created_at)}`, r.requester && `신청자: ${esc(r.requester)}`, r.note && `사유: ${esc(r.note)}`].filter(Boolean).join(" · ");
+  return `
+    <div class="req-card${selectedReqIds.has(String(r.id)) ? " req-checked" : ""}">
+      <div class="req-top">
+        <label class="req-check"><input type="checkbox" data-reqcheck="${r.id}" ${selectedReqIds.has(String(r.id)) ? "checked" : ""} /></label>
+        <span class="req-badge ${actionCls[r.action]}">${actionLabel[r.action]}</span>
+        ${meta ? `<span class="req-meta">${meta}</span>` : ""}
+      </div>
+      <div class="req-summary">${summary}</div>
+      <div class="req-actions">
+        <button class="btn btn-primary btn-sm" data-approve="${r.id}">결재</button>
+        <button class="btn btn-danger btn-sm" data-reject="${r.id}">반려</button>
+      </div>
+    </div>`;
 }
 // 요청 1건 승인 처리(적용 + 상태 갱신)만 수행 — 목록 새로고침은 호출부에서.
 async function approveRequestCore(r) {
@@ -3045,6 +3097,39 @@ async function bulkApproveSelected() {
   reqBulkBusy = false;
   await reloadAll(); rerender(); renderReview();
   alert(`일괄 결재 완료: ${ok}건${fail ? ` · ${fail}건 실패` : ""}`);
+}
+// 묶음(batch) 요청 한 작업 전체를 결재/반려
+async function approveBatchRequests(bid) {
+  if (reqBulkBusy) return;
+  const items = requests.filter((r) => r.payload && r.payload.batch === bid);
+  if (!items.length) return;
+  if (!confirm(`이 작업 묶음 ${items.length}건을 모두 결재(승인)합니다.\n계속할까요?`)) return;
+  reqBulkBusy = true;
+  let ok = 0, fail = 0;
+  for (const r of items) {
+    setReqProgress(`결재 중… ${ok + fail + 1}/${items.length}`);
+    try { await approveRequestCore(r); ok++; }
+    catch (e) { console.error("묶음 결재 실패:", r.id, e); fail++; }
+  }
+  setReqProgress(""); reqBulkBusy = false;
+  await reloadAll(); rerender(); renderReview();
+  alert(`묶음 결재 완료: ${ok}건${fail ? ` · ${fail}건 실패` : ""}`);
+}
+async function rejectBatchRequests(bid) {
+  if (reqBulkBusy) return;
+  const items = requests.filter((r) => r.payload && r.payload.batch === bid);
+  if (!items.length) return;
+  if (!confirm(`이 작업 묶음 ${items.length}건을 모두 반려합니다.\n계속할까요?`)) return;
+  reqBulkBusy = true;
+  let ok = 0, fail = 0;
+  for (const r of items) {
+    setReqProgress(`반려 중… ${ok + fail + 1}/${items.length}`);
+    try { const { error } = await sb.from("requests").update({ status: "rejected", decided_at: new Date().toISOString() }).eq("id", r.id); if (error) throw error; ok++; }
+    catch (e) { console.error("묶음 반려 실패:", r.id, e); fail++; }
+  }
+  setReqProgress(""); reqBulkBusy = false;
+  await reloadAll(); rerender(); renderReview();
+  alert(`묶음 반려 완료: ${ok}건${fail ? ` · ${fail}건 실패` : ""}`);
 }
 async function bulkRejectSelected() {
   if (reqBulkBusy) return;
@@ -3431,6 +3516,10 @@ document.getElementById("bulkEditForm").addEventListener("change", (e) => {
     document.getElementById("bulk-photo-fields").hidden = !e.target.checked;
     return;
   }
+  if (e.target.id === "bulk-inspcancel-on") {
+    document.getElementById("bulk-inspcancel-fields").hidden = !e.target.checked;
+    return;
+  }
   const c = e.target.closest("input[data-bulk]");
   if (!c) return;
   const input = document.getElementById("bulk-" + c.dataset.bulk);
@@ -3622,6 +3711,10 @@ document.getElementById("adminReviewBody").addEventListener("click", (e) => {
   const rj = e.target.closest("button[data-reject]");
   if (ap) { approveRequest(ap.dataset.approve); return; }
   if (rj) { rejectRequest(rj.dataset.reject); return; }
+  const apb = e.target.closest("button[data-approvebatch]");
+  if (apb) { approveBatchRequests(apb.dataset.approvebatch); return; }
+  const rjb = e.target.closest("button[data-rejectbatch]");
+  if (rjb) { rejectBatchRequests(rjb.dataset.rejectbatch); return; }
   if (e.target.closest("#reqBulkApprove")) { bulkApproveSelected(); return; }
   if (e.target.closest("#reqBulkReject")) { bulkRejectSelected(); return; }
 });
@@ -3634,7 +3727,9 @@ document.getElementById("adminReviewBody").addEventListener("change", (e) => {
     return;
   }
   if (e.target.id === "reqSelectAll") {
-    if (e.target.checked) requests.forEach((r) => selectedReqIds.add(String(r.id)));
+    // 개별(묶음이 아닌) 요청만 전체 선택
+    const singles = requests.filter((r) => !(r.payload && r.payload.batch));
+    if (e.target.checked) singles.forEach((r) => selectedReqIds.add(String(r.id)));
     else selectedReqIds.clear();
     renderReview();
   }
