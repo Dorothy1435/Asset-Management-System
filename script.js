@@ -3777,13 +3777,14 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "bulkPhotoOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
 // 배경(어두운 부분) 클릭 시 닫기 — 단, 여러 장 검수 창은 실수로 닫히면 인식한 사진이 날아가므로 제외(‘닫기’ 버튼으로만)
-document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov && ov.id !== "batchInspectOverlay") ov.hidden = true; }));
+// 모바일: 카메라·사진 선택창을 다녀올 때 배경에 '유령 클릭'이 들어가 창이 꺼지는 문제 방지
+const NO_BACKDROP_CLOSE = new Set(["batchInspectOverlay", "inspectOverlay", "formOverlay", "bulkEditOverlay", "bulkPhotoOverlay"]);
+document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov && !NO_BACKDROP_CLOSE.has(ov.id)) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   closeLightbox();
-  const batch = document.getElementById("batchInspectOverlay");
-  const keepBatch = batch && !batch.hidden; // 여러 장 검수 창은 Esc로 닫지 않는다(‘닫기’ 버튼 사용)
-  ALL_MODALS.forEach((id) => { if (id === "batchInspectOverlay" && keepBatch) return; hide(id); });
+  // 작업 중인 창은 Esc로도 닫지 않는다 (사진 유실 방지)
+  ALL_MODALS.forEach((id) => { const el = document.getElementById(id); if (NO_BACKDROP_CLOSE.has(id) && el && !el.hidden) return; hide(id); });
 });
 
 // 시작
