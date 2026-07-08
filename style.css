@@ -1607,6 +1607,31 @@ body { max-width: 100%; overflow-x: hidden; }
 .batch-retry { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
 .batch-retry:hover { background: #fef3c7; }
 #batchInspectOverlay .modal.batch-drag { outline: 3px dashed #0284c7; outline-offset: -8px; background: #f0f9ff; }
+.batch-prog { font-size: 15px; color: #0e7490; }
+/* 검수 확인자·소속 (완료 버튼 근처) */
+.batch-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  margin: 12px 0 2px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.batch-fields .form-row { margin: 0; }
+.batch-fields .form-row input,
+.batch-fields .form-row select { width: 100%; }
+/* 하단 고정 완료 버튼 영역 */
+#batchInspectOverlay .modal-footer { display: flex; gap: 8px; align-items: center; }
+.batch-actions { display: flex; gap: 8px; flex: 1; min-width: 0; }
+.batch-actions .btn { flex: 1; }
+.batch-apply-btn { font-size: 15px; padding: 12px 10px; font-weight: 700; }
+.batch-apply-btn:disabled { opacity: 0.5; }
 @media (max-width: 560px) {
   .batch-filters { grid-template-columns: 1fr; }
+  .batch-fields { grid-template-columns: 1fr; }
+  /* 모바일: 완료 버튼을 크고 누르기 쉽게, 세로로 */
+  #batchInspectOverlay .modal-footer { flex-wrap: wrap; }
+  .batch-actions { flex: 1 1 100%; flex-wrap: wrap; }
+  .batch-actions .btn { flex: 1 1 100%; padding: 14px; font-size: 16px; }
+  #batchInspectOverlay .modal-footer > [data-close] { flex: 1 1 100%; }
 }

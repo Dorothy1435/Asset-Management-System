@@ -601,14 +601,6 @@
             <label>검수 회차</label>
             <select id="batch-period"></select>
           </div>
-          <div class="form-row">
-            <label>검수 확인자</label>
-            <input type="text" id="batch-inspector" placeholder="예: 홍길동" />
-          </div>
-          <div class="form-row">
-            <label>소속</label>
-            <select id="batch-affil"></select>
-          </div>
         </div>
         <div class="batch-pick-row">
           <input type="file" id="batchInspectInput" accept="image/*" multiple hidden />
@@ -617,10 +609,20 @@
           <span class="batch-summary" id="batchInspectSummary"></span>
         </div>
         <div class="batch-list" id="batchInspectList"></div>
+        <div class="batch-fields">
+          <div class="form-row">
+            <label>검수 확인자 이름</label>
+            <input type="text" id="batch-inspector" placeholder="예: 홍길동" />
+          </div>
+          <div class="form-row">
+            <label>소속</label>
+            <select id="batch-affil"></select>
+          </div>
+        </div>
         <p class="form-info insp-note" id="batchInspectNote">검수는 관리자 승인 후 기록에 반영됩니다.</p>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-primary" id="batchInspectApply" disabled>✅ 검수 완료</button>
+        <div class="batch-actions" id="batchActions"></div>
         <button class="btn btn-secondary" data-close>닫기</button>
       </div>
     </div>

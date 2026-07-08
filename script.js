@@ -1800,6 +1800,7 @@ let batchItems = [];       // { name, photoData, code, asset, status, overwrite 
 let batchProcessing = false;
 let batchFileSigs = new Set(); // 이미 올린 사진(파일) 식별자 — 같은 사진을 다시 고르면 '이미 올린 사진'으로 표시
 let batchRunTotal = 0, batchRunDone = 0; // 이번 업로드 진행률(인식 X/Y)
+let batchApplyMsg = ""; // 저장 진행 중 안내(‘검수 저장 중… x/y’)
 // 지금 메뉴 + (선택)위치·자산명으로 좁힌 매칭 후보 풀. 필터 결과가 비면 메뉴 전체로 되돌린다.
 function buildInspectPool(locStr, nameStr) {
   const g = currentGroup;
@@ -1834,6 +1835,7 @@ function openBatchInspect() {
   batchItems = [];
   batchProcessing = false;
   batchSuppressScan = false;
+  batchApplyMsg = "";
   batchFileSigs = new Set();
   setScanLoading("", false);
   document.getElementById("batch-location").value = "";
@@ -1931,43 +1933,61 @@ function batchWillApply(it) {
 function renderBatchList() {
   const grid = document.getElementById("batchInspectList");
   const summary = document.getElementById("batchInspectSummary");
-  const applyBtn = document.getElementById("batchInspectApply");
   if (!grid) return;
   if (!batchItems.length) {
     grid.innerHTML = `<div class="batch-empty">아직 올린 사진이 없습니다. <b>‘사진 선택’</b>을 눌러 라벨 사진을 여러 장 한꺼번에 선택하거나,<br>이 창으로 사진을 <b>끌어다 놓으세요</b>. (PC)</div>`;
   } else {
     grid.innerHTML = batchItems.map((it, i) => {
-      const dupType = it.status === "dup" || it.status === "already";
       const failed = it.status === "nomatch" || it.status === "error";
-      const s = dupType && it.overwrite ? { cls: "b-ok", label: "덮어쓰기" } : (BATCH_STATUS[it.status] || BATCH_STATUS.processing);
+      const s = BATCH_STATUS[it.status] || BATCH_STATUS.processing;
       const src = it.thumb || it.photoData;
       const thumb = src ? `<img src="${src}" alt="" />` : `<span class="batch-thumb-ph">${it.status === "processing" ? "…" : "🏷️"}</span>`;
       const title = it.asset ? esc(it.asset.assetName) : (it.code ? `인식: ${esc(it.code)}` : "인식되지 않음");
       const sub = it.asset ? esc(it.asset.assetNumber) : esc(it.name);
-      // 중복/이미검수 항목엔 건너뛰기 ↔ 덮어쓰기 토글, 실패 항목엔 재시도 버튼을 준다.
-      let action = "";
-      if (dupType) action = `<button type="button" class="batch-toggle" data-batch-toggle="${i}">${it.overwrite ? "건너뛰기로" : "덮어쓰기로"}</button>`;
-      else if (failed && it.file) action = `<button type="button" class="batch-toggle batch-retry" data-batch-retry="${i}">↻ 재시도</button>`;
+      // 실패 항목엔 재시도 버튼을 준다. (중복 건너뛰기/덮어쓰기는 하단 완료 버튼으로 한 번에 결정)
+      const action = (failed && it.file) ? `<button type="button" class="batch-toggle batch-retry" data-batch-retry="${i}">↻ 재시도</button>` : "";
       const clickable = src ? ' batch-thumb-click" data-batch-preview="' + i + '"' : '"';
       return `<div class="batch-row ${s.cls}" data-idx="${i}"><div class="batch-thumb${clickable}>${thumb}</div><div class="batch-info"><div class="batch-title">${title}</div><div class="batch-sub">${sub}</div></div>${action}<div class="batch-badge">${s.label}</div></div>`;
     }).join("");
   }
-  const ready = batchItems.filter(batchWillApply).length;
   const nomatch = batchItems.filter((it) => it.status === "nomatch" || it.status === "error").length;
   const skip = batchItems.filter((it) => (it.status === "dup" || it.status === "already") && !it.overwrite).length;
   const samePhoto = batchItems.filter((it) => it.status === "samephoto").length;
+  const readyN = batchItems.filter(batchWillApply).length;
   if (summary) {
     if (batchProcessing && batchRunTotal) {
-      summary.innerHTML = `🔎 인식 중… <b>${Math.min(batchRunDone + 1, batchRunTotal)}/${batchRunTotal}</b> (사진이 많으면 몇 분 걸릴 수 있어요)`;
+      summary.innerHTML = `🔎 인식 중… <b class="batch-prog">${Math.min(batchRunDone + 1, batchRunTotal)}/${batchRunTotal}</b>`;
+    } else if (batchApplyMsg) {
+      summary.innerHTML = batchApplyMsg;
     } else {
       summary.innerHTML = batchItems.length
-        ? `총 <b>${batchItems.length}</b>장 · 검수 준비 <b class="b-ok-t">${ready}</b> · 건너뜀 <b>${skip}</b>${samePhoto ? ` · 이미 올림 <b>${samePhoto}</b>` : ""} · 실패 <b class="b-err-t">${nomatch}</b>`
+        ? `총 <b>${batchItems.length}</b>장 · 검수 준비 <b class="b-ok-t">${readyN}</b> · 건너뜀 <b>${skip}</b>${samePhoto ? ` · 이미 올림 <b>${samePhoto}</b>` : ""} · 실패 <b class="b-err-t">${nomatch}</b>`
         : "";
     }
   }
-  if (applyBtn) {
-    applyBtn.disabled = ready === 0 || batchProcessing;
-    applyBtn.textContent = isAdmin ? `✅ ${ready}건 검수 완료` : `✅ ${ready}건 검수 요청`;
+  renderBatchActions();
+}
+// 하단 고정 완료 버튼: 중복이 있으면 '건너뛰고 완료 / 덮어쓰기 완료' 두 개, 없으면 '검수 완료' 하나.
+function renderBatchActions() {
+  const wrap = document.getElementById("batchActions");
+  if (!wrap) return;
+  const matchedIds = new Set(), overIds = new Set();
+  batchItems.forEach((it) => {
+    if (!it.asset) return;
+    const id = String(it.asset.id);
+    if (it.status === "matched") { matchedIds.add(id); overIds.add(id); }
+    else if (it.status === "dup" || it.status === "already") overIds.add(id);
+  });
+  const skipN = matchedIds.size, overN = overIds.size;
+  const verb = isAdmin ? "완료" : "요청";
+  const busy = batchProcessing ? "disabled" : "";
+  if (!batchItems.length) { wrap.innerHTML = ""; return; }
+  if (overN === skipN) {
+    wrap.innerHTML = `<button class="btn btn-primary batch-apply-btn" data-batch-apply="skip" ${skipN ? "" : "disabled"} ${busy}>✅ ${skipN}건 검수 ${verb}</button>`;
+  } else {
+    wrap.innerHTML =
+      `<button class="btn btn-secondary batch-apply-btn" data-batch-apply="skip" ${skipN ? "" : "disabled"} ${busy}>⏭️ 건너뛰고 ${skipN}건 ${verb}</button>` +
+      `<button class="btn btn-primary batch-apply-btn" data-batch-apply="overwrite" ${overN ? "" : "disabled"} ${busy}>🔁 덮어쓰기 ${overN}건 ${verb}</button>`;
   }
 }
 function setBatchBusy(busy) {
@@ -2015,26 +2035,37 @@ async function previewBatchItem(index) {
     if (big) openLightbox(big);
   } catch { if (it.thumb || it.photoData) openLightbox(it.thumb || it.photoData); }
 }
-// 준비된 항목을 일괄 검수 처리 (관리자: 즉시 반영 / 일반: 승인 요청)
-async function applyBatchInspect() {
+// 준비된 항목을 일괄 검수 처리. policy: "skip"(중복 건너뛰기) | "overwrite"(중복 덮어쓰기)
+// 관리자는 즉시 반영, 일반 사용자는 승인 요청. 버튼 한 번으로 바로 검수 완료된다.
+async function applyBatchInspect(policy) {
   if (batchProcessing) return;
+  // 전역 버튼(건너뛰기/덮어쓰기)을 누르면 모든 중복 항목의 처리 방식을 한 번에 정한다.
+  if (policy === "skip" || policy === "overwrite") {
+    const ov = policy === "overwrite";
+    batchItems.forEach((it) => { if (it.status === "dup" || it.status === "already") it.overwrite = ov; });
+  }
   // 검수 준비됨 + '덮어쓰기' 선택 항목. 같은 자산번호는 한 번만(마지막 사진 우선) 처리.
   const byId = new Map();
   batchItems.filter(batchWillApply).forEach((it) => byId.set(String(it.asset.id), it));
   const targets = [...byId.values()];
-  if (!targets.length) { alert("검수할 준비된 자산이 없습니다."); return; }
-  const period = document.getElementById("batch-period").value.trim();
+  if (!targets.length) { alert("검수할 자산이 없습니다. 먼저 라벨 사진을 올려 인식하세요."); return; }
+  const period = document.getElementById("batch-period").value.trim() || "1회차";
   const inspector = document.getElementById("batch-inspector").value.trim();
   const affiliation = document.getElementById("batch-affil").value.trim();
-  if (!period) { alert("검수 회차를 선택해 주세요."); return; }
-  if (!inspector) { alert("검수 확인자 이름을 입력해 주세요."); return; }
+  if (!inspector) {
+    alert("검수 확인자 이름을 입력해 주세요. (목록 아래 ‘검수 확인자 이름’ 칸)");
+    const el = document.getElementById("batch-inspector"); el.focus(); el.scrollIntoView({ block: "center" });
+    return;
+  }
   const reqName = affiliation ? `${inspector} (${affiliation})` : inspector;
-  const applyBtn = document.getElementById("batchInspectApply");
-  applyBtn.disabled = true;
   batchProcessing = true;
+  setBatchBusy(true);
+  renderBatchList(); // 완료 버튼 비활성화
   let ok = 0, fail = 0;
   for (const it of targets) {
-    applyBtn.textContent = `처리 중… ${ok + fail + 1}/${targets.length}`;
+    batchApplyMsg = `💾 검수 저장 중… <b class="batch-prog">${ok + fail + 1}/${targets.length}</b>`;
+    const summary = document.getElementById("batchInspectSummary");
+    if (summary) summary.innerHTML = batchApplyMsg;
     try {
       if (isAdmin) {
         await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [] });
@@ -2052,6 +2083,8 @@ async function applyBatchInspect() {
     }
   }
   batchProcessing = false;
+  batchApplyMsg = "";
+  setBatchBusy(false);
   hide("batchInspectOverlay");
   await reloadAll(); rerender();
   if (isAdmin) alert(`여러 장 검수 완료: ${ok}건 처리${fail ? ` · ${fail}건 실패` : ""}.`);
@@ -3121,10 +3154,11 @@ document.getElementById("batchPickBtn").addEventListener("click", () => {
   if (input) { input.value = ""; input.click(); }
 });
 document.getElementById("batchInspectInput").addEventListener("change", (e) => { handleBatchFiles(e.target.files); });
-document.getElementById("batchInspectApply").addEventListener("click", applyBatchInspect);
+document.getElementById("batchActions").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-batch-apply]");
+  if (b) applyBatchInspect(b.dataset.batchApply);
+});
 document.getElementById("batchInspectList").addEventListener("click", (e) => {
-  const toggle = e.target.closest("button[data-batch-toggle]");
-  if (toggle) { const it = batchItems[Number(toggle.dataset.batchToggle)]; if (it) { it.overwrite = !it.overwrite; renderBatchList(); } return; }
   const retry = e.target.closest("button[data-batch-retry]");
   if (retry) { retryBatchItem(Number(retry.dataset.batchRetry)); return; }
   const prev = e.target.closest("[data-batch-preview]");
