@@ -1564,10 +1564,10 @@ const OCR_CONFUSE_PAIRS = new Set(["38", "08", "58", "68", "89", "06", "56", "17
 const isConfusablePair = (a, b) => OCR_CONFUSE_PAIRS.has(a < b ? a + b : b + a);
 // 인식 숫자열이 '혼동 가능한 숫자쌍으로만' 어긋나는 실제 자산을 찾는다.
 // 예) 3을 8로 오독한 경우처럼, 틀린 자리가 모두 알려진 혼동쌍이고 유일한 후보면 그 자산으로 보정.
-function confusableAssetMatch(target, norm) {
+function confusableAssetMatch(target, norm, pool) {
   if (target.length < 16 || target.length > 24 || !/^\d+$/.test(target)) return null;
   let best = null, bestMis = Infinity, tie = false;
-  for (const a of assets) {
+  for (const a of (pool || assets)) {
     const n = norm(a.assetNumber);
     if (n.length !== target.length || !/^\d+$/.test(n)) continue;
     let mis = 0, ok = true;
@@ -1583,24 +1583,26 @@ function confusableAssetMatch(target, norm) {
   return best && !tie ? best : null;
 }
 // 자산번호를 정규화(공백·하이픈 제거)해 비교하며 자산을 찾는다.
-function findAssetByNumber(code) {
+// pool: 검색 대상 자산 배열(기본 전체). 일괄 검수의 '위치·자산명 필터'로 좁힌 후보를 넘길 수 있다.
+function findAssetByNumber(code, pool) {
+  const list = pool || assets;
   const norm = (s) => String(s || "").replace(/[\s-]/g, "");
   const target = norm(code);
   if (!target) return null;
   // 1) 정확 일치
-  let hit = assets.find((a) => norm(a.assetNumber) === target);
+  let hit = list.find((a) => norm(a.assetNumber) === target);
   if (hit) return hit;
   // 2) 부분 포함 (인식 자릿수 오차 대비)
-  hit = assets.find((a) => { const n = norm(a.assetNumber); return n.length >= 8 && (n.includes(target) || target.includes(n)); });
+  hit = list.find((a) => { const n = norm(a.assetNumber); return n.length >= 8 && (n.includes(target) || target.includes(n)); });
   if (hit) return hit;
   // 3) 혼동쌍 보정: 3↔8 처럼 OCR이 헷갈리는 숫자로만 어긋난 유일한 자산이면 그것으로 인정.
-  hit = confusableAssetMatch(target, norm);
+  hit = confusableAssetMatch(target, norm, list);
   if (hit) return hit;
   // 4) 근접 매칭: 실제 등록된 자산번호 중 편집거리가 최소이면서 '유일하게 가까운' 후보만 채택.
   //    (연속 번호는 1자리 차이라, 애매하면 채택하지 않아 오인식을 막는다.)
   if (target.length >= 16 && target.length <= 24) {
     let best = null, bestD = Infinity, secondD = Infinity;
-    for (const a of assets) {
+    for (const a of list) {
       const n = norm(a.assetNumber);
       if (n.length < 16) continue;
       const d = _editDistance(target, n);
@@ -1641,11 +1643,11 @@ function extractAlnumCodes(text) {
   return [...new Set(runs)].filter((r) => /[A-Z]/.test(r) && /\d/.test(r));
 }
 // 2024 메뉴 자산 중에서 코드(문자+숫자)로 자산을 찾는다. 정확→부분포함→근접(유일승자) 순.
-function findAsset2024ByCode(code) {
+function findAsset2024ByCode(code, poolArg) {
   const norm = (s) => String(s || "").toUpperCase().replace(/[\s-]/g, "");
   const target = norm(code);
   if (target.length < 6) return null;
-  const pool = assets.filter((a) => groupOf(a) === GROUP_PAST);
+  const pool = (poolArg || assets).filter((a) => groupOf(a) === GROUP_PAST);
   let hit = pool.find((a) => norm(a.assetNumber) === target);
   if (hit) return hit;
   hit = pool.find((a) => { const n = norm(a.assetNumber); return n.length >= 6 && (n.includes(target) || target.includes(n)); });
@@ -1695,13 +1697,13 @@ function warmupNumberOcr() { try { getNumberOcrWorker().catch(() => {}); } catch
 // 1차에서 못 맞추면(형식 애매 등) 고해상도 넓은 인식으로 한 번만 정밀 재시도.
 const OCR_WL_DIGIT = "0123456789";
 const OCR_WL_ALNUM = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-";
-async function recognizeAssetNumber(dataUrl, mode) {
+async function recognizeAssetNumber(dataUrl, mode, pool) {
   const alnumMode = mode === "alnum";
   const candidates = [];
   const addFrom = (text) => { extractAssetCodes(text).forEach((c) => { if (!candidates.includes(c)) candidates.push(c); }); };
-  const matched = () => candidates.find((c) => findAssetByNumber(c));
+  const matched = () => candidates.find((c) => findAssetByNumber(c, pool));
   let alnumHit = null; // 2024 형식(G20250019-0001 등) 매칭 자산
-  const tryAlnum = (text) => { if (alnumHit) return; for (const c of extractAlnumCodes(text)) { const a = findAsset2024ByCode(c); if (a) { alnumHit = a; break; } } };
+  const tryAlnum = (text) => { if (alnumHit) return; for (const c of extractAlnumCodes(text)) { const a = findAsset2024ByCode(c, pool); if (a) { alnumHit = a; break; } } };
   const done = () => !!matched() || !!alnumHit;
   try {
     setScanLoading("글자를 인식하는 중입니다… 처음 실행은 몇 초 걸릴 수 있어요.", true);
@@ -1785,6 +1787,206 @@ async function handleScanCapture(file) {
     alert("사진 처리 중 문제가 발생했습니다. 다시 시도해 주세요.");
   }
 }
+// ===== 여러 장 한번에 검수 (갤러리에서 라벨 사진 여러 장 업로드 → 각 사진의 자산코드 인식 → 일괄 검수 완료) =====
+// 위치·자산명 필터를 넣으면 그 범위로 좁혀 인식·매칭하므로, 한 곳에서 모아 찍은 사진을 한꺼번에 올릴 때 정확도가 높아진다.
+let batchItems = [];       // { name, photoData, code, asset, status, overwrite } — status: matched|dup|already|samephoto|nomatch|error
+let batchProcessing = false;
+let batchFileSigs = new Set(); // 이미 올린 사진(파일) 식별자 — 같은 사진을 다시 고르면 '이미 올린 사진'으로 표시
+// 지금 메뉴 + (선택)위치·자산명으로 좁힌 매칭 후보 풀. 필터 결과가 비면 메뉴 전체로 되돌린다.
+function buildInspectPool(locStr, nameStr) {
+  const g = currentGroup;
+  const menu = assets.filter((a) => groupOf(a) === g);
+  const loc = String(locStr || "").trim().toLowerCase();
+  const nm = String(nameStr || "").trim().toLowerCase();
+  let pool = menu;
+  if (loc) pool = pool.filter((a) => String(a.location || "").toLowerCase().includes(loc));
+  if (nm) pool = pool.filter((a) => String(a.assetName || "").toLowerCase().includes(nm));
+  return pool.length ? pool : menu;
+}
+// 사진 한 장에서 자산을 인식한다. 풀 우선 매칭 → 실패 시 메뉴 전체로 한 번 더 (필터 오타로 놓치지 않게).
+async function recognizeAssetInPool(dataUrl, mode, pool) {
+  const r = await recognizeAssetNumber(dataUrl, mode, pool);
+  if (r && typeof r === "object") return { asset: r, code: r.assetNumber || "" };
+  const code = typeof r === "string" ? r : null;
+  if (!code) return { asset: null, code: null };
+  const a = findAssetByNumber(code, pool) || findAsset2024ByCode(code, pool)
+        || findAssetByNumber(code) || findAsset2024ByCode(code);
+  return { asset: a || null, code };
+}
+function openBatchInspect() {
+  if (!requireLogin()) return;
+  if (currentGroup === GROUP_ELEC) { alert("여러 장 검수는 2025·2024년도 자산 메뉴에서 사용할 수 있습니다."); return; }
+  batchItems = [];
+  batchProcessing = false;
+  batchFileSigs = new Set();
+  document.getElementById("batch-location").value = "";
+  document.getElementById("batch-name").value = "";
+  // 검수 회차: 지금 목록에서 보고 있는 회차를 기본값으로
+  const bp = document.getElementById("batch-period");
+  bp.innerHTML = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`).map((o) => `<option value="${o}">${o}</option>`).join("");
+  bp.value = inspRound || "1회차";
+  document.getElementById("batch-inspector").value = myProfile?.name || "";
+  const affil = myProfile?.affiliation || "";
+  const bAffil = document.getElementById("batch-affil");
+  bAffil.innerHTML = deptOptionsHtml(affil);
+  bAffil.value = affil;
+  document.getElementById("batchInspectTitle").textContent = isAdmin ? "여러 장 검수" : "여러 장 검수 요청";
+  const note = document.getElementById("batchInspectNote");
+  if (note) note.hidden = isAdmin;
+  renderBatchList();
+  show("batchInspectOverlay");
+}
+// 여러 장 업로드 처리: 파일마다 순서대로 인식 → 결과를 즉시 목록에 반영
+async function handleBatchFiles(files) {
+  const list = Array.from(files || []).filter((f) => f && f.type && f.type.startsWith("image/"));
+  if (!list.length) { alert("이미지(사진) 파일을 선택해 주세요."); return; }
+  if (batchProcessing) return;
+  batchProcessing = true;
+  setBatchBusy(true);
+  warmupNumberOcr();
+  const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
+  const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
+  const period = document.getElementById("batch-period").value;
+  let newDup = 0;
+  for (const file of list) {
+    const item = { name: file.name || "사진", photoData: "", code: null, asset: null, status: "processing", overwrite: false };
+    // 같은 사진(파일)을 또 고른 경우 — 인식 없이 '이미 올린 사진'으로 표시해 헷갈리지 않게 한다.
+    const sig = `${file.name || ""}|${file.size || 0}|${file.lastModified || 0}`;
+    if (batchFileSigs.has(sig)) {
+      item.status = "samephoto";
+      batchItems.push(item);
+      renderBatchList();
+      continue;
+    }
+    batchFileSigs.add(sig);
+    batchItems.push(item);
+    renderBatchList();
+    try {
+      const raw = await fileToDataURL(file);
+      const { asset, code } = await recognizeAssetInPool(raw, mode, pool);
+      item.code = code || null;
+      if (!asset) {
+        item.status = "nomatch";
+      } else {
+        item.asset = asset;
+        item.photoData = await compressImage(file, 900, 0.6); // 검수 증빙 사진(압축). 덮어쓰기 대비 미리 준비.
+        const dupInBatch = batchItems.some((x) => x !== item && x.asset && String(x.asset.id) === String(asset.id));
+        if (dupInBatch) { item.status = "dup"; newDup++; }         // 이번 업로드 안에서 같은 자산번호가 또 나옴
+        else if (inspectedRound(asset, period)) { item.status = "already"; newDup++; } // DB에 이미 이번 회차 검수됨
+        else item.status = "matched";
+      }
+    } catch (e) {
+      console.error("일괄 검수 인식 오류:", e);
+      item.status = "error";
+    }
+    renderBatchList();
+  }
+  batchProcessing = false;
+  setBatchBusy(false);
+  renderBatchList();
+  if (newDup) {
+    alert(`자산번호가 중복되는 사진이 ${newDup}장 있습니다.\n(같은 번호가 여러 장이거나, 이미 이번 회차에 검수된 자산)\n\n목록에서 각 항목의 ‘건너뛰기 / 덮어쓰기’를 선택하세요. 기본값은 건너뛰기입니다.`);
+  }
+}
+const BATCH_STATUS = {
+  processing: { cls: "b-proc", label: "인식 중…" },
+  matched: { cls: "b-ok", label: "검수 준비됨" },
+  dup: { cls: "b-dup", label: "번호 중복" },
+  already: { cls: "b-dup", label: "이미 검수됨" },
+  samephoto: { cls: "b-dup", label: "이미 올린 사진" },
+  nomatch: { cls: "b-err", label: "자산 못 찾음" },
+  error: { cls: "b-err", label: "인식 실패" },
+  done: { cls: "b-done", label: "완료" },
+  savefail: { cls: "b-err", label: "저장 실패" },
+};
+// 이 항목이 실제로 검수 처리될지 여부 (준비됨 이거나, 중복/이미검수인데 '덮어쓰기' 선택)
+function batchWillApply(it) {
+  return !!it.asset && (it.status === "matched" || ((it.status === "dup" || it.status === "already") && it.overwrite));
+}
+function renderBatchList() {
+  const grid = document.getElementById("batchInspectList");
+  const summary = document.getElementById("batchInspectSummary");
+  const applyBtn = document.getElementById("batchInspectApply");
+  if (!grid) return;
+  if (!batchItems.length) {
+    grid.innerHTML = `<div class="batch-empty">아직 올린 사진이 없습니다. <b>‘사진 선택’</b>을 눌러 라벨 사진을 여러 장 한꺼번에 선택하세요.</div>`;
+  } else {
+    grid.innerHTML = batchItems.map((it, i) => {
+      const dupType = it.status === "dup" || it.status === "already";
+      const s = dupType && it.overwrite ? { cls: "b-ok", label: "덮어쓰기" } : (BATCH_STATUS[it.status] || BATCH_STATUS.processing);
+      const thumb = it.photoData ? `<img src="${it.photoData}" alt="" />` : `<span class="batch-thumb-ph">${it.status === "processing" ? "…" : "🏷️"}</span>`;
+      const title = it.asset ? esc(it.asset.assetName) : (it.code ? `인식: ${esc(it.code)}` : "인식되지 않음");
+      const sub = it.asset ? esc(it.asset.assetNumber) : esc(it.name);
+      // 중복/이미검수 항목엔 건너뛰기 ↔ 덮어쓰기 토글 버튼을 준다.
+      const toggle = dupType
+        ? `<button type="button" class="batch-toggle" data-batch-toggle="${i}">${it.overwrite ? "건너뛰기로" : "덮어쓰기로"}</button>`
+        : "";
+      return `<div class="batch-row ${s.cls}"><div class="batch-thumb">${thumb}</div><div class="batch-info"><div class="batch-title">${title}</div><div class="batch-sub">${sub}</div></div>${toggle}<div class="batch-badge">${s.label}</div></div>`;
+    }).join("");
+  }
+  const ready = batchItems.filter(batchWillApply).length;
+  const nomatch = batchItems.filter((it) => it.status === "nomatch" || it.status === "error").length;
+  const skip = batchItems.filter((it) => (it.status === "dup" || it.status === "already") && !it.overwrite).length;
+  const samePhoto = batchItems.filter((it) => it.status === "samephoto").length;
+  if (summary) {
+    summary.innerHTML = batchItems.length
+      ? `총 <b>${batchItems.length}</b>장 · 검수 준비 <b class="b-ok-t">${ready}</b> · 건너뜀 <b>${skip}</b>${samePhoto ? ` · 이미 올림 <b>${samePhoto}</b>` : ""} · 실패 <b class="b-err-t">${nomatch}</b>`
+      : "";
+  }
+  if (applyBtn) {
+    applyBtn.disabled = ready === 0 || batchProcessing;
+    applyBtn.textContent = isAdmin ? `✅ ${ready}건 검수 완료` : `✅ ${ready}건 검수 요청`;
+  }
+}
+function setBatchBusy(busy) {
+  const pick = document.getElementById("batchPickBtn");
+  const spin = document.getElementById("batchSpinner");
+  if (pick) pick.disabled = busy;
+  if (spin) spin.hidden = !busy;
+}
+// 준비된 항목을 일괄 검수 처리 (관리자: 즉시 반영 / 일반: 승인 요청)
+async function applyBatchInspect() {
+  if (batchProcessing) return;
+  // 검수 준비됨 + '덮어쓰기' 선택 항목. 같은 자산번호는 한 번만(마지막 사진 우선) 처리.
+  const byId = new Map();
+  batchItems.filter(batchWillApply).forEach((it) => byId.set(String(it.asset.id), it));
+  const targets = [...byId.values()];
+  if (!targets.length) { alert("검수할 준비된 자산이 없습니다."); return; }
+  const period = document.getElementById("batch-period").value.trim();
+  const inspector = document.getElementById("batch-inspector").value.trim();
+  const affiliation = document.getElementById("batch-affil").value.trim();
+  if (!period) { alert("검수 회차를 선택해 주세요."); return; }
+  if (!inspector) { alert("검수 확인자 이름을 입력해 주세요."); return; }
+  const reqName = affiliation ? `${inspector} (${affiliation})` : inspector;
+  const applyBtn = document.getElementById("batchInspectApply");
+  applyBtn.disabled = true;
+  batchProcessing = true;
+  let ok = 0, fail = 0;
+  for (const it of targets) {
+    applyBtn.textContent = `처리 중… ${ok + fail + 1}/${targets.length}`;
+    try {
+      if (isAdmin) {
+        await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [] });
+      } else {
+        await submitRequest({
+          action: "inspect", target_id: it.asset.id,
+          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], assetName: it.asset.assetName, assetNumber: it.asset.assetNumber },
+          requester: reqName, note: `${period} 검수 확인 · 여러 장 검수`,
+        });
+      }
+      it.status = "done"; ok++;
+    } catch (e) {
+      console.error("일괄 검수 처리 오류:", e);
+      it.status = "savefail"; fail++;
+    }
+  }
+  batchProcessing = false;
+  hide("batchInspectOverlay");
+  await reloadAll(); rerender();
+  if (isAdmin) alert(`여러 장 검수 완료: ${ok}건 처리${fail ? ` · ${fail}건 실패` : ""}.`);
+  else alert(`여러 장 검수 요청 접수: ${ok}건 신청${fail ? ` · ${fail}건 실패` : ""}. 관리자 승인 후 반영됩니다.`);
+}
+
 // 인식 텍스트에서 '자산번호(20자리)'와 '취득금액(천단위 숫자)'만 채운다.
 // (품명·비치호실 등 한글 항목은 OCR 정확도 한계로 자동입력하지 않음 — 직접 입력)
 function fillFromOcr(text) {
@@ -2841,6 +3043,20 @@ document.getElementById("scanGuideStart").addEventListener("click", launchScanCa
 document.getElementById("scanGuideCancel").addEventListener("click", () => hide("scanGuideOverlay"));
 document.getElementById("scanGuideOverlay").addEventListener("click", (e) => { if (e.target.id === "scanGuideOverlay") hide("scanGuideOverlay"); });
 document.getElementById("scanCameraInput").addEventListener("change", (e) => { handleScanCapture(e.target.files && e.target.files[0]); });
+// 여러 장 한번에 검수
+document.getElementById("batchInspectBtn").addEventListener("click", openBatchInspect);
+document.getElementById("batchPickBtn").addEventListener("click", () => {
+  const input = document.getElementById("batchInspectInput");
+  if (input) { input.value = ""; input.click(); }
+});
+document.getElementById("batchInspectInput").addEventListener("change", (e) => { handleBatchFiles(e.target.files); });
+document.getElementById("batchInspectApply").addEventListener("click", applyBatchInspect);
+document.getElementById("batchInspectList").addEventListener("click", (e) => {
+  const t = e.target.closest("button[data-batch-toggle]");
+  if (!t) return;
+  const it = batchItems[Number(t.dataset.batchToggle)];
+  if (it) { it.overwrite = !it.overwrite; renderBatchList(); }
+});
 // 검수 화면: 물품 사진 이어 찍기(최대 3장)
 document.getElementById("inspExtraBtn").addEventListener("click", () => {
   const input = document.getElementById("inspExtraInput");
@@ -2973,7 +3189,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); ALL_MODALS.forEach(hide); } });
