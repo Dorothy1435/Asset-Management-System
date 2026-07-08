@@ -918,7 +918,35 @@ function openBulkEdit() {
     const input = document.getElementById("bulk-" + c.dataset.bulk);
     if (input) { input.disabled = true; if (input.tagName === "INPUT") input.value = ""; }
   });
+  // 검수 처리 섹션 초기화
+  document.getElementById("bulk-insp-on").checked = false;
+  document.getElementById("bulk-insp-fields").hidden = true;
+  const bperiod = document.getElementById("bulk-insp-period");
+  bperiod.innerHTML = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`).map((o) => `<option value="${o}">${o}</option>`).join("");
+  bperiod.value = inspRound || "1회차";
+  document.getElementById("bulk-insp-inspector").value = myProfile?.name || "";
+  const baffil = document.getElementById("bulk-insp-affil");
+  baffil.innerHTML = deptOptionsHtml(myProfile?.affiliation || "");
+  baffil.value = myProfile?.affiliation || "";
   show("bulkEditOverlay");
+}
+// 한 자산에 '필드 수정 + 검수 기록'을 한 번의 저장으로 반영(따로 저장하면 서로 덮어써서 유실됨)
+async function bulkApplyOne(a, fields, insp) {
+  const id = String(a.id);
+  const kind = id.startsWith("u") ? "added" : "override";
+  const existing = overlay.find((o) => String(o.id) === id && o.kind === kind)?.data || {};
+  const data = { ...existing, ...cleanFields(fields) };
+  if (insp) {
+    const rec = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: "회차", period: insp.period, inspector: insp.inspector, affiliation: insp.affiliation, photo: "", checkedAt: new Date().toISOString() };
+    const cur = Array.isArray(a.inspections) ? a.inspections : [];
+    data.inspections = [...cur, rec];
+  }
+  const { error } = await sb.from("assets").upsert({ id, kind, data, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  const notes = [];
+  if (Object.keys(fields).length) notes.push("일괄 수정");
+  if (insp) notes.push(`검수 확인 · ${insp.period} · 확인자: ${insp.inspector}${insp.affiliation ? ` (${insp.affiliation})` : ""}`);
+  await logHistory({ asset_id: id, asset_name: a.assetName, action: insp ? "inspect" : "update", before: null, after: null, requester: insp ? (insp.inspector + (insp.affiliation ? ` (${insp.affiliation})` : "")) : "", note: notes.join(" · ") });
 }
 async function applyBulkEdit() {
   if (!isAdmin) return;
@@ -929,7 +957,17 @@ async function applyBulkEdit() {
   });
   const errEl = document.getElementById("bulkEditError");
   errEl.hidden = true;
-  if (Object.keys(fields).length === 0) { errEl.textContent = "변경할 항목을 하나 이상 체크해주세요."; errEl.hidden = false; return; }
+  // 검수 처리 옵션
+  const inspOn = document.getElementById("bulk-insp-on").checked;
+  let insp = null;
+  if (inspOn) {
+    const period = document.getElementById("bulk-insp-period").value.trim();
+    const inspector = document.getElementById("bulk-insp-inspector").value.trim();
+    const affiliation = document.getElementById("bulk-insp-affil").value.trim();
+    if (!inspector) { errEl.textContent = "검수자 이름을 입력해주세요."; errEl.hidden = false; return; }
+    insp = { period, inspector, affiliation };
+  }
+  if (Object.keys(fields).length === 0 && !inspOn) { errEl.textContent = "변경할 항목을 체크하거나 ‘검수 처리’를 선택해주세요."; errEl.hidden = false; return; }
   const ids = [...selectedIds];
   const btn = document.getElementById("bulkEditSave");
   const prog = document.getElementById("bulkProgress");
@@ -937,14 +975,19 @@ async function applyBulkEdit() {
   let done = 0, failed = 0;
   for (const id of ids) {
     prog.textContent = `적용 중… ${done + failed + 1}/${ids.length}`;
-    try { await applyUpdate(id, fields, { note: "일괄 수정" }); done++; }
-    catch (e) { console.error("일괄 수정 실패:", id, e); failed++; }
+    try {
+      const a = findAsset(id);
+      if (!a) { failed++; continue; }
+      if (insp) await bulkApplyOne(a, fields, insp);        // 필드+검수 한 번에
+      else await applyUpdate(id, fields, { note: "일괄 수정" }); // 필드만 (기존 로직: 스냅샷·미디어 처리)
+      done++;
+    } catch (e) { console.error("일괄 수정 실패:", id, e); failed++; }
   }
   btn.disabled = false;
   hide("bulkEditOverlay");
   selectedIds.clear();
   await reloadAll(); rerender();
-  alert(`일괄 수정 완료: ${done}건 적용${failed ? `, ${failed}건 실패` : ""}`);
+  alert(`일괄 처리 완료: ${done}건 적용${failed ? `, ${failed}건 실패` : ""}${insp ? " (검수 포함)" : ""}`);
 }
 // ===== 검색결과에 사진 1장 일괄 적용 (관리자) =====
 let bulkPhotoData = ""; // 선택한 사진(base64)
@@ -3349,6 +3392,12 @@ document.getElementById("bulkSelectAll").addEventListener("click", () => { filte
 document.getElementById("bulkEditBtn").addEventListener("click", openBulkEdit);
 document.getElementById("bulkEditSave").addEventListener("click", applyBulkEdit);
 document.getElementById("bulkEditForm").addEventListener("change", (e) => {
+  if (e.target.id === "bulk-insp-on") {
+    const box = document.getElementById("bulk-insp-fields");
+    box.hidden = !e.target.checked;
+    if (e.target.checked) document.getElementById("bulk-insp-inspector").focus();
+    return;
+  }
   const c = e.target.closest("input[data-bulk]");
   if (!c) return;
   const input = document.getElementById("bulk-" + c.dataset.bulk);
