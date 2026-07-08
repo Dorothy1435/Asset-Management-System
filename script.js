@@ -699,7 +699,7 @@ function updateUI() {
   badge.hidden = n === 0;
 
   g("addBtn").textContent = isAdmin ? "+ 자산 등록" : "+ 자산 등록 요청";
-  const bpb = g("bulkPhotoBtn"); if (bpb) bpb.hidden = !isAdmin; // 검색결과 사진 일괄 적용(관리자)
+  const bpb = g("bulkPhotoBtn"); if (bpb) bpb.hidden = !loggedIn; // 검색결과 사진 일괄 적용(로그인 사용자 · 비관리자는 승인 요청)
 
   const notice = g("userNotice");
   if (isAdmin) notice.hidden = true;
@@ -940,7 +940,7 @@ async function applyBulkEdit() {
 // ===== 검색결과에 사진 1장 일괄 적용 (관리자) =====
 let bulkPhotoData = ""; // 선택한 사진(base64)
 function openBulkPhoto() {
-  if (!isAdmin) return;
+  if (!requireLogin()) return;
   if (!filtered.length) { alert("먼저 상세 필터·검색으로 자산을 찾은 뒤 사용하세요."); return; }
   bulkPhotoData = "";
   document.getElementById("bulkPhotoError").hidden = true;
@@ -949,7 +949,11 @@ function openBulkPhoto() {
   document.getElementById("bulkPhotoInput").value = "";
   document.getElementById("bulkPhotoPreview").innerHTML = "";
   document.getElementById("bulkPhotoApply").disabled = true;
-  document.getElementById("bulkPhotoTarget").innerHTML = `현재 <b>${filtered.length}개</b>의 검색된 자산에 사진 1장을 적용합니다.`;
+  const verb = isAdmin ? "적용합니다" : "적용을 요청합니다";
+  document.getElementById("bulkPhotoTarget").innerHTML = `현재 <b>${filtered.length}개</b>의 검색된 자산에 사진 1장을 ${verb}.`;
+  // 비관리자 안내
+  const note = document.getElementById("bulkPhotoReqNote");
+  if (note) note.hidden = isAdmin;
   show("bulkPhotoOverlay");
 }
 async function handleBulkPhotoPick(file) {
@@ -967,20 +971,25 @@ async function handleBulkPhotoPick(file) {
 function updateBulkPhotoApply() {
   const btn = document.getElementById("bulkPhotoApply");
   btn.disabled = !bulkPhotoData;
-  btn.textContent = `✅ ${filtered.length}개에 적용`;
+  btn.textContent = isAdmin ? `✅ ${filtered.length}개에 적용` : `✅ ${filtered.length}개에 적용 요청`;
 }
 async function applyBulkPhoto() {
-  if (!isAdmin || !bulkPhotoData) return;
-  const ids = filtered.map((a) => String(a.id));
+  if (!requireLogin() || !bulkPhotoData) return;
+  const targets = filtered.slice();
+  const ids = targets.map((a) => String(a.id));
   if (!ids.length) return;
   const replace = document.getElementById("bulkPhotoReplace").checked;
-  if (!confirm(`검색된 ${ids.length}개 자산에 이 사진을 ${replace ? "‘이 사진만’으로 덮어씁니다" : "대표 사진으로 추가합니다"}.\n계속할까요?`)) return;
+  const how = replace ? "‘이 사진만’으로 덮어씁니다" : "대표 사진으로 추가합니다";
+  const confirmMsg = isAdmin
+    ? `검색된 ${ids.length}개 자산에 이 사진을 ${how}.\n계속할까요?`
+    : `검색된 ${ids.length}개 자산에 이 사진 적용을 요청합니다. (${how})\n관리자 승인 후 반영됩니다. 계속할까요?`;
+  if (!confirm(confirmMsg)) return;
   const errEl = document.getElementById("bulkPhotoError");
   const prog = document.getElementById("bulkPhotoProgress");
   const btn = document.getElementById("bulkPhotoApply");
   errEl.hidden = true;
   btn.disabled = true; prog.hidden = false;
-  // 사진은 딱 한 번만 업로드하고, 그 URL을 모든 자산에 붙인다(용량·속도 절약).
+  // 사진은 딱 한 번만 업로드하고, 그 URL을 모든 자산(또는 요청)에 붙인다(용량·속도 절약).
   prog.textContent = "사진 올리는 중…";
   let photoUrl = bulkPhotoData, thumbUrl = "";
   try {
@@ -991,14 +1000,24 @@ async function applyBulkPhoto() {
     photoUrl = bulkPhotoData; // 업로드 실패 시 base64로라도 적용
   }
   let done = 0, failed = 0;
-  for (const id of ids) {
-    prog.textContent = `적용 중… ${done + failed + 1}/${ids.length}`;
+  for (const a of targets) {
+    const id = String(a.id);
+    prog.textContent = `${isAdmin ? "적용" : "요청"} 중… ${done + failed + 1}/${ids.length}`;
     try {
-      const a = findAsset(id);
-      const existing = a ? photosOf(a).filter((u) => u && u !== photoUrl) : [];
+      const existing = photosOf(a).filter((u) => u && u !== photoUrl);
       const merged = replace ? [photoUrl] : [photoUrl, ...existing].slice(0, MAX_PHOTOS);
-      // 이미 URL이므로 재업로드 없음. 대표사진·썸네일도 함께 지정.
-      await applyUpdate(id, { imageUrls: merged, imageUrl: photoUrl, thumbUrl: thumbUrl || "" }, { note: "사진 일괄 적용" });
+      const fields = { imageUrls: merged, imageUrl: photoUrl, thumbUrl: thumbUrl || "" };
+      if (isAdmin) {
+        // 이미 URL이므로 재업로드 없음. 대표사진·썸네일도 함께 지정.
+        await applyUpdate(id, fields, { note: "사진 일괄 적용" });
+      } else {
+        // 비관리자: 자산별 '수정 요청'으로 접수 → 관리자 승인 시 반영
+        await submitRequest({
+          action: "update", target_id: id,
+          payload: { ...fields, assetName: a.assetName, assetNumber: a.assetNumber },
+          note: "사진 일괄 적용 요청",
+        });
+      }
       done++;
     } catch (e) { console.error("사진 일괄 적용 실패:", id, e); failed++; }
   }
@@ -1006,7 +1025,8 @@ async function applyBulkPhoto() {
   hide("bulkPhotoOverlay");
   bulkPhotoData = "";
   await reloadAll(); rerender();
-  alert(`사진 일괄 적용 완료: ${done}건${failed ? ` · ${failed}건 실패` : ""}`);
+  if (isAdmin) alert(`사진 일괄 적용 완료: ${done}건${failed ? ` · ${failed}건 실패` : ""}`);
+  else alert(`사진 일괄 적용 요청 접수: ${done}건${failed ? ` · ${failed}건 실패` : ""}. 관리자 승인 후 반영됩니다.`);
 }
 function renderPagination() {
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
