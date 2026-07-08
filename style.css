@@ -1565,6 +1565,10 @@ body { max-width: 100%; overflow-x: hidden; }
 .batch-row.b-dup { border-color: #fed7aa; background: #fff7ed; }
 .batch-row.b-err { border-color: #fecaca; background: #fef2f2; }
 .batch-row.b-done { border-color: #93c5fd; background: #eff6ff; }
+/* 이미 올린 사진 — 노란색으로 뚜렷하게 */
+.batch-row.b-same { border-color: #fde047; background: #fefce8; }
+.batch-row.b-same .batch-badge { background: #fef08a; color: #854d0e; }
+.batch-row.b-same .batch-thumb { border-color: #fde047; }
 .batch-thumb {
   width: 46px; height: 46px;
   flex-shrink: 0;
@@ -1626,6 +1630,7 @@ body { max-width: 100%; overflow-x: hidden; }
 .batch-actions .btn { flex: 1; }
 .batch-apply-btn { font-size: 15px; padding: 12px 10px; font-weight: 700; }
 .batch-apply-btn:disabled { opacity: 0.5; }
+.batch-done-msg { flex: 1; font-size: 13.5px; color: #047857; font-weight: 600; line-height: 1.4; }
 @media (max-width: 560px) {
   .batch-filters { grid-template-columns: 1fr; }
   .batch-fields { grid-template-columns: 1fr; }

@@ -1800,7 +1800,8 @@ let batchItems = [];       // { name, photoData, code, asset, status, overwrite 
 let batchProcessing = false;
 let batchFileSigs = new Set(); // 이미 올린 사진(파일) 식별자 — 같은 사진을 다시 고르면 '이미 올린 사진'으로 표시
 let batchRunTotal = 0, batchRunDone = 0; // 이번 업로드 진행률(인식 X/Y)
-let batchApplyMsg = ""; // 저장 진행 중 안내(‘검수 저장 중… x/y’)
+let batchApplyMsg = ""; // 저장 진행 중/완료 안내(‘검수 저장 중… x/y’, ‘완료’)
+let batchDone = false;  // 검수 신청/완료가 끝났는지 — 끝나도 창은 열어두고 결과를 보여준다
 // 지금 메뉴 + (선택)위치·자산명으로 좁힌 매칭 후보 풀. 필터 결과가 비면 메뉴 전체로 되돌린다.
 function buildInspectPool(locStr, nameStr) {
   const g = currentGroup;
@@ -1836,6 +1837,7 @@ function openBatchInspect() {
   batchProcessing = false;
   batchSuppressScan = false;
   batchApplyMsg = "";
+  batchDone = false;
   batchFileSigs = new Set();
   setScanLoading("", false);
   document.getElementById("batch-location").value = "";
@@ -1862,6 +1864,8 @@ async function handleBatchFiles(files) {
   if (batchProcessing) return;
   batchProcessing = true;
   batchSuppressScan = true;
+  batchDone = false;      // 새 사진을 추가하면 완료 상태 해제 → 완료 버튼 다시 표시
+  batchApplyMsg = "";
   setBatchBusy(true);
   warmupNumberOcr();
   const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
@@ -1920,8 +1924,8 @@ const BATCH_STATUS = {
   matched: { cls: "b-ok", label: "검수 준비됨" },
   dup: { cls: "b-dup", label: "번호 중복" },
   already: { cls: "b-dup", label: "이미 검수됨" },
-  samephoto: { cls: "b-dup", label: "이미 올린 사진" },
-  nomatch: { cls: "b-err", label: "자산 못 찾음" },
+  samephoto: { cls: "b-same", label: "이미 올린 사진" },
+  nomatch: { cls: "b-err", label: "인식 실패" },
   error: { cls: "b-err", label: "인식 실패" },
   done: { cls: "b-done", label: "완료" },
   savefail: { cls: "b-err", label: "저장 실패" },
@@ -1971,6 +1975,10 @@ function renderBatchList() {
 function renderBatchActions() {
   const wrap = document.getElementById("batchActions");
   if (!wrap) return;
+  if (batchDone) { // 신청/완료가 끝난 상태 — 결과만 보여주고 '닫기'로 마무리
+    wrap.innerHTML = `<span class="batch-done-msg">🎉 처리가 끝났습니다. 결과를 확인하고 <b>‘닫기’</b>를 누르세요.</span>`;
+    return;
+  }
   const matchedIds = new Set(), overIds = new Set();
   batchItems.forEach((it) => {
     if (!it.asset) return;
@@ -2001,7 +2009,7 @@ async function retryBatchItem(index) {
   if (batchProcessing) return;
   const it = batchItems[index];
   if (!it || !it.file) return;
-  batchProcessing = true; batchSuppressScan = true; setBatchBusy(true);
+  batchProcessing = true; batchSuppressScan = true; batchDone = false; batchApplyMsg = ""; setBatchBusy(true);
   it.status = "processing"; renderBatchList();
   const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
   const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
@@ -2059,11 +2067,13 @@ async function applyBatchInspect(policy) {
   }
   const reqName = affiliation ? `${inspector} (${affiliation})` : inspector;
   batchProcessing = true;
+  batchDone = false;
   setBatchBusy(true);
-  renderBatchList(); // 완료 버튼 비활성화
+  renderBatchList(); // 완료 버튼 비활성화 + 진행 표시
+  const verb = isAdmin ? "검수" : "검수 신청";
   let ok = 0, fail = 0;
   for (const it of targets) {
-    batchApplyMsg = `💾 검수 저장 중… <b class="batch-prog">${ok + fail + 1}/${targets.length}</b>`;
+    batchApplyMsg = `💾 ${verb} 처리 중… <b class="batch-prog">${ok + fail + 1}/${targets.length}</b>`;
     const summary = document.getElementById("batchInspectSummary");
     if (summary) summary.innerHTML = batchApplyMsg;
     try {
@@ -2083,12 +2093,14 @@ async function applyBatchInspect(policy) {
     }
   }
   batchProcessing = false;
-  batchApplyMsg = "";
+  batchDone = true;
   setBatchBusy(false);
-  hide("batchInspectOverlay");
+  // 창은 닫지 않는다 — 그 자리에서 결과를 보여준다.
+  const doneWord = isAdmin ? "검수 완료" : "검수 신청 완료";
+  batchApplyMsg = `✅ <b class="b-ok-t">${ok}건</b> ${doneWord}${fail ? ` · <b class="b-err-t">${fail}건 실패</b>` : ""}${isAdmin ? "" : " · 관리자 승인 후 반영"}`;
+  renderBatchList();
+  // 뒤 목록/통계는 갱신하되 검수 창은 그대로 열어둔다.
   await reloadAll(); rerender();
-  if (isAdmin) alert(`여러 장 검수 완료: ${ok}건 처리${fail ? ` · ${fail}건 실패` : ""}.`);
-  else alert(`여러 장 검수 요청 접수: ${ok}건 신청${fail ? ` · ${fail}건 실패` : ""}. 관리자 승인 후 반영됩니다.`);
 }
 
 // 인식 텍스트에서 '자산번호(20자리)'와 '취득금액(천단위 숫자)'만 채운다.
