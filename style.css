@@ -1188,6 +1188,24 @@ body {
   align-items: center;
   justify-content: center;
 }
+.insp-extra-rot {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: #0284c7;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#inspPhotoRotateBtn { margin-top: 8px; }
 .insp-extra-hint {
   font-size: 12px;
   color: var(--text-light);

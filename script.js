@@ -1522,6 +1522,26 @@ function resizeDataUrl(dataUrl, max, quality) {
     img.src = dataUrl;
   });
 }
+// 이미지(dataURL)를 시계방향 90도 등으로 회전한 dataURL 반환 (색상 보존)
+function rotateImageDataUrl(dataUrl, deg = 90) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const rot = ((deg % 360) + 360) % 360;
+      const swap = rot === 90 || rot === 270;
+      const w = img.width, h = img.height;
+      const canvas = document.createElement("canvas");
+      canvas.width = swap ? h : w; canvas.height = swap ? w : h;
+      const ctx = canvas.getContext("2d");
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(rot * Math.PI / 180);
+      ctx.drawImage(img, -w / 2, -h / 2);
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
 const MAX_PHOTOS = 8; // 자산당 물품 사진 최대 장수 (저장공간 보호)
 async function handlePhotoUpload(files) {
   const list = Array.from(files || []).filter(Boolean);
@@ -2541,7 +2561,7 @@ function renderInspExtra() {
   const hint = document.getElementById("inspExtraHint");
   if (!grid || !btn) return;
   grid.innerHTML = inspectExtraPhotos.map((src, i) =>
-    `<div class="insp-extra-thumb"><img src="${src}" alt="물품 사진 ${i + 1}" /><button type="button" class="insp-extra-del" data-insp-extra="${i}" title="이 사진 제거">✕</button></div>`
+    `<div class="insp-extra-thumb"><img src="${src}" alt="물품 사진 ${i + 1}" /><button type="button" class="insp-extra-rot" data-insp-rot="${i}" title="이 사진 회전">↻</button><button type="button" class="insp-extra-del" data-insp-extra="${i}" title="이 사진 제거">✕</button></div>`
   ).join("");
   const full = inspectExtraPhotos.length >= INSP_EXTRA_MAX;
   btn.hidden = full;
@@ -3626,9 +3646,26 @@ document.getElementById("inspExtraBtn").addEventListener("click", () => {
   if (input) { input.value = ""; input.click(); }
 });
 document.getElementById("inspExtraInput").addEventListener("change", (e) => { handleInspExtraCapture(e.target.files && e.target.files[0]); });
-document.getElementById("inspExtraPreview").addEventListener("click", (e) => {
+document.getElementById("inspExtraPreview").addEventListener("click", async (e) => {
   const del = e.target.closest("button[data-insp-extra]");
-  if (del) { inspectExtraPhotos.splice(Number(del.dataset.inspExtra), 1); renderInspExtra(); }
+  if (del) { inspectExtraPhotos.splice(Number(del.dataset.inspExtra), 1); renderInspExtra(); return; }
+  const rot = e.target.closest("button[data-insp-rot]");
+  if (rot) {
+    const i = Number(rot.dataset.inspRot);
+    try { inspectExtraPhotos[i] = await rotateImageDataUrl(inspectExtraPhotos[i], 90); renderInspExtra(); } catch (err) { console.error("회전 오류:", err); }
+  }
+});
+// 검수 사진 회전
+document.getElementById("inspPhotoRotateBtn").addEventListener("click", async () => {
+  if (!inspectPhoto) return;
+  const btn = document.getElementById("inspPhotoRotateBtn");
+  btn.disabled = true;
+  try {
+    inspectPhoto = await rotateImageDataUrl(inspectPhoto, 90);
+    const prev = document.getElementById("inspPhotoPreview");
+    if (prev) prev.innerHTML = `<img src="${inspectPhoto}" alt="검수 사진" />`;
+  } catch (err) { console.error("검수 사진 회전 오류:", err); }
+  btn.disabled = false;
 });
 document.getElementById("lightbox").addEventListener("click", closeLightbox);
 
