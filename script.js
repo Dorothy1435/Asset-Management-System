@@ -1540,9 +1540,11 @@ function fileToDataURL(file) {
     reader.readAsDataURL(file);
   });
 }
+let batchSuppressScan = false; // 여러 장 검수 중에는 단일 검수용 큰 로딩 오버레이를 띄우지 않는다(배치 전용 진행률 사용).
 function setScanLoading(msg, show) {
   const el = document.getElementById("scanLoading");
   if (!el) return;
+  if (batchSuppressScan) { el.hidden = true; return; } // 배치 진행 중엔 항상 숨김
   if (msg) { const m = document.getElementById("scanLoadingMsg"); if (m) m.textContent = msg; }
   el.hidden = !show;
 }
@@ -1831,7 +1833,9 @@ function openBatchInspect() {
   if (currentGroup === GROUP_ELEC) { alert("여러 장 검수는 2025·2024년도 자산 메뉴에서 사용할 수 있습니다."); return; }
   batchItems = [];
   batchProcessing = false;
+  batchSuppressScan = false;
   batchFileSigs = new Set();
+  setScanLoading("", false);
   document.getElementById("batch-location").value = "";
   document.getElementById("batch-name").value = "";
   // 검수 회차: 지금 목록에서 보고 있는 회차를 기본값으로
@@ -1855,6 +1859,7 @@ async function handleBatchFiles(files) {
   if (!list.length) { alert("이미지(사진) 파일을 선택해 주세요."); return; }
   if (batchProcessing) return;
   batchProcessing = true;
+  batchSuppressScan = true;
   setBatchBusy(true);
   warmupNumberOcr();
   const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
@@ -1900,6 +1905,8 @@ async function handleBatchFiles(files) {
   }
   batchProcessing = false;
   batchRunTotal = 0;
+  batchSuppressScan = false;
+  setScanLoading("", false); // 혹시 남아있을 단일 검수 오버레이 정리
   setBatchBusy(false);
   renderBatchList();
   if (newDup) {
@@ -1974,7 +1981,7 @@ async function retryBatchItem(index) {
   if (batchProcessing) return;
   const it = batchItems[index];
   if (!it || !it.file) return;
-  batchProcessing = true; setBatchBusy(true);
+  batchProcessing = true; batchSuppressScan = true; setBatchBusy(true);
   it.status = "processing"; renderBatchList();
   const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
   const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
@@ -1994,7 +2001,7 @@ async function retryBatchItem(index) {
     console.error("재시도 인식 오류:", e);
     it.status = "error";
   }
-  batchProcessing = false; setBatchBusy(false); renderBatchList();
+  batchProcessing = false; batchSuppressScan = false; setScanLoading("", false); setBatchBusy(false); renderBatchList();
   if (it.status === "nomatch" || it.status === "error") {
     alert("이 사진은 여전히 자산번호를 인식하지 못했어요.\n\n· 위치·자산명 칸을 채우면 범위가 좁아져 잘 잡혀요\n· 라벨이 크고 반듯하게 나온 사진으로 바꿔 보세요\n· 그래도 안 되면 그 자산은 상세 화면에서 직접 검수하세요.");
   }
