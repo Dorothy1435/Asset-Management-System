@@ -1612,6 +1612,7 @@ body { max-width: 100%; overflow-x: hidden; }
 .batch-retry:hover { background: #fef3c7; }
 #batchInspectOverlay .modal.batch-drag { outline: 3px dashed #0284c7; outline-offset: -8px; background: #f0f9ff; }
 .batch-prog { font-size: 15px; color: #0e7490; }
+#batchRetryAllBtn, #batchRetryRotateBtn { font-size: 13px; padding: 8px 12px; }
 /* 검수 확인자·소속 (완료 버튼 근처) */
 .batch-fields {
   display: grid;

@@ -1377,8 +1377,8 @@ function setOcrStatus(msg, kind) {
   st.textContent = msg;
   st.className = "ocr-status" + (kind ? " ocr-" + kind : "");
 }
-// 인식률을 높이기 위해 그레이스케일 + 대비 보정 후 캔버스로 변환
-function preprocessOcrImage(dataUrl, max, min) {
+// 인식률을 높이기 위해 그레이스케일 + 대비 보정 후 캔버스로 변환. rotate(0/90/180/270)로 회전도 지원.
+function preprocessOcrImage(dataUrl, max, min, rotate = 0) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -1386,14 +1386,18 @@ function preprocessOcrImage(dataUrl, max, min) {
       // max/min 인자로 해상도 조절(1차 저해상도=빠름, 2차 고해상도=정확).
       const MAX = max || 2400, MIN = (min === undefined ? 1800 : min);
       const s = longest > MAX ? MAX / longest : (MIN && longest < MIN ? MIN / longest : 1);
-      const w = Math.round(img.width * s), h = Math.round(img.height * s);
+      const w0 = Math.round(img.width * s), h0 = Math.round(img.height * s);
+      const rot = ((rotate % 360) + 360) % 360;
+      const swap = rot === 90 || rot === 270;
+      const w = swap ? h0 : w0, h = swap ? w0 : h0;   // 90/270도는 가로세로 뒤바뀜
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d");
       // 흑백+대비를 GPU 가속 필터로 처리(픽셀 루프보다 훨씬 빠름). 미지원 브라우저는 수동 처리로 폴백.
       let filtered = false;
       try { ctx.filter = "grayscale(1) contrast(1.35)"; filtered = ctx.filter && ctx.filter !== "none"; } catch {}
-      ctx.drawImage(img, 0, 0, w, h);
+      if (rot) { ctx.save(); ctx.translate(w / 2, h / 2); ctx.rotate(rot * Math.PI / 180); ctx.drawImage(img, -w0 / 2, -h0 / 2, w0, h0); ctx.restore(); }
+      else ctx.drawImage(img, 0, 0, w, h);
       if (!filtered) {
         try {
           const d = ctx.getImageData(0, 0, w, h);
@@ -1710,7 +1714,7 @@ function warmupNumberOcr() { try { getNumberOcrWorker().catch(() => {}); } catch
 // 1차에서 못 맞추면(형식 애매 등) 고해상도 넓은 인식으로 한 번만 정밀 재시도.
 const OCR_WL_DIGIT = "0123456789";
 const OCR_WL_ALNUM = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-";
-async function recognizeAssetNumber(dataUrl, mode, pool) {
+async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
   const alnumMode = mode === "alnum";
   const candidates = [];
   const addFrom = (text) => { extractAssetCodes(text).forEach((c) => { if (!candidates.includes(c)) candidates.push(c); }); };
@@ -1741,11 +1745,28 @@ async function recognizeAssetNumber(dataUrl, mode, pool) {
           try { await worker.setParameters({ tessedit_char_whitelist: OCR_WL_DIGIT }); } catch {}
         }
       }
+      // 회전 재시도(옵션): 사진이 옆으로/거꾸로 찍힌 경우 → 90·270·180도 돌려가며 재시도
+      if (tryRotate && !done()) {
+        try { await worker.setParameters({ tessedit_char_whitelist: alnumMode ? OCR_WL_ALNUM : OCR_WL_DIGIT }); } catch {}
+        for (const deg of [90, 270, 180]) {
+          setScanLoading("사진을 돌려서 다시 확인하는 중…", true);
+          const rimg = await preprocessOcrImage(dataUrl, 2000, 1400, deg);
+          ({ data } = await worker.recognize(rimg));
+          addFrom(data.text); if (alnumMode) tryAlnum(data.text);
+          if (done()) break;
+        }
+      }
     } else {
       const image = await preprocessOcrImage(dataUrl, 2400, 1800);
-      const { data } = await Tesseract.recognize(image, "eng");
-      addFrom(data.text);
-      tryAlnum(data.text);
+      let { data } = await Tesseract.recognize(image, "eng");
+      addFrom(data.text); tryAlnum(data.text);
+      // 회전 재시도(옵션)
+      if (tryRotate) for (const deg of [90, 270, 180]) {
+        if (done()) break;
+        const rimg = await preprocessOcrImage(dataUrl, 2000, 1400, deg);
+        ({ data } = await Tesseract.recognize(rimg, "eng"));
+        addFrom(data.text); tryAlnum(data.text);
+      }
     }
   } catch (e) {
     console.error("자산번호 인식 오류:", e);
@@ -1820,8 +1841,8 @@ function buildInspectPool(locStr, nameStr) {
   return pool.length ? pool : menu;
 }
 // 사진 한 장에서 자산을 인식한다. 풀 우선 매칭 → 실패 시 메뉴 전체로 한 번 더 (필터 오타로 놓치지 않게).
-async function recognizeAssetInPool(dataUrl, mode, pool) {
-  const r = await recognizeAssetNumber(dataUrl, mode, pool);
+async function recognizeAssetInPool(dataUrl, mode, pool, tryRotate = false) {
+  const r = await recognizeAssetNumber(dataUrl, mode, pool, tryRotate);
   if (r && typeof r === "object") return { asset: r, code: r.assetNumber || "" };
   const code = typeof r === "string" ? r : null;
   if (!code) return { asset: null, code: null };
@@ -1970,6 +1991,13 @@ function renderBatchList() {
   const skip = batchItems.filter((it) => (it.status === "dup" || it.status === "already") && !it.overwrite).length;
   const samePhoto = batchItems.filter((it) => it.status === "samephoto").length;
   const readyN = batchItems.filter(batchWillApply).length;
+  // 인식 실패가 있으면 '전체 재시도' / '전체 회전 재시도' 버튼 노출
+  const failN = batchItems.filter((it) => (it.status === "nomatch" || it.status === "error") && it.file).length;
+  const showRetry = failN > 0 && !batchProcessing;
+  const retryAll = document.getElementById("batchRetryAllBtn");
+  const retryRot = document.getElementById("batchRetryRotateBtn");
+  if (retryAll) { retryAll.hidden = !showRetry; retryAll.textContent = `↻ 전체 재시도 (${failN})`; }
+  if (retryRot) { retryRot.hidden = !showRetry; retryRot.textContent = `🔄 전체 회전 재시도 (${failN})`; }
   if (summary) {
     if (batchProcessing && batchRunTotal) {
       summary.innerHTML = `🔎 인식 중… <b class="batch-prog">${Math.min(batchRunDone + 1, batchRunTotal)}/${batchRunTotal}</b>`;
@@ -2016,35 +2044,60 @@ function setBatchBusy(busy) {
   if (pick) pick.disabled = busy;
   if (spin) spin.hidden = !busy;
 }
-// 인식 실패 사진 다시 인식 (보관해 둔 원본 파일로 재시도. 위치·자산명 필터를 고쳤다면 그 값으로 다시 시도)
-async function retryBatchItem(index) {
+// 한 항목(사진)을 원본 파일로 인식해 상태를 채운다. (업로드/재시도 공용)
+async function recognizeIntoItem(item, mode, pool, period, tryRotate = false) {
+  const raw = await fileToDataURL(item.file);
+  if (!item.thumb) { try { item.thumb = await resizeDataUrl(raw, 160, 0.5); } catch {} }
+  const { asset, code } = await recognizeAssetInPool(raw, mode, pool, tryRotate);
+  item.code = code || null;
+  if (!asset) { item.status = "nomatch"; return; }
+  item.asset = asset;
+  item.photoData = await compressImage(item.file, 900, 0.6); // 검수 증빙 사진(압축)
+  item.status = classifyBatchItem(item, asset, period);
+}
+// 현재 위치·자산명·회차 기준 인식 설정
+function currentBatchScan() {
+  return {
+    mode: currentGroup === GROUP_PAST ? "alnum" : "digit",
+    pool: buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value),
+    period: document.getElementById("batch-period").value,
+  };
+}
+// 인식 실패 사진 한 장 다시 인식 (위치·자산명 필터를 고쳤다면 그 값으로 다시 시도)
+async function retryBatchItem(index, tryRotate = false) {
   if (batchProcessing) return;
   const it = batchItems[index];
   if (!it || !it.file) return;
   batchProcessing = true; batchSuppressScan = true; batchDone = false; batchApplyMsg = ""; setBatchBusy(true);
   it.status = "processing"; renderBatchList();
-  const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
-  const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
-  const period = document.getElementById("batch-period").value;
-  try {
-    const raw = await fileToDataURL(it.file);
-    if (!it.thumb) { try { it.thumb = await resizeDataUrl(raw, 160, 0.5); } catch {} }
-    const { asset, code } = await recognizeAssetInPool(raw, mode, pool);
-    it.code = code || null;
-    if (!asset) { it.status = "nomatch"; }
-    else {
-      it.asset = asset;
-      it.photoData = await compressImage(it.file, 900, 0.6);
-      it.status = classifyBatchItem(it, asset, period);
-    }
-  } catch (e) {
-    console.error("재시도 인식 오류:", e);
-    it.status = "error";
-  }
-  batchProcessing = false; batchSuppressScan = false; setScanLoading("", false); setBatchBusy(false); renderBatchList();
+  const { mode, pool, period } = currentBatchScan();
+  try { await recognizeIntoItem(it, mode, pool, period, tryRotate); }
+  catch (e) { console.error("재시도 인식 오류:", e); it.status = "error"; }
+  finally { batchProcessing = false; batchSuppressScan = false; setScanLoading("", false); setBatchBusy(false); renderBatchList(); }
   if (it.status === "nomatch" || it.status === "error") {
-    alert("이 사진은 여전히 자산번호를 인식하지 못했어요.\n\n· 위치·자산명 칸을 채우면 범위가 좁아져 잘 잡혀요\n· 라벨이 크고 반듯하게 나온 사진으로 바꿔 보세요\n· 그래도 안 되면 그 자산은 상세 화면에서 직접 검수하세요.");
+    alert("이 사진은 여전히 자산번호를 인식하지 못했어요.\n\n· 위치·자산명 칸을 채우면 범위가 좁아져 잘 잡혀요\n· 옆으로 찍혔다면 ‘🔄 회전 재시도’를 눌러 보세요\n· 그래도 안 되면 그 자산은 상세 화면에서 직접 검수하세요.");
   }
+}
+// 인식 실패한 사진들만 한 번에 모두 다시 인식. tryRotate=true면 90·180·270도 회전까지 시도.
+async function retryAllFailed(tryRotate = false) {
+  if (batchProcessing) return;
+  const fails = batchItems.filter((it) => (it.status === "nomatch" || it.status === "error") && it.file);
+  if (!fails.length) return;
+  batchProcessing = true; batchSuppressScan = true; batchDone = false; batchApplyMsg = ""; setBatchBusy(true);
+  const { mode, pool, period } = currentBatchScan();
+  batchRunTotal = fails.length; batchRunDone = 0;
+  try {
+    for (const it of fails) {
+      it.status = "processing"; renderBatchList();
+      try { await recognizeIntoItem(it, mode, pool, period, tryRotate); }
+      catch (e) { console.error("일괄 재시도 오류:", e); it.status = "error"; }
+      batchRunDone++; renderBatchList();
+    }
+  } finally {
+    batchProcessing = false; batchRunTotal = 0; batchSuppressScan = false; setScanLoading("", false); setBatchBusy(false); renderBatchList();
+  }
+  const still = batchItems.filter((it) => it.status === "nomatch" || it.status === "error").length;
+  if (still) alert(`아직 ${still}장은 인식되지 않았어요.\n${tryRotate ? "" : "옆으로 찍힌 사진이면 ‘🔄 전체 회전 재시도’를 눌러 보세요.\n"}위치·자산명 칸을 채우고 다시 시도하거나, 그 자산은 상세 화면에서 직접 검수하세요.`);
 }
 // 목록의 사진을 크게 확대해 확인 (원본 파일에서 즉석 생성 → 메모리 절약)
 async function previewBatchItem(index) {
@@ -2090,11 +2143,11 @@ async function applyBatchInspect(policy) {
     if (summary) summary.innerHTML = batchApplyMsg;
     try {
       if (isAdmin) {
-        await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [] });
+        await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: true });
       } else {
         await submitRequest({
           action: "inspect", target_id: it.asset.id,
-          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], assetName: it.asset.assetName, assetNumber: it.asset.assetNumber },
+          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: true, assetName: it.asset.assetName, assetNumber: it.asset.assetNumber },
           requester: reqName, note: `${period} 검수 확인 · 여러 장 검수`,
         });
       }
@@ -2371,7 +2424,7 @@ async function writeInspections(id, list, photoFields) {
   const { error } = await sb.from("assets").upsert({ id: String(id), kind, data, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
-async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos }, meta = {}) {
+async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos, label }, meta = {}) {
   const current = findAsset(id);
   if (!current) throw new Error("자산 없음");
   // 검수 사진은 Storage에 올리고 DB에는 URL만 저장한다.
@@ -2383,17 +2436,29 @@ async function applyInspect(id, { periodType, period, inspector, affiliation, ph
   }
   const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", photo: photoStored || "", checkedAt: new Date().toISOString() };
   const list = Array.isArray(current.inspections) ? [...current.inspections, insp] : [insp];
+  let mediaFields = {};
   // 이어 찍은 물품 사진(최대 3장)이 있으면 기존 자산 사진 뒤에 병합해 함께 저장
   const extra = Array.isArray(photos) ? photos.filter(Boolean) : [];
-  let photoFields = null;
-  if (extra.length) {
-    const merged = [...photosOf(current), ...extra];
-    photoFields = await withUploadedMedia({ imageUrls: merged });
+  if (extra.length) mediaFields.imageUrls = [...photosOf(current), ...extra];
+  // 검수한 라벨 사진을 자산의 '라벨 파일'로도 저장.
+  // label === true 이면 '검수 사진을 라벨로도 사용'(요청 payload에 사진을 중복 저장하지 않기 위함).
+  const labelImg = label === true ? (photoStored || photo) : label;
+  if (labelImg) {
+    const sameAsPhoto = (label === true) || (labelImg === photo);
+    mediaFields.labelFile = (sameAsPhoto && photoStored && !photoStored.startsWith("data:")) ? photoStored : labelImg;
+    // 미리보기는 base64 원본에서 생성(Storage URL로 만들면 캔버스가 오염돼 실패할 수 있음)
+    const previewSrc = label === true ? photo : labelImg;
+    try { mediaFields.labelPreview = (previewSrc && previewSrc.startsWith("data:")) ? await resizeDataUrl(previewSrc, 640, 0.6) : ""; }
+    catch { mediaFields.labelPreview = ""; }
+    mediaFields.labelFileName = `${(current.assetName || "asset")}_라벨.jpg`;
   }
+  // withUploadedMedia: base64는 Storage 업로드 후 URL로, 이미 URL이면 그대로 둔다.
+  let photoFields = Object.keys(mediaFields).length ? await withUploadedMedia(mediaFields) : null;
   await writeInspections(id, list, photoFields);
   const who = inspector + (affiliation ? ` (${affiliation})` : "");
   const photoNote = extra.length ? ` · 물품사진 ${extra.length}장 추가` : "";
-  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${period} · 확인자: ${who}${photoNote}` });
+  const labelNote = label ? " · 라벨 저장" : "";
+  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${period} · 확인자: ${who}${photoNote}${labelNote}` });
 }
 async function removeInspection(assetId, inspId) {
   const current = findAsset(assetId);
@@ -3178,6 +3243,8 @@ document.getElementById("batchPickBtn").addEventListener("click", () => {
   if (input) { input.value = ""; input.click(); }
 });
 document.getElementById("batchInspectInput").addEventListener("change", (e) => { handleBatchFiles(e.target.files); });
+document.getElementById("batchRetryAllBtn").addEventListener("click", () => retryAllFailed(false));
+document.getElementById("batchRetryRotateBtn").addEventListener("click", () => retryAllFailed(true));
 document.getElementById("batchActions").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-batch-apply]");
   if (b) applyBatchInspect(b.dataset.batchApply);
