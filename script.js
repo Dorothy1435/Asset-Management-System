@@ -699,6 +699,7 @@ function updateUI() {
   badge.hidden = n === 0;
 
   g("addBtn").textContent = isAdmin ? "+ 자산 등록" : "+ 자산 등록 요청";
+  const bpb = g("bulkPhotoBtn"); if (bpb) bpb.hidden = !isAdmin; // 검색결과 사진 일괄 적용(관리자)
 
   const notice = g("userNotice");
   if (isAdmin) notice.hidden = true;
@@ -935,6 +936,77 @@ async function applyBulkEdit() {
   selectedIds.clear();
   await reloadAll(); rerender();
   alert(`일괄 수정 완료: ${done}건 적용${failed ? `, ${failed}건 실패` : ""}`);
+}
+// ===== 검색결과에 사진 1장 일괄 적용 (관리자) =====
+let bulkPhotoData = ""; // 선택한 사진(base64)
+function openBulkPhoto() {
+  if (!isAdmin) return;
+  if (!filtered.length) { alert("먼저 상세 필터·검색으로 자산을 찾은 뒤 사용하세요."); return; }
+  bulkPhotoData = "";
+  document.getElementById("bulkPhotoError").hidden = true;
+  document.getElementById("bulkPhotoProgress").hidden = true;
+  document.getElementById("bulkPhotoReplace").checked = false;
+  document.getElementById("bulkPhotoInput").value = "";
+  document.getElementById("bulkPhotoPreview").innerHTML = "";
+  document.getElementById("bulkPhotoApply").disabled = true;
+  document.getElementById("bulkPhotoTarget").innerHTML = `현재 <b>${filtered.length}개</b>의 검색된 자산에 사진 1장을 적용합니다.`;
+  show("bulkPhotoOverlay");
+}
+async function handleBulkPhotoPick(file) {
+  if (!file) return;
+  if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
+  try {
+    bulkPhotoData = await compressImage(file, 1000, 0.65);
+    document.getElementById("bulkPhotoPreview").innerHTML = `<img src="${bulkPhotoData}" alt="선택한 사진" />`;
+    updateBulkPhotoApply();
+  } catch (e) {
+    console.error("사진 처리 오류:", e);
+    alert("사진 처리 중 문제가 발생했습니다. 다시 시도해 주세요.");
+  }
+}
+function updateBulkPhotoApply() {
+  const btn = document.getElementById("bulkPhotoApply");
+  btn.disabled = !bulkPhotoData;
+  btn.textContent = `✅ ${filtered.length}개에 적용`;
+}
+async function applyBulkPhoto() {
+  if (!isAdmin || !bulkPhotoData) return;
+  const ids = filtered.map((a) => String(a.id));
+  if (!ids.length) return;
+  const replace = document.getElementById("bulkPhotoReplace").checked;
+  if (!confirm(`검색된 ${ids.length}개 자산에 이 사진을 ${replace ? "‘이 사진만’으로 덮어씁니다" : "대표 사진으로 추가합니다"}.\n계속할까요?`)) return;
+  const errEl = document.getElementById("bulkPhotoError");
+  const prog = document.getElementById("bulkPhotoProgress");
+  const btn = document.getElementById("bulkPhotoApply");
+  errEl.hidden = true;
+  btn.disabled = true; prog.hidden = false;
+  // 사진은 딱 한 번만 업로드하고, 그 URL을 모든 자산에 붙인다(용량·속도 절약).
+  prog.textContent = "사진 올리는 중…";
+  let photoUrl = bulkPhotoData, thumbUrl = "";
+  try {
+    photoUrl = await uploadMedia(bulkPhotoData, "photos");
+    try { thumbUrl = await uploadMedia(await resizeDataUrl(bulkPhotoData, 240, 0.55), "thumbs"); } catch {}
+  } catch (e) {
+    console.warn("사진 업로드 실패 — base64로 진행:", e?.message || e);
+    photoUrl = bulkPhotoData; // 업로드 실패 시 base64로라도 적용
+  }
+  let done = 0, failed = 0;
+  for (const id of ids) {
+    prog.textContent = `적용 중… ${done + failed + 1}/${ids.length}`;
+    try {
+      const a = findAsset(id);
+      const existing = a ? photosOf(a).filter((u) => u && u !== photoUrl) : [];
+      const merged = replace ? [photoUrl] : [photoUrl, ...existing].slice(0, MAX_PHOTOS);
+      // 이미 URL이므로 재업로드 없음. 대표사진·썸네일도 함께 지정.
+      await applyUpdate(id, { imageUrls: merged, imageUrl: photoUrl, thumbUrl: thumbUrl || "" }, { note: "사진 일괄 적용" });
+      done++;
+    } catch (e) { console.error("사진 일괄 적용 실패:", id, e); failed++; }
+  }
+  btn.disabled = false;
+  hide("bulkPhotoOverlay");
+  bulkPhotoData = "";
+  await reloadAll(); rerender();
+  alert(`사진 일괄 적용 완료: ${done}건${failed ? ` · ${failed}건 실패` : ""}`);
 }
 function renderPagination() {
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
@@ -3192,6 +3264,11 @@ document.getElementById("bulkEditForm").addEventListener("change", (e) => {
   const input = document.getElementById("bulk-" + c.dataset.bulk);
   if (input) { input.disabled = !c.checked; if (c.checked) input.focus(); }
 });
+// 검색결과에 사진 일괄 적용
+document.getElementById("bulkPhotoBtn").addEventListener("click", openBulkPhoto);
+document.getElementById("bulkPhotoPickBtn").addEventListener("click", () => { const i = document.getElementById("bulkPhotoInput"); i.value = ""; i.click(); });
+document.getElementById("bulkPhotoInput").addEventListener("change", (e) => handleBulkPhotoPick(e.target.files && e.target.files[0]));
+document.getElementById("bulkPhotoApply").addEventListener("click", applyBulkPhoto);
 
 document.getElementById("assetTbody").addEventListener("click", (e) => {
   const thumb = e.target.closest("img.thumb");
@@ -3403,7 +3480,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "bulkPhotoOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
 // 배경(어두운 부분) 클릭 시 닫기 — 단, 여러 장 검수 창은 실수로 닫히면 인식한 사진이 날아가므로 제외(‘닫기’ 버튼으로만)
 document.querySelectorAll(".modal-overlay").forEach((ov) => ov.addEventListener("click", (e) => { if (e.target === ov && ov.id !== "batchInspectOverlay") ov.hidden = true; }));

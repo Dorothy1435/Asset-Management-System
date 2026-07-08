@@ -142,6 +142,7 @@
         </div>
       </div>
       <button class="btn btn-secondary" id="advReset">필터 초기화</button>
+      <button class="btn btn-primary" id="bulkPhotoBtn" hidden>📷 검색결과에 사진 일괄 적용</button>
     </section>
 
     <div class="bulk-bar" id="bulkBar" hidden>
@@ -625,6 +626,32 @@
       </div>
       <div class="modal-footer">
         <div class="batch-actions" id="batchActions"></div>
+        <button class="btn btn-secondary" data-close>닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 검색결과에 사진 일괄 적용 -->
+  <div class="modal-overlay" id="bulkPhotoOverlay" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>사진 일괄 적용</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="del-target" id="bulkPhotoTarget"></p>
+        <div class="bulkphoto-pick">
+          <input type="file" id="bulkPhotoInput" accept="image/*" hidden />
+          <button type="button" class="btn btn-primary" id="bulkPhotoPickBtn">🖼️ 사진 선택</button>
+          <div class="bulkphoto-preview" id="bulkPhotoPreview"></div>
+        </div>
+        <label class="bulkphoto-check"><input type="checkbox" id="bulkPhotoReplace" /> 기존 물품 사진은 모두 지우고 이 사진만 넣기</label>
+        <p class="form-info">체크하지 않으면 이 사진이 <b>대표 사진</b>으로 맨 앞에 추가되고 기존 사진은 유지됩니다.</p>
+        <p class="form-error" id="bulkPhotoError" hidden></p>
+        <p class="form-info" id="bulkPhotoProgress" hidden></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="bulkPhotoApply" disabled>✅ 적용</button>
         <button class="btn btn-secondary" data-close>닫기</button>
       </div>
     </div>

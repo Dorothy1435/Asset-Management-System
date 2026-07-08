@@ -1632,6 +1632,13 @@ body { max-width: 100%; overflow-x: hidden; }
 .batch-apply-btn { font-size: 15px; padding: 12px 10px; font-weight: 700; }
 .batch-apply-btn:disabled { opacity: 0.5; }
 .batch-done-msg { flex: 1; font-size: 13.5px; color: #047857; font-weight: 600; line-height: 1.4; }
+/* 검색결과 사진 일괄 적용 */
+.bulkphoto-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; margin: 6px 0 14px; }
+.bulkphoto-preview:empty { display: none; }
+.bulkphoto-preview img { max-width: 100%; max-height: 240px; border-radius: 10px; border: 1px solid var(--border); }
+.bulkphoto-check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; cursor: pointer; }
+#bulkPhotoBtn { width: 100%; margin-top: 4px; }
+@media (min-width: 561px) { #bulkPhotoBtn { width: auto; } }
 @media (max-width: 560px) {
   .batch-filters { grid-template-columns: 1fr; }
   .batch-fields { grid-template-columns: 1fr; }
