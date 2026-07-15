@@ -2016,16 +2016,21 @@ function openBatchInspect() {
   const bAffil = document.getElementById("batch-affil");
   bAffil.innerHTML = deptOptionsHtml(affil);
   bAffil.value = affil;
-  document.getElementById("batchInspectTitle").textContent = isAdmin ? "여러 장 검수" : "여러 장 검수 요청";
+  document.getElementById("batchInspectTitle").textContent = isAdmin ? "라벨 여러 장 검수" : "라벨 여러 장 검수 요청";
+  const lead = document.getElementById("batchLead");
+  if (lead) lead.innerHTML = "<b>라벨 사진</b>을 여러 장 한꺼번에 올리면 각 사진의 자산번호를 인식해 한 번에 검수합니다. 한 곳에서 모아 찍었다면 아래 <b>위치·자산명</b>을 넣어 범위를 좁히면 더 정확합니다.";
   const note = document.getElementById("batchInspectNote");
   if (note) note.hidden = isAdmin;
   renderBatchList();
   show("batchInspectOverlay");
   return true;
 }
-// '📄 PDF 검수' 버튼 → 검수 창을 열고 곧바로 PDF 파일 선택창을 띄운다 (사용자 클릭 제스처 안에서 호출)
+// '📄 자산 등록 PDF 검수' 버튼 → 검수 창을 열고(제목·안내를 PDF용으로 바꾼 뒤) 곧바로 PDF 파일 선택창을 띄운다.
 function openPdfInspect() {
   if (!openBatchInspect()) return;               // 로그인·메뉴 확인 실패 시 중단
+  document.getElementById("batchInspectTitle").textContent = isAdmin ? "자산 등록 PDF 검수" : "자산 등록 PDF 검수 요청";
+  const lead = document.getElementById("batchLead");
+  if (lead) lead.innerHTML = "<b>자산 등록 PDF</b>(자산코드·위치 표)를 올리면 코드와 위치를 함께 인식해 한 번에 검수합니다. 등록 안 된 코드는 <b>‘미등록 코드’</b>로 표시되니 재확인하세요. 검수하면 <b>위치도 함께 저장</b>됩니다.";
   const input = document.getElementById("batchPdfInput");
   if (input) { input.value = ""; input.click(); }
 }
@@ -2137,24 +2142,38 @@ async function extractPdfText(dataUrl, onProgress) {
   try { pdf.destroy && pdf.destroy(); } catch {}
   return out;
 }
-// 일반 텍스트(PDF 추출본)에서 자산번호 후보를 뽑는다. 토큰 단위(가장 정확) + 줄 단위(조각난 코드 복구) 병행.
-function extractCodesFromPlainText(text) {
-  const codes = new Set();
-  // 1) 토큰 단위: 공백으로 나눈 각 토큰에서 구분자만 제거 후 형식 확인 (인접 숫자와 섞이지 않아 정확)
-  String(text || "").split(/\s+/).forEach((tok) => {
-    const digits = tok.replace(/[.\-]/g, "");
-    if (/^\d{16,24}$/.test(digits)) codes.add(digits);                 // 20자리 숫자형 자산코드
-    const up = tok.toUpperCase().replace(/[.]/g, "");
-    if (/^[A-Z0-9\-]{6,}$/.test(up) && /[A-Z]/.test(up) && /\d/.test(up)) codes.add(up); // 2024 문자+숫자형(G20250019-0001 등)
-  });
-  // 2) 줄 단위(공백 제거 후 정확히 20자리만): 숫자가 조각나 있던 코드를 복구. 병합 오탐을 줄이려 20자리로 한정.
-  String(text || "").split(/[\r\n]+/).forEach((line) => {
-    const m = line.replace(/[.\s\-]/g, "").match(/\d{20}/g);
-    if (m) m.forEach((c) => codes.add(c));
-  });
-  return [...codes];
+// PDF 표의 한 줄에서 '자산코드'와 '위치'를 함께 뽑는다.
+//  · 코드: 숫자형 16~24자리(내부 .- 허용) 우선, 없으면 문자+숫자형(G20250019-0001)
+//  · 위치: 그 줄에서 코드 부분을 뺀 나머지(한글·영어·숫자 무엇이든). 표 두 칸이 공백으로 붙어 나옴.
+function parsePdfRow(line) {
+  const raw = String(line || "").trim();
+  if (!raw) return null;
+  let code = null, span = null;
+  const digitMatches = raw.match(/\d[\d.\-]{14,26}/g) || [];   // 셀 안 코드는 공백 없이 붙어 있음
+  for (const dm of digitMatches) {
+    const d = dm.replace(/[.\-]/g, "");
+    if (d.length >= 16 && d.length <= 24) { code = d; span = dm; break; }
+  }
+  if (!code) {
+    const am = raw.match(/[A-Za-z][A-Za-z0-9\-]{5,}/g) || [];
+    for (const a of am) { const up = a.toUpperCase(); if (/[A-Z]/.test(up) && /\d/.test(up)) { code = up.replace(/[^A-Z0-9\-]/g, ""); span = a; break; } }
+  }
+  if (!code) return null;
+  const location = raw.replace(span, " ").replace(/\s+/g, " ").trim(); // 코드 뺀 나머지 = 위치
+  return { code, location };
 }
-// PDF 파일 하나를 읽어 자산번호를 인식하고, 매칭된 자산을 검수 목록(batchItems)에 추가한다.
+// PDF 추출 텍스트를 줄 단위로 훑어 {code, location} 목록을 만든다. 같은 코드가 여러 번이면 위치가 있는 행을 우선.
+function extractPdfRows(text) {
+  const map = new Map();
+  String(text || "").split(/[\r\n]+/).forEach((line) => {
+    const row = parsePdfRow(line);
+    if (!row) return;
+    const prev = map.get(row.code);
+    if (!prev || (!prev.location && row.location)) map.set(row.code, row);
+  });
+  return [...map.values()];
+}
+// 자산 등록 PDF 파일 하나를 읽어 '자산코드+위치'를 인식하고, 매칭 자산을 검수 목록(batchItems)에 추가한다.
 async function handlePdfInspect(file) {
   if (!file) return;
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
@@ -2166,7 +2185,8 @@ async function handlePdfInspect(file) {
   setBatchBusy(true);
   const summary = document.getElementById("batchInspectSummary");
   if (summary) summary.innerHTML = "📄 PDF를 여는 중…";
-  let matchN = 0, unmatched = 0, codeCount = 0;
+  let matchN = 0, codeCount = 0;
+  const unmatchedCodes = [];   // 등록 안 된(일치 자산 없는) 코드 — 사용자에게 그대로 알려준다
   try {
     const dataUrl = await fileToDataURL(file);
     const text = await extractPdfText(dataUrl, (p, n) => {
@@ -2175,37 +2195,43 @@ async function handlePdfInspect(file) {
     if (scanCancelRequested) return;
     const period = document.getElementById("batch-period").value;
     const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
-    const codes = extractCodesFromPlainText(text);
-    codeCount = codes.length;
+    const rows = extractPdfRows(text);
+    codeCount = rows.length;
     const addedIds = new Set(batchItems.filter((it) => it.asset).map((it) => String(it.asset.id)));
-    const nomatch = [];
-    for (const code of codes) {
+    for (const { code, location } of rows) {
       const asset = findAssetByNumber(code, pool) || findAsset2024ByCode(code, pool)
                  || findAssetByNumber(code) || findAsset2024ByCode(code);
-      if (!asset) { nomatch.push(code); continue; }
+      if (!asset) { unmatchedCodes.push(code); continue; }
       if (addedIds.has(String(asset.id))) continue; // 이미 목록에 있는 자산은 건너뜀
       addedIds.add(String(asset.id));
-      const item = { name: asset.assetNumber, file: null, thumb: "", photoData: "", code, asset, status: "matched", overwrite: false, fromPdf: true };
+      const item = { name: asset.assetNumber, file: null, thumb: "", photoData: "", code, asset, status: "matched", overwrite: false, fromPdf: true, pdfLocation: location || "" };
       item.status = classifyBatchItem(item, asset, period);
       batchItems.push(item);
       matchN++;
     }
-    // 일치하는 자산을 못 찾은 번호도 보이도록 목록에 추가(최대 500개) — 어떤 번호가 빠졌는지 확인용
-    nomatch.slice(0, 500).forEach((code) => {
-      batchItems.push({ name: code, file: null, thumb: "", photoData: "", code, asset: null, status: "nomatch", overwrite: false, fromPdf: true });
+    // 등록 안 된 코드도 목록에 그대로 보여준다(어떤 코드가 미등록인지 재확인용). 최대 500개.
+    unmatchedCodes.slice(0, 500).forEach((code) => {
+      const loc = (rows.find((r) => r.code === code) || {}).location || "";
+      batchItems.push({ name: code, file: null, thumb: "", photoData: "", code, asset: null, status: "nomatch", overwrite: false, fromPdf: true, pdfLocation: loc });
     });
-    unmatched = nomatch.length;
   } catch (e) {
     console.error("PDF 검수 처리 오류:", e);
-    if (!scanCancelRequested) alert("PDF를 읽는 중 문제가 발생했습니다.\n텍스트가 들어있는 PDF인지 확인해 주세요. (스캔한 이미지 PDF는 글자를 읽을 수 없습니다 — 이 경우 사진 검수를 이용하세요.)");
+    if (!scanCancelRequested) alert("PDF를 읽는 중 문제가 발생했습니다.\n텍스트가 들어있는 PDF인지 확인해 주세요. (스캔한 이미지 PDF는 글자를 읽을 수 없습니다 — 이 경우 라벨 사진 검수를 이용하세요.)");
   } finally {
     batchProcessing = false; batchRunTotal = 0; batchSuppressScan = false; setBatchBusy(false); renderBatchList();
   }
   if (scanCancelRequested) return;
   if (!codeCount) {
-    alert("PDF에서 자산번호를 찾지 못했습니다.\n\n· 표에 자산번호(20자리)가 글자로 들어있는 PDF인지 확인하세요.\n· 스캔한 이미지 PDF라면 글자를 읽을 수 없습니다 — ‘사진 선택’으로 라벨을 촬영해 검수하세요.");
+    alert("PDF에서 자산코드를 찾지 못했습니다.\n\n· 표 ‘자산 코드’ 칸에 코드(20자리 등)가 글자로 들어있는 PDF인지 확인하세요.\n· 스캔한 이미지 PDF라면 글자를 읽을 수 없습니다 — 라벨 사진 검수를 이용하세요.");
   } else {
-    alert(`📄 PDF에서 자산번호 ${codeCount}개를 읽었습니다.\n\n· 검수 대상으로 찾음: ${matchN}건${unmatched ? `\n· 일치하는 자산을 못 찾은 번호: ${unmatched}개` : ""}\n\n아래 목록에서 확인 후 하단의 ‘검수 완료’ 버튼을 누르세요.`);
+    // 등록 안 된 코드가 있으면 어떤 코드인지 목록으로 보여준다(재확인).
+    let msg = `📄 자산 등록 PDF에서 자산코드 ${codeCount}개를 읽었습니다.\n\n· 검수 대상으로 찾음: ${matchN}건`;
+    if (unmatchedCodes.length) {
+      const shown = unmatchedCodes.slice(0, 30).join("\n");
+      msg += `\n\n⚠️ 등록되지 않은(일치 자산 없는) 코드 ${unmatchedCodes.length}개 — 재확인 필요:\n${shown}${unmatchedCodes.length > 30 ? `\n… 외 ${unmatchedCodes.length - 30}개 (목록의 ‘미등록 코드’ 참고)` : ""}`;
+    }
+    msg += `\n\n위치까지 확인한 뒤, 회차를 고르고 하단의 ‘검수 완료’를 누르세요. (검수와 함께 위치도 저장됩니다)`;
+    alert(msg);
   }
 }
 const BATCH_STATUS = {
@@ -2235,13 +2261,17 @@ function renderBatchList() {
       const failed = it.status === "nomatch" || it.status === "error";
       const s = BATCH_STATUS[it.status] || BATCH_STATUS.processing;
       const src = it.thumb || it.photoData;
-      const thumb = src ? `<img src="${src}" alt="" />` : `<span class="batch-thumb-ph">${it.status === "processing" ? "…" : "🏷️"}</span>`;
-      const title = it.asset ? esc(it.asset.assetName) : (it.code ? `인식: ${esc(it.code)}` : "인식되지 않음");
-      const sub = it.asset ? esc(it.asset.assetNumber) : esc(it.name);
+      const thumb = src ? `<img src="${src}" alt="" />` : `<span class="batch-thumb-ph">${it.status === "processing" ? "…" : (it.fromPdf ? "📄" : "🏷️")}</span>`;
+      // PDF 검수: 위치를 함께 표시. 미등록 코드는 '미등록 코드'로 분명히 표기.
+      const loc = it.pdfLocation ? ` · 📍 ${esc(it.pdfLocation)}` : "";
+      const title = it.asset ? esc(it.asset.assetName)
+        : (it.fromPdf ? "미등록 코드" : (it.code ? `인식: ${esc(it.code)}` : "인식되지 않음"));
+      const sub = it.asset ? (esc(it.asset.assetNumber) + loc) : (esc(it.code || it.name) + loc);
+      const badge = (it.fromPdf && it.status === "nomatch") ? "미등록" : s.label;
       // 실패 항목엔 재시도 버튼을 준다. (중복 건너뛰기/덮어쓰기는 하단 완료 버튼으로 한 번에 결정)
       const action = (failed && it.file) ? `<button type="button" class="batch-toggle batch-retry" data-batch-retry="${i}">↻ 재시도</button>` : "";
       const clickable = src ? ' batch-thumb-click" data-batch-preview="' + i + '"' : '"';
-      return `<div class="batch-row ${s.cls}" data-idx="${i}"><div class="batch-thumb${clickable}>${thumb}</div><div class="batch-info"><div class="batch-title">${title}</div><div class="batch-sub">${sub}</div></div>${action}<div class="batch-badge">${s.label}</div></div>`;
+      return `<div class="batch-row ${s.cls}" data-idx="${i}"><div class="batch-thumb${clickable}>${thumb}</div><div class="batch-info"><div class="batch-title">${title}</div><div class="batch-sub">${sub}</div></div>${action}<div class="batch-badge">${badge}</div></div>`;
     }).join("");
   }
   const nomatch = batchItems.filter((it) => it.status === "nomatch" || it.status === "error").length;
@@ -2386,7 +2416,7 @@ async function applyBatchInspect(policy) {
   const byId = new Map();
   batchItems.filter(batchWillApply).forEach((it) => byId.set(String(it.asset.id), it));
   const targets = [...byId.values()];
-  if (!targets.length) { alert("검수할 자산이 없습니다. 먼저 라벨 사진을 올려 인식하세요."); return; }
+  if (!targets.length) { alert("검수할 자산이 없습니다. 먼저 라벨 사진이나 자산 등록 PDF를 올려 인식하세요."); return; }
   const period = document.getElementById("batch-period").value.trim() || "1회차";
   const inspector = document.getElementById("batch-inspector").value.trim();
   const affiliation = document.getElementById("batch-affil").value.trim();
@@ -2407,16 +2437,18 @@ async function applyBatchInspect(policy) {
     batchApplyMsg = `💾 ${verb} 처리 중… <b class="batch-prog">${ok + fail + 1}/${targets.length}</b>`;
     const summary = document.getElementById("batchInspectSummary");
     if (summary) summary.innerHTML = batchApplyMsg;
-    const viaPdf = !!it.fromPdf;                 // PDF 목록 검수는 증빙 사진이 없다
-    const srcLabel = viaPdf ? "PDF 목록 검수" : "여러 장 검수";
+    const viaPdf = !!it.fromPdf;                 // 자산 등록 PDF 검수는 증빙 사진이 없다
+    const srcLabel = viaPdf ? "자산 등록 PDF 검수" : "라벨 여러 장 검수";
+    // PDF 검수는 위치도 함께 저장(값이 있을 때만). 검수와 한 번에 반영된다.
+    const fields = (viaPdf && it.pdfLocation) ? { location: it.pdfLocation } : undefined;
     try {
       if (isAdmin) {
-        await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf });
+        await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf, fields });
       } else {
         await submitRequest({
           action: "inspect", target_id: it.asset.id,
-          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf, assetName: it.asset.assetName, assetNumber: it.asset.assetNumber, batch: bid, batchLabel: srcLabel },
-          requester: reqName, note: `${period} 검수 확인 · ${srcLabel}`,
+          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf, fields, assetName: it.asset.assetName, assetNumber: it.asset.assetNumber, batch: bid, batchLabel: srcLabel },
+          requester: reqName, note: `${period} 검수 확인 · ${srcLabel}${it.pdfLocation ? ` · 위치: ${it.pdfLocation}` : ""}`,
         });
       }
       it.status = "done"; ok++;
@@ -2692,7 +2724,7 @@ async function writeInspections(id, list, photoFields) {
   const { error } = await sb.from("assets").upsert({ id: String(id), kind, data, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
-async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos, label, batch }, meta = {}) {
+async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos, label, batch, fields }, meta = {}) {
   const current = findAsset(id);
   if (!current) throw new Error("자산 없음");
   // 검수 사진은 Storage에 올리고 DB에는 URL만 저장한다.
@@ -2722,11 +2754,15 @@ async function applyInspect(id, { periodType, period, inspector, affiliation, ph
   }
   // withUploadedMedia: base64는 Storage 업로드 후 URL로, 이미 URL이면 그대로 둔다.
   let photoFields = Object.keys(mediaFields).length ? await withUploadedMedia(mediaFields) : null;
+  // 검수와 함께 자산 필드도 갱신(예: PDF 검수의 '위치'). 값이 있을 때만 덮어쓴다.
+  let locNote = "";
+  const locVal = fields && typeof fields.location === "string" ? fields.location.trim() : "";
+  if (locVal) { photoFields = { ...(photoFields || {}), location: locVal }; locNote = ` · 위치: ${locVal}`; }
   await writeInspections(id, list, photoFields);
   const who = inspector + (affiliation ? ` (${affiliation})` : "");
   const photoNote = extra.length ? ` · 물품사진 ${extra.length}장 추가` : "";
   const labelNote = label ? " · 라벨 저장" : "";
-  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${period} · 확인자: ${who}${photoNote}${labelNote}` });
+  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${period} · 확인자: ${who}${locNote}${photoNote}${labelNote}` });
 }
 async function removeInspection(assetId, inspId) {
   const current = findAsset(assetId);
