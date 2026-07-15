@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://pmjwwvgcmaywbatryibc.supabase.co" crossorigin />
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="style.css?v=20260715c" />
+  <link rel="stylesheet" href="style.css?v=20260715d" />
 </head>
 <body>
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -392,12 +392,13 @@
           </div>
         </div>
         <div class="form-row signup-only" style="margin-bottom:12px;">
-          <label>이름</label>
+          <label>이름 <span class="req">*</span></label>
           <input type="text" id="authName" autocomplete="name" placeholder="예: 홍길동" />
         </div>
         <div class="form-row signup-only" style="margin-bottom:12px;">
-          <label>소속 (부서)</label>
+          <label>소속 (부서) <span class="req">*</span></label>
           <select id="authAffil"></select>
+          <input type="text" id="authAffilCustom" placeholder="부서명을 직접 입력하세요" style="margin-top:8px;" hidden />
         </div>
         <div class="form-row">
           <label>비밀번호</label>
@@ -781,6 +782,6 @@
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20260715c"></script>
+  <script src="script.js?v=20260715d"></script>
 </body>
 </html>

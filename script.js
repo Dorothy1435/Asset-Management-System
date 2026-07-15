@@ -508,8 +508,10 @@ function openAuth(mode) {
   document.getElementById("authId").value = "";
   document.getElementById("authPw").value = "";
   document.getElementById("authName").value = "";
-  document.getElementById("authAffil").innerHTML = deptOptionsHtml("");
+  document.getElementById("authAffil").innerHTML = deptSignupOptionsHtml();
   document.getElementById("authAffil").value = "";
+  const affilCustom = document.getElementById("authAffilCustom");
+  if (affilCustom) { affilCustom.value = ""; affilCustom.hidden = true; }
   resetConsent();
   applyAuthMode();
   show("authOverlay");
@@ -547,9 +549,15 @@ async function authSubmit() {
   try {
     if (authMode === "signup") {
       if (!consentAllChecked()) { errEl.textContent = "회원가입을 위해 필수 동의 항목에 모두 체크해주세요."; errEl.hidden = false; btn.disabled = false; return; }
-      const email = idToEmail(idVal, true);
       const name = document.getElementById("authName").value.trim();
-      const affiliation = document.getElementById("authAffil").value.trim();
+      const affilSel = document.getElementById("authAffil").value;
+      const affiliation = affilSel === "__custom__"
+        ? document.getElementById("authAffilCustom").value.trim()
+        : affilSel.trim();
+      // 이름·소속(부서)은 필수
+      if (!name) { errEl.textContent = "이름을 입력해주세요."; errEl.hidden = false; btn.disabled = false; return; }
+      if (!affiliation) { errEl.textContent = "소속(부서)를 선택하거나 직접 입력해주세요."; errEl.hidden = false; btn.disabled = false; return; }
+      const email = idToEmail(idVal, true);
       const username = email.split("@")[0];
       const { data, error } = await sb.auth.signUp({
         email, password: pw,
@@ -1271,6 +1279,12 @@ function deptOptionsHtml(value) {
   if (value && !list.includes(value)) list.push(value);
   return `<option value="">(선택 안 함)</option>` + list.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
 }
+// 회원가입용 부서 선택지: 목록에 없으면 '직접 입력'으로 부서명을 적을 수 있게 한다.
+function deptSignupOptionsHtml() {
+  return `<option value="" disabled selected>부서를 선택하세요</option>`
+    + DEPTS.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join("")
+    + `<option value="__custom__">＋ 기타 (직접 입력)</option>`;
+}
 function setDeptSelect(value) {
   const sel = document.getElementById("f-dept");
   sel.innerHTML = deptOptionsHtml(value);
@@ -1970,6 +1984,7 @@ async function handleScanCapture(file) {
 // ===== 여러 장 한번에 검수 (갤러리에서 라벨 사진 여러 장 업로드 → 각 사진의 자산코드 인식 → 일괄 검수 완료) =====
 // 위치·자산명 필터를 넣으면 그 범위로 좁혀 인식·매칭하므로, 한 곳에서 모아 찍은 사진을 한꺼번에 올릴 때 정확도가 높아진다.
 let batchItems = [];       // { name, photoData, code, asset, status, overwrite } — status: matched|dup|already|samephoto|nomatch|error
+let batchMode = "label";   // "label"(라벨 사진 여러 장) | "pdf"(자산 등록 PDF) — PDF 모드는 사진 인식을 하지 않는다
 let batchProcessing = false;
 let batchFileSigs = new Set(); // 이미 올린 사진(파일) 식별자 — 같은 사진을 다시 고르면 '이미 올린 사진'으로 표시
 let batchRunTotal = 0, batchRunDone = 0; // 이번 업로드 진행률(인식 X/Y)
@@ -2033,6 +2048,7 @@ function openBatchInspect() {
 }
 // 검수 창을 '라벨 사진'용 / '자산 등록 PDF'용으로 전환 (제목·안내·버튼 노출을 함께 바꾼다)
 function setBatchMode(mode) {
+  batchMode = mode === "pdf" ? "pdf" : "label";
   const pdf = mode === "pdf";
   const title = document.getElementById("batchInspectTitle");
   const lead = document.getElementById("batchLead");
@@ -2367,7 +2383,9 @@ function renderBatchList() {
   const summary = document.getElementById("batchInspectSummary");
   if (!grid) return;
   if (!batchItems.length) {
-    grid.innerHTML = `<div class="batch-empty">아직 올린 사진이 없습니다. <b>‘사진 선택’</b>을 눌러 라벨 사진을 여러 장 한꺼번에 선택하거나,<br>이 창으로 사진을 <b>끌어다 놓으세요</b>. (PC)</div>`;
+    grid.innerHTML = batchMode === "pdf"
+      ? `<div class="batch-empty"><b>‘📄 PDF 불러오기’</b>를 눌러 자산 등록 PDF(자산코드·위치 표)를 올리거나,<br>이 창으로 PDF를 <b>끌어다 놓으세요</b>. (PC)</div>`
+      : `<div class="batch-empty">아직 올린 사진이 없습니다. <b>‘사진 선택’</b>을 눌러 라벨 사진을 여러 장 한꺼번에 선택하거나,<br>이 창으로 사진을 <b>끌어다 놓으세요</b>. (PC)</div>`;
   } else {
     grid.innerHTML = batchItems.map((it, i) => {
       const failed = it.status === "nomatch" || it.status === "error";
@@ -2382,8 +2400,10 @@ function renderBatchList() {
       const badge = (it.fromPdf && it.status === "nomatch") ? "미등록" : s.label;
       // 실패 항목엔 재시도 버튼을 준다. (중복 건너뛰기/덮어쓰기는 하단 완료 버튼으로 한 번에 결정)
       const action = (failed && it.file) ? `<button type="button" class="batch-toggle batch-retry" data-batch-retry="${i}">↻ 재시도</button>` : "";
+      // 어떤 항목이든 목록에서 삭제(제거) 가능. (처리 중에는 숨김)
+      const removeBtn = batchProcessing ? "" : `<button type="button" class="batch-toggle batch-remove" data-batch-remove="${i}" title="목록에서 제거">✕ 삭제</button>`;
       const clickable = src ? ' batch-thumb-click" data-batch-preview="' + i + '"' : '"';
-      return `<div class="batch-row ${s.cls}" data-idx="${i}"><div class="batch-thumb${clickable}>${thumb}</div><div class="batch-info"><div class="batch-title">${title}</div><div class="batch-sub">${sub}</div></div>${action}<div class="batch-badge">${badge}</div></div>`;
+      return `<div class="batch-row ${s.cls}" data-idx="${i}"><div class="batch-thumb${clickable}>${thumb}</div><div class="batch-info"><div class="batch-title">${title}</div><div class="batch-sub">${sub}</div></div>${action}${removeBtn}<div class="batch-badge">${badge}</div></div>`;
     }).join("");
   }
   const nomatch = batchItems.filter((it) => it.status === "nomatch" || it.status === "error").length;
@@ -2467,6 +2487,19 @@ function currentBatchScan() {
   };
 }
 // 인식 실패 사진 한 장 다시 인식 (위치·자산명 필터를 고쳤다면 그 값으로 다시 시도)
+// 목록에서 항목 1개 삭제(제거). 같은 사진을 다시 올릴 수 있도록 파일 서명도 해제한다.
+function removeBatchItem(index) {
+  if (batchProcessing) return;
+  const it = batchItems[index];
+  if (!it) return;
+  if (it.file) {
+    const sig = `${it.file.name || ""}|${it.file.size || 0}|${it.file.lastModified || 0}`;
+    batchFileSigs.delete(sig);
+  }
+  batchItems.splice(index, 1);
+  batchDone = false;      // 삭제 후에도 남은 항목으로 계속 검수할 수 있게
+  renderBatchList();
+}
 async function retryBatchItem(index, tryRotate = false) {
   if (batchProcessing) return;
   const it = batchItems[index];
@@ -3908,6 +3941,8 @@ document.getElementById("batchActions").addEventListener("click", (e) => {
   if (b) applyBatchInspect(b.dataset.batchApply);
 });
 document.getElementById("batchInspectList").addEventListener("click", (e) => {
+  const remove = e.target.closest("button[data-batch-remove]");
+  if (remove) { removeBatchItem(Number(remove.dataset.batchRemove)); return; }
   const retry = e.target.closest("button[data-batch-retry]");
   if (retry) { retryBatchItem(Number(retry.dataset.batchRetry)); return; }
   const prev = e.target.closest("[data-batch-preview]");
@@ -3926,11 +3961,16 @@ document.getElementById("batchInspectList").addEventListener("click", (e) => {
     const files = e.dataTransfer && e.dataTransfer.files;
     if (!files || !files.length) return;
     e.preventDefault(); modal.classList.remove("batch-drag");
-    // PDF를 끌어다 놓으면 PDF 목록 검수로, 사진은 여러 장 검수로 처리
     const arr = Array.from(files);
     const pdf = arr.find((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name || ""));
-    if (pdf) handlePdfInspect(pdf);
-    else handleBatchFiles(files);
+    if (batchMode === "pdf") {
+      // 자산 등록 PDF 검수: PDF 파일만 받는다. (사진 인식 안 함)
+      if (pdf) handlePdfInspect(pdf);
+      else alert("자산 등록 PDF 검수에는 PDF 파일만 올릴 수 있습니다.");
+      return;
+    }
+    // 라벨 여러 장 검수: 사진만 처리
+    handleBatchFiles(files);
   });
 })();
 // 검수 화면: 물품 사진 이어 찍기(최대 3장)
@@ -4012,6 +4052,13 @@ document.getElementById("mpSaveBtn").addEventListener("click", saveMyProfile);
 document.getElementById("myProfileForm").addEventListener("submit", (e) => { e.preventDefault(); saveMyProfile(); });
 document.getElementById("authSubmit").addEventListener("click", authSubmit);
 document.getElementById("authForm").addEventListener("submit", (e) => { e.preventDefault(); authSubmit(); });
+// 소속(부서) '기타(직접 입력)' 선택 시 직접 입력칸 표시
+document.getElementById("authAffil").addEventListener("change", (e) => {
+  const custom = document.getElementById("authAffilCustom");
+  const on = e.target.value === "__custom__";
+  custom.hidden = !on;
+  if (on) custom.focus();
+});
 document.getElementById("authSwitch").addEventListener("click", () => { authMode = authMode === "login" ? "signup" : "login"; document.getElementById("authError").hidden = true; document.getElementById("authInfo").hidden = true; applyAuthMode(); });
 document.getElementById("forgotBtn").addEventListener("click", forgotPassword);
 document.getElementById("pwSubmit").addEventListener("click", updatePassword);

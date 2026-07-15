@@ -1682,6 +1682,8 @@ body { max-width: 100%; overflow-x: hidden; }
 .batch-thumb-click { cursor: zoom-in; }
 .batch-retry { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
 .batch-retry:hover { background: #fef3c7; }
+.batch-remove { color: #b91c1c; border-color: #fecaca; background: #fff5f5; }
+.batch-remove:hover { background: #fee2e2; }
 #batchInspectOverlay .modal.batch-drag { outline: 3px dashed #0284c7; outline-offset: -8px; background: #f0f9ff; }
 .batch-prog { font-size: 15px; color: #0e7490; }
 #batchRetryAllBtn, #batchRetryRotateBtn { font-size: 13px; padding: 8px 12px; }
