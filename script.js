@@ -214,7 +214,8 @@ function cleanFields(f) {
 // ===== 데이터 로드 =====
 async function sbLoadOverlay() {
   if (!sb) return;
-  const { data, error } = await sb.from("assets").select("id, kind, data, updated_at");
+  // kind='config'(양식 파일 포인터 등)는 자산이 아니므로 목록 로드에서 제외 → 모두의 로딩을 가볍게 유지
+  const { data, error } = await sb.from("assets").select("id, kind, data, updated_at").neq("kind", "config");
   if (error) { console.error("오버레이 로드 오류:", error.message); return; }
   overlay = data || [];
 }
@@ -2070,15 +2071,17 @@ async function saveTemplateConfig(cfg) {
   if (error) throw error;
   templateCfgCache = cfg;
 }
+// 양식이 등록됐는지 (Storage URL 또는 DB 저장본)
+function templateSrc(cfg) { return cfg && (cfg.url || cfg.dataUrl) ? (cfg.url || cfg.dataUrl) : ""; }
 // PDF 모드가 열릴 때 양식 등록 여부/파일명, 업로드 버튼(최고관리자) 노출을 갱신
 async function refreshTemplateUI() {
   const upBtn = document.getElementById("batchTemplateUpload");
   if (upBtn) upBtn.hidden = !isSuperAdmin;   // 양식 등록/교체는 최고관리자만
   const nameEl = document.getElementById("batchTemplateName");
   if (nameEl) nameEl.textContent = "양식 확인 중…";
-  const cfg = await loadTemplateConfig(true);
+  const cfg = await loadTemplateConfig(false); // 세션당 1회만 조회(용량 절약)
   if (!nameEl) return;
-  if (cfg && cfg.url) nameEl.textContent = `현재 양식: ${cfg.filename || "등록됨"}`;
+  if (templateSrc(cfg)) nameEl.textContent = `현재 양식: ${cfg.filename || "등록됨"}`;
   else nameEl.textContent = isSuperAdmin ? "등록된 양식이 없습니다. ‘양식 등록/교체’로 올려주세요." : "아직 등록된 양식이 없습니다. (최고관리자 등록 후 이용 가능)";
 }
 // 임의 파일(한글 등)을 Storage에 올리고 공개 URL 반환 — 원본 확장자·파일명 보존
@@ -2092,28 +2095,45 @@ async function uploadTemplateFile(file) {
   return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 // 최고관리자: 양식 파일 등록/교체
+// 1차로 Storage에 올리고, 버킷이 한글(HWP) 등 파일형식을 막으면 2차로 DB(config 행)에 직접 저장한다.
 async function handleTemplateUpload(file) {
   if (!file) return;
   if (!isSuperAdmin) { alert("양식 등록은 최고관리자만 할 수 있습니다."); return; }
   if (file.size > 20 * 1024 * 1024) { alert("양식 파일은 20MB 이하로 올려주세요."); return; }
   const nameEl = document.getElementById("batchTemplateName");
   if (nameEl) nameEl.textContent = "양식 올리는 중…";
+  const base = { filename: file.name || "자산등록양식", updatedAt: new Date().toISOString() };
+  let cfg = null, storageErr = "";
   try {
-    const url = await uploadTemplateFile(file);
-    await saveTemplateConfig({ url, filename: file.name || "자산등록양식", updatedAt: new Date().toISOString() });
-    alert("양식이 등록되었습니다. 이제 모든 사용자가 ‘양식 다운로드’로 받을 수 있습니다.");
-  } catch (e) {
-    console.error("양식 등록 오류:", e);
-    alert("양식 등록에 실패했습니다. 다시 시도해 주세요.");
+    const url = await uploadTemplateFile(file);          // 1차: Storage
+    cfg = { ...base, url };
+  } catch (e1) {
+    storageErr = e1?.message || String(e1);
+    console.warn("양식 Storage 업로드 실패 — DB 저장으로 대체:", storageErr);
+    try {
+      const dataUrl = await fileToDataURL(file);          // 2차: DB에 base64로 저장 (버킷 제한 우회)
+      cfg = { ...base, dataUrl };
+    } catch (e2) {
+      alert("양식 파일을 읽지 못했습니다.\n원인: " + (e2?.message || e2));
+      refreshTemplateUI(); return;
+    }
+  }
+  try {
+    await saveTemplateConfig(cfg);
+    alert(`양식이 등록되었습니다. 이제 모든 사용자가 ‘양식 다운로드’로 받을 수 있습니다.${cfg.dataUrl ? "\n(저장소가 이 형식을 막아 DB에 저장했습니다 — 다운로드는 정상 동작합니다.)" : ""}`);
+  } catch (e3) {
+    console.error("양식 저장 오류:", e3);
+    alert("양식 저장에 실패했습니다.\n원인: " + (e3?.message || e3) + (storageErr ? `\n(저장소 오류: ${storageErr})` : ""));
   }
   refreshTemplateUI();
 }
 // 양식 다운로드 (원본 파일명으로 저장되도록 blob으로 받아 내려줌)
 async function downloadPdfTemplate() {
   const cfg = await loadTemplateConfig();
-  if (!cfg || !cfg.url) { alert("아직 등록된 양식이 없습니다.\n최고관리자가 ‘양식 등록/교체’로 파일을 올린 뒤 이용할 수 있습니다."); return; }
+  const src = templateSrc(cfg);
+  if (!src) { alert("아직 등록된 양식이 없습니다.\n최고관리자가 ‘양식 등록/교체’로 파일을 올린 뒤 이용할 수 있습니다."); return; }
   try {
-    const res = await fetch(cfg.url);
+    const res = await fetch(src);        // src는 Storage URL 또는 data:URL(DB 저장본) 둘 다 fetch 가능
     if (!res.ok) throw new Error("fetch 실패");
     const blob = await res.blob();
     const a = document.createElement("a");
@@ -2123,7 +2143,7 @@ async function downloadPdfTemplate() {
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   } catch (e) {
     console.warn("양식 blob 다운로드 실패 — 새 탭으로 엽니다:", e?.message || e);
-    window.open(cfg.url, "_blank");
+    window.open(src, "_blank");
   }
 }
 // 여러 장 업로드 처리: 파일마다 순서대로 인식 → 결과를 즉시 목록에 반영
