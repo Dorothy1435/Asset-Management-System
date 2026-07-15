@@ -559,11 +559,25 @@ async function authSubmit() {
       if (!affiliation) { errEl.textContent = "소속(부서)를 선택하거나 직접 입력해주세요."; errEl.hidden = false; btn.disabled = false; return; }
       const email = idToEmail(idVal, true);
       const username = email.split("@")[0];
+      // 아이디 형식 검사(웹메일 아이디 부분)
+      if (!/^[a-zA-Z0-9._%+-]+$/.test(username)) {
+        errEl.textContent = "아이디는 영문·숫자로 입력하세요. (예: hong123 → hong123@inje.ac.kr)"; errEl.hidden = false; return;
+      }
+      const dupMsg = "이미 등록된 아이디입니다. 로그인하거나 ‘비밀번호를 잊으셨나요?’를 이용하세요.";
       const { data, error } = await sb.auth.signUp({
         email, password: pw,
         options: { data: { name, affiliation, username } },
       });
-      if (error) { errEl.textContent = "가입 실패: " + error.message; errEl.hidden = false; return; }
+      if (error) {
+        const m = (error.message || "").toLowerCase();
+        // 이미 가입된 이메일(이메일 확인 OFF일 때 여기로 옴)
+        errEl.textContent = (m.includes("already") || m.includes("registered") || m.includes("exist")) ? dupMsg : ("가입 실패: " + error.message);
+        errEl.hidden = false; return;
+      }
+      // 이메일 확인 ON이면 이미 존재하는 계정은 열거 방지를 위해 identities가 빈 배열로 온다 → 중복으로 처리
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        errEl.textContent = dupMsg; errEl.hidden = false; return;
+      }
       if (data.session) {
         hide("authOverlay");
         alert("가입 신청이 접수되었습니다.\n관리자 승인 후 이용하실 수 있습니다.");

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://pmjwwvgcmaywbatryibc.supabase.co" crossorigin />
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="style.css?v=20260715e" />
+  <link rel="stylesheet" href="style.css?v=20260715f" />
 </head>
 <body>
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -390,6 +390,7 @@
             <input type="text" id="authId" autocomplete="username" placeholder="아이디" required />
             <span class="id-suffix">@inje.ac.kr</span>
           </div>
+          <p class="form-info signup-only" id="authIdHint" style="margin-top:6px;">✉️ <b>실제 사용하는 웹메일 주소</b>(인제대 @inje.ac.kr)를 입력하세요. 비밀번호 찾기·가입 안내에 사용됩니다.</p>
         </div>
         <div class="form-row signup-only" style="margin-bottom:12px;">
           <label>이름 <span class="req">*</span></label>
@@ -782,6 +783,6 @@
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20260715e"></script>
+  <script src="script.js?v=20260715f"></script>
 </body>
 </html>
