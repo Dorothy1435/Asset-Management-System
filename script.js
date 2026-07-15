@@ -2015,7 +2015,10 @@ async function recognizeAssetInPool(dataUrl, mode, pool, tryRotate = false) {
 function classifyBatchItem(item, asset, period) {
   const dupInBatch = batchItems.some((x) => x !== item && x.asset && String(x.asset.id) === String(asset.id));
   if (dupInBatch) return "dup";
-  if (inspectedRound(asset, period)) return "already";
+  // 이미 이번 회차에 검수됨:
+  //  · 라벨 사진 등록 모드 → 'relabel'(검수는 그대로 두고 라벨 사진만 추가)
+  //  · PDF 검수 모드 → 'already'(건너뛰기/덮어쓰기 선택)
+  if (inspectedRound(asset, period)) return batchMode === "pdf" ? "already" : "relabel";
   return "matched";
 }
 function openBatchInspect() {
@@ -2053,10 +2056,10 @@ function setBatchMode(mode) {
   const title = document.getElementById("batchInspectTitle");
   const lead = document.getElementById("batchLead");
   const verb = isAdmin ? "" : " 요청";
-  if (title) title.textContent = (pdf ? "자산 등록 PDF 검수" : "라벨 여러 장 검수") + verb;
+  if (title) title.textContent = (pdf ? "자산 등록 PDF 검수" : "라벨 사진 등록") + verb;
   if (lead) lead.innerHTML = pdf
     ? "<b>자산 등록 PDF</b>(자산코드·위치 표)를 올리면 코드와 위치를 함께 인식해 한 번에 검수합니다. 등록 안 된 코드는 <b>‘미등록 코드’</b>로 표시되니 재확인하세요. 검수하면 <b>위치도 함께 저장</b>됩니다."
-    : "<b>라벨 사진</b>을 여러 장 한꺼번에 올리면 각 사진의 자산코드를 인식해 한 번에 검수합니다. 한 곳에서 모아 찍었다면 아래 <b>위치·자산명</b>을 넣어 범위를 좁히면 더 정확합니다.";
+    : "<b>라벨 사진</b>을 여러 장 올리면 각 사진의 자산코드를 인식해 그 자산에 <b>라벨 사진을 등록</b>합니다. 아직 검수 안 된 자산은 <b>검수도 함께</b> 처리되고, 이미 검수된 자산은 <b>라벨 사진만 추가</b>됩니다.";
   // 라벨용/PDF용 버튼을 모드에 맞게만 노출
   const show1 = (id, on) => { const el = document.getElementById(id); if (el) el.hidden = !on; };
   show1("batchPickBtn", !pdf);
@@ -2206,9 +2209,10 @@ async function handleBatchFiles(files) {
           item.status = "nomatch";
         } else {
           item.asset = asset;
-          item.photoData = await compressImage(file, 900, 0.6); // 검수 증빙 사진(압축). 덮어쓰기 대비 미리 준비.
+          item.photoData = await compressImage(file, 900, 0.6); // 라벨/검수 사진(압축).
           item.status = classifyBatchItem(item, asset, period);
-          if (item.status !== "matched") newDup++;
+          // '중복 처리 방법 선택'(건너뛰기/덮어쓰기) 안내는 PDF 검수 모드에만 해당. 라벨 등록 모드는 자동 처리.
+          if (batchMode === "pdf" && (item.status === "dup" || item.status === "already")) newDup++;
         }
       } catch (e) {
         if (e && e.name === "AbortError") { item.status = "canceled"; renderBatchList(); break; } // 취소 → 이 사진 표시 후 중단
@@ -2365,6 +2369,7 @@ async function handlePdfInspect(file) {
 const BATCH_STATUS = {
   processing: { cls: "b-proc", label: "인식 중…" },
   matched: { cls: "b-ok", label: "검수 준비됨" },
+  relabel: { cls: "b-ok", label: "라벨 추가" },   // 이미 검수됨 → 라벨 사진만 추가(라벨 사진 등록 모드)
   dup: { cls: "b-dup", label: "번호 중복" },
   already: { cls: "b-dup", label: "이미 검수됨" },
   samephoto: { cls: "b-same", label: "이미 올린 사진" },
@@ -2374,9 +2379,13 @@ const BATCH_STATUS = {
   done: { cls: "b-done", label: "완료" },
   savefail: { cls: "b-err", label: "저장 실패" },
 };
-// 이 항목이 실제로 검수 처리될지 여부 (준비됨 이거나, 중복/이미검수인데 '덮어쓰기' 선택)
+// 이 항목이 실제로 처리될지 여부.
+//  · 라벨 사진 등록: 인식된 자산은 모두 적용(matched=검수+라벨, relabel=라벨만, dup=같은 자산 1개로 합침)
+//  · PDF 검수: 준비됨(matched) 또는 중복/이미검수인데 '덮어쓰기' 선택한 것
 function batchWillApply(it) {
-  return !!it.asset && (it.status === "matched" || ((it.status === "dup" || it.status === "already") && it.overwrite));
+  if (!it.asset) return false;
+  if (batchMode === "pdf") return it.status === "matched" || ((it.status === "dup" || it.status === "already") && it.overwrite);
+  return it.status === "matched" || it.status === "relabel" || it.status === "dup";
 }
 function renderBatchList() {
   const grid = document.getElementById("batchInspectList");
@@ -2423,9 +2432,11 @@ function renderBatchList() {
     } else if (batchApplyMsg) {
       summary.innerHTML = batchApplyMsg;
     } else {
-      summary.innerHTML = batchItems.length
-        ? `총 <b>${batchItems.length}</b>장 · 검수 준비 <b class="b-ok-t">${readyN}</b> · 건너뜀 <b>${skip}</b>${samePhoto ? ` · 이미 올림 <b>${samePhoto}</b>` : ""} · 실패 <b class="b-err-t">${nomatch}</b>`
-        : "";
+      if (!batchItems.length) summary.innerHTML = "";
+      else if (batchMode === "pdf")
+        summary.innerHTML = `총 <b>${batchItems.length}</b>건 · 검수 준비 <b class="b-ok-t">${readyN}</b> · 건너뜀 <b>${skip}</b> · 실패 <b class="b-err-t">${nomatch}</b>`;
+      else
+        summary.innerHTML = `총 <b>${batchItems.length}</b>장 · 등록 준비 <b class="b-ok-t">${readyN}</b>${samePhoto ? ` · 이미 올림 <b>${samePhoto}</b>` : ""} · 실패 <b class="b-err-t">${nomatch}</b>`;
     }
   }
   renderBatchActions();
@@ -2436,6 +2447,15 @@ function renderBatchActions() {
   if (!wrap) return;
   if (batchDone) { // 신청/완료가 끝난 상태 — 결과만 보여주고 '닫기'로 마무리
     wrap.innerHTML = `<span class="batch-done-msg">🎉 처리가 끝났습니다. 결과를 확인하고 <b>‘닫기’</b>를 누르세요.</span>`;
+    return;
+  }
+  const busyD = batchProcessing ? "disabled" : "";
+  if (!batchItems.length) { wrap.innerHTML = ""; return; }
+  // 라벨 사진 등록: 중복 선택 없이 한 번에 적용 (검수 안 된 자산=검수+라벨, 이미 검수된 자산=라벨만 추가)
+  if (batchMode !== "pdf") {
+    const n = new Set(batchItems.filter(batchWillApply).map((it) => String(it.asset.id))).size;
+    const verbL = isAdmin ? "등록" : "등록 요청";
+    wrap.innerHTML = `<button class="btn btn-primary batch-apply-btn" data-batch-apply="all" ${n ? "" : "disabled"} ${busyD}>✅ ${n}건 라벨 사진 ${verbL}</button>`;
     return;
   }
   const matchedIds = new Set(), overIds = new Set();
@@ -2552,16 +2572,17 @@ async function previewBatchItem(index) {
 // 관리자는 즉시 반영, 일반 사용자는 승인 요청. 버튼 한 번으로 바로 검수 완료된다.
 async function applyBatchInspect(policy) {
   if (batchProcessing) return;
-  // 전역 버튼(건너뛰기/덮어쓰기)을 누르면 모든 중복 항목의 처리 방식을 한 번에 정한다.
+  const isPdfMode = batchMode === "pdf";
+  // (PDF 검수) 전역 버튼(건너뛰기/덮어쓰기)을 누르면 모든 중복 항목의 처리 방식을 한 번에 정한다.
   if (policy === "skip" || policy === "overwrite") {
     const ov = policy === "overwrite";
     batchItems.forEach((it) => { if (it.status === "dup" || it.status === "already") it.overwrite = ov; });
   }
-  // 검수 준비됨 + '덮어쓰기' 선택 항목. 같은 자산코드는 한 번만(마지막 사진 우선) 처리.
+  // 적용 대상. 같은 자산은 한 번만(마지막 사진 우선) 처리.
   const byId = new Map();
   batchItems.filter(batchWillApply).forEach((it) => byId.set(String(it.asset.id), it));
   const targets = [...byId.values()];
-  if (!targets.length) { alert("검수할 자산이 없습니다. 먼저 라벨 사진이나 자산 등록 PDF를 올려 인식하세요."); return; }
+  if (!targets.length) { alert("처리할 자산이 없습니다. 먼저 라벨 사진이나 자산 등록 PDF를 올려 인식하세요."); return; }
   const period = document.getElementById("batch-period").value.trim() || "1회차";
   const inspector = document.getElementById("batch-inspector").value.trim();
   const affiliation = document.getElementById("batch-affil").value.trim();
@@ -2575,30 +2596,34 @@ async function applyBatchInspect(policy) {
   batchDone = false;
   setBatchBusy(true);
   renderBatchList(); // 완료 버튼 비활성화 + 진행 표시
-  const verb = isAdmin ? "검수" : "검수 신청";
-  const bid = newBatchId(); // 비관리자 검수 신청을 한 작업으로 묶기
+  const verb = isPdfMode ? (isAdmin ? "검수" : "검수 신청") : (isAdmin ? "등록" : "등록 신청");
+  const bid = newBatchId(); // 비관리자 신청을 한 작업으로 묶기
   let ok = 0, fail = 0;
   for (const it of targets) {
     batchApplyMsg = `💾 ${verb} 처리 중… <b class="batch-prog">${ok + fail + 1}/${targets.length}</b>`;
     const summary = document.getElementById("batchInspectSummary");
     if (summary) summary.innerHTML = batchApplyMsg;
     const viaPdf = !!it.fromPdf;                 // 자산 등록 PDF 검수는 증빙 사진이 없다
-    const srcLabel = viaPdf ? "자산 등록 PDF 검수" : "라벨 여러 장 검수";
-    // PDF 검수는 위치도 함께 저장(값이 있을 때만). 검수와 한 번에 반영된다.
+    // 라벨 사진 등록: 이미 이번 회차 검수된 자산이면 '라벨 사진만 추가'(검수 기록은 그대로), 아니면 검수+라벨.
+    const labelOnly = !isPdfMode && inspectedRound(it.asset, period);
+    const srcLabel = viaPdf ? "자산 등록 PDF 검수" : (labelOnly ? "라벨 사진 추가" : "라벨 사진 등록");
     const fields = (viaPdf && it.pdfLocation) ? { location: it.pdfLocation } : undefined;
+    const note = viaPdf
+      ? `${period} 검수 확인 · ${srcLabel}${it.pdfLocation ? ` · 위치: ${it.pdfLocation}` : ""}`
+      : (labelOnly ? `라벨 사진 추가` : `${period} 검수 확인 · 라벨 사진 등록`);
     try {
       if (isAdmin) {
-        await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf, fields });
+        await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf, fields, labelOnly });
       } else {
         await submitRequest({
           action: "inspect", target_id: it.asset.id,
-          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf, fields, assetName: it.asset.assetName, assetNumber: it.asset.assetNumber, batch: bid, batchLabel: srcLabel },
-          requester: reqName, note: `${period} 검수 확인 · ${srcLabel}${it.pdfLocation ? ` · 위치: ${it.pdfLocation}` : ""}`,
+          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf, fields, labelOnly, assetName: it.asset.assetName, assetNumber: it.asset.assetNumber, batch: bid, batchLabel: srcLabel },
+          requester: reqName, note,
         });
       }
       it.status = "done"; ok++;
     } catch (e) {
-      console.error("일괄 검수 처리 오류:", e);
+      console.error("일괄 처리 오류:", e);
       it.status = "savefail"; fail++;
     }
   }
@@ -2606,7 +2631,7 @@ async function applyBatchInspect(policy) {
   batchDone = true;
   setBatchBusy(false);
   // 창은 닫지 않는다 — 그 자리에서 결과를 보여준다.
-  const doneWord = isAdmin ? "검수 완료" : "검수 신청 완료";
+  const doneWord = isPdfMode ? (isAdmin ? "검수 완료" : "검수 신청 완료") : (isAdmin ? "라벨 사진 등록 완료" : "라벨 사진 등록 신청 완료");
   batchApplyMsg = `✅ <b class="b-ok-t">${ok}건</b> ${doneWord}${fail ? ` · <b class="b-err-t">${fail}건 실패</b>` : ""}${isAdmin ? "" : " · 관리자 승인 후 반영"}`;
   renderBatchList();
   // 뒤 목록/통계는 갱신하되 검수 창은 그대로 열어둔다.
@@ -2869,7 +2894,7 @@ async function writeInspections(id, list, photoFields) {
   const { error } = await sb.from("assets").upsert({ id: String(id), kind, data, updated_at: new Date().toISOString() });
   if (error) throw error;
 }
-async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos, label, batch, fields }, meta = {}) {
+async function applyInspect(id, { periodType, period, inspector, affiliation, photo, photos, label, batch, fields, labelOnly }, meta = {}) {
   const current = findAsset(id);
   if (!current) throw new Error("자산 없음");
   // 검수 사진은 Storage에 올리고 DB에는 URL만 저장한다.
@@ -2879,8 +2904,13 @@ async function applyInspect(id, { periodType, period, inspector, affiliation, ph
     try { photoStored = await uploadMedia(photoStored, "inspections"); }
     catch (e) { console.warn("검수 사진 업로드 실패 — base64로 저장합니다:", e?.message || e); }
   }
-  const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", photo: photoStored || "", checkedAt: new Date().toISOString(), ...(batch ? { batch } : {}) };
-  const list = Array.isArray(current.inspections) ? [...current.inspections, insp] : [insp];
+  // labelOnly=true: 검수 기록은 추가하지 않고 '라벨 사진만' 자산에 붙인다(이미 검수된 자산 재등록 방지).
+  const prevList = Array.isArray(current.inspections) ? current.inspections.slice() : [];
+  let list = prevList;
+  if (!labelOnly) {
+    const insp = { id: "i" + Date.now() + Math.floor(Math.random() * 1000), periodType: periodType || "", period: period || "", inspector: inspector || "", affiliation: affiliation || "", photo: photoStored || "", checkedAt: new Date().toISOString(), ...(batch ? { batch } : {}) };
+    list = [...prevList, insp];
+  }
   let mediaFields = {};
   // 이어 찍은 물품 사진(최대 3장)이 있으면 기존 자산 사진 뒤에 병합해 함께 저장
   const extra = Array.isArray(photos) ? photos.filter(Boolean) : [];
@@ -2907,7 +2937,10 @@ async function applyInspect(id, { periodType, period, inspector, affiliation, ph
   const who = inspector + (affiliation ? ` (${affiliation})` : "");
   const photoNote = extra.length ? ` · 물품사진 ${extra.length}장 추가` : "";
   const labelNote = label ? " · 라벨 저장" : "";
-  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note: `검수 확인 · ${period} · 확인자: ${who}${locNote}${photoNote}${labelNote}` });
+  const note = labelOnly
+    ? `라벨 사진 추가${who ? ` · ${who}` : ""}`
+    : `검수 확인 · ${period} · 확인자: ${who}${locNote}${photoNote}${labelNote}`;
+  await logHistory({ asset_id: id, asset_name: current.assetName, action: "inspect", before: null, after: null, requester: meta.requester || who, note });
 }
 async function removeInspection(assetId, inspId) {
   const current = findAsset(assetId);
