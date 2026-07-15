@@ -1042,6 +1042,7 @@ body {
 }
 .member-count { margin-top: 12px; color: var(--text-light); font-size: 13px; }
 .member-self { color: var(--text-light); font-size: 12px; }
+.member-pending { color: #b45309; font-size: 12px; font-weight: 600; white-space: nowrap; }
 
 /* 사진 확대 라이트박스 */
 .lightbox {
@@ -1584,6 +1585,17 @@ body { max-width: 100%; overflow-x: hidden; }
   margin-bottom: 12px;
   border-top: 1px solid var(--border);
 }
+.batch-template {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+}
+.batch-template[hidden] { display: none; }
+.batch-template-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.batch-template-name { font-size: 13px; color: var(--text-light); }
+.batch-template-note { margin: 10px 0 0; font-size: 12.5px; line-height: 1.6; color: #b45309; }
 .batch-spinner {
   width: 20px; height: 20px;
   border: 3px solid #e0f2fe;

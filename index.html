@@ -90,7 +90,7 @@
 
     <section class="toolbar">
       <div class="search-box">
-        <input type="text" id="searchInput" placeholder="자산명, 자산번호, 위치, 사용자, 부서, 제작사 검색..." autocomplete="off" />
+        <input type="text" id="searchInput" placeholder="자산명, 자산코드, 위치, 사용자, 부서, 제작사 검색..." autocomplete="off" />
         <button id="clearBtn" class="btn-clear" title="검색어 지우기">✕</button>
       </div>
       <button class="btn btn-secondary" id="advToggle">상세 필터</button>
@@ -158,7 +158,7 @@
           <tr>
             <th class="col-check"><input type="checkbox" id="checkAllPage" title="이 페이지 전체 선택" /></th>
             <th class="sortable" data-key="assetName">자산명 <span class="sort-arrow"></span></th>
-            <th class="sortable" data-key="assetNumber">자산번호 <span class="sort-arrow"></span></th>
+            <th class="sortable" data-key="assetNumber">자산코드 <span class="sort-arrow"></span></th>
             <th>라벨</th>
             <th class="sortable" data-key="location">위치 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="manager"><span id="thManager">사용자</span> <span class="sort-arrow"></span></th>
@@ -204,7 +204,7 @@
        <div id="adminReviewBody"></div>
      </div>
      <div class="admin-panel" id="admin-hist" hidden>
-       <input type="text" id="adminHistSearch" class="hist-search" placeholder="자산명 또는 자산번호로 검색..." autocomplete="off" />
+       <input type="text" id="adminHistSearch" class="hist-search" placeholder="자산명 또는 자산코드로 검색..." autocomplete="off" />
        <div id="adminHistBody"></div>
      </div>
      <div class="admin-panel" id="admin-members" hidden>
@@ -256,7 +256,7 @@
             <input type="text" id="f-assetName" />
           </div>
           <div class="form-row">
-            <label id="lbl-assetNumber">자산번호 <span class="req">*</span></label>
+            <label id="lbl-assetNumber">자산코드 <span class="req">*</span></label>
             <input type="text" id="f-assetNumber" />
           </div>
           <div class="form-row">
@@ -266,10 +266,10 @@
           <div class="form-row full">
             <label>라벨 파일</label>
             <input type="file" id="f-labelFile" accept=".pdf,image/*" />
-            <div class="ocr-hint">💡 라벨을 <b>사진(이미지)</b>으로 올리면 아래 버튼으로 <b>자산번호·취득금액</b>을 자동으로 채웁니다. (나머지 항목은 직접 입력)</div>
+            <div class="ocr-hint">💡 라벨을 <b>사진(이미지)</b>으로 올리면 아래 버튼으로 <b>자산코드·취득금액</b>을 자동으로 채웁니다. (나머지 항목은 직접 입력)</div>
             <div class="label-file-info" id="labelFileInfo"><span class="photo-placeholder">파일 없음</span></div>
             <div class="ocr-row">
-              <button type="button" class="btn btn-secondary btn-sm" id="ocrBtn" hidden>🔍 라벨에서 자산번호·금액 채우기</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="ocrBtn" hidden>🔍 라벨에서 자산코드·금액 채우기</button>
               <button type="button" class="btn-link" id="ocrResultBtn" hidden>인식 결과 보기</button>
               <button type="button" class="btn-link" id="removeLabelFileBtn" hidden>파일 제거</button>
             </div>
@@ -612,7 +612,7 @@
         <button class="modal-close" data-close>✕</button>
       </div>
       <div class="modal-body">
-        <p class="batch-lead" id="batchLead">라벨 사진을 <b>여러 장 한꺼번에</b> 올리면 각 사진의 자산번호를 인식해 한 번에 검수합니다. 한 곳에서 모아 찍었다면 아래 <b>위치·자산명</b>을 넣어 범위를 좁히면 더 정확합니다.</p>
+        <p class="batch-lead" id="batchLead">라벨 사진을 <b>여러 장 한꺼번에</b> 올리면 각 사진의 자산코드를 인식해 한 번에 검수합니다. 한 곳에서 모아 찍었다면 아래 <b>위치·자산명</b>을 넣어 범위를 좁히면 더 정확합니다.</p>
         <div class="batch-filters">
           <div class="form-row">
             <label>위치 <span class="label-hint">(선택)</span></label>
@@ -631,12 +631,22 @@
           <input type="file" id="batchInspectInput" accept="image/*" multiple hidden />
           <input type="file" id="batchPdfInput" accept="application/pdf,.pdf" hidden />
           <button type="button" class="btn btn-primary" id="batchPickBtn">🖼️ 사진 선택 (여러 장)</button>
-          <button type="button" class="btn btn-secondary" id="batchPdfBtn">📄 PDF 목록 불러오기</button>
+          <button type="button" class="btn btn-primary" id="batchPdfBtn" hidden>📄 PDF 불러오기</button>
           <button type="button" class="btn btn-secondary batch-retry" id="batchRetryAllBtn" hidden>↻ 전체 재시도</button>
           <button type="button" class="btn btn-secondary batch-retry" id="batchRetryRotateBtn" hidden>🔄 전체 회전 재시도</button>
           <button type="button" class="btn btn-secondary batch-cancel-btn" id="batchCancelBtn" hidden>✕ 인식 취소</button>
           <span class="batch-spinner" id="batchSpinner" hidden></span>
           <span class="batch-summary" id="batchInspectSummary"></span>
+        </div>
+        <!-- 자산 등록 PDF 검수: 양식(한글 파일) 다운로드 / 최고관리자 양식 등록 -->
+        <div class="batch-template" id="batchTemplateRow" hidden>
+          <input type="file" id="batchTemplateInput" hidden />
+          <div class="batch-template-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="batchTemplateDownload">📥 양식 다운로드</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="batchTemplateUpload" hidden>⬆️ 양식 등록/교체</button>
+            <span class="batch-template-name" id="batchTemplateName">양식 확인 중…</span>
+          </div>
+          <p class="batch-template-note">⚠️ 양식을 내려받아 <b>자산코드·위치</b>를 채운 뒤, <b>반드시 PDF로 변환해서</b> 올려주세요. (한글/워드에서 <b>다른 이름으로 저장 → PDF</b> 또는 <b>인쇄 → PDF로 저장</b>)</p>
         </div>
         <div class="batch-list" id="batchInspectList"></div>
         <div class="batch-fields">
@@ -742,10 +752,10 @@
         </div>
       </div>
       <h2 class="scan-guide-title">자산 검수 촬영</h2>
-      <p class="scan-guide-sub">라벨에 인쇄된 <b>자산번호</b>가<br />또렷하게 보이도록 촬영해 주세요.</p>
+      <p class="scan-guide-sub">라벨에 인쇄된 <b>자산코드</b>가<br />또렷하게 보이도록 촬영해 주세요.</p>
       <ul class="scan-guide-list">
         <li><span class="sg-ic">📱</span> <span>휴대폰을 <b>세로</b>로 들고 촬영하세요.</span></li>
-        <li><span class="sg-ic">🔍</span> <span>자산번호가 화면에 <b>크고 반듯하게</b> 담기도록.</span></li>
+        <li><span class="sg-ic">🔍</span> <span>자산코드가 화면에 <b>크고 반듯하게</b> 담기도록.</span></li>
         <li><span class="sg-ic">💡</span> <span><b>밝은 곳</b>에서 그림자·흔들림 없이.</span></li>
       </ul>
       <div class="scan-guide-actions">
@@ -760,7 +770,7 @@
     <div class="scan-loading-box">
       <div class="scan-spinner"></div>
       <div class="scan-loading-title">📷 자산 인식 중…</div>
-      <div class="scan-loading-msg" id="scanLoadingMsg">사진에서 자산번호를 읽고 있습니다.</div>
+      <div class="scan-loading-msg" id="scanLoadingMsg">사진에서 자산코드를 읽고 있습니다.</div>
       <button type="button" class="btn btn-secondary scan-cancel-btn" id="scanCancelBtn">✕ 인식 취소</button>
     </div>
   </div>

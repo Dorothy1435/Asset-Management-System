@@ -342,7 +342,7 @@ function renderNav() {
 async function loadData() {
   // 베이스 자산(읽기 전용)은 3개 파일에서 합쳐 읽는다.
   //  · assets.json        : 2025년도 자산(메인)
-  //  · assets2025add.json : 2025년도 자산에 추가 병합분(6.30 기준, 중복 자산번호 제외됨)
+  //  · assets2025add.json : 2025년도 자산에 추가 병합분(6.30 기준, 중복 자산코드 제외됨)
   //  · assets2024.json    : 2024년도 자산 메뉴 (assetGroup=GROUP_PAST 태깅됨)
   const fetchJson = (url) => fetch(url).then((r) => (r.ok ? r.json() : [])).catch(() => []);
   // 첫 화면을 빨리 띄우려고 '기본(2025)' 데이터만 먼저 로드. 2024 자산(2천여 건)은 뒤에서 이어 로드.
@@ -682,18 +682,22 @@ function updateUI() {
   const navAdmin = g("navAdmin");
   if (navAdmin) navAdmin.hidden = !isAdmin;
   const pendingMembers = members.filter((m) => (m.status || "pending") === "pending").length;
+  // 관리자 승격 요청(grant_admin)은 자산 결재가 아니라 회원 관리에서 처리 → 배지 계산을 분리한다.
+  const assetReqN = requests.filter((r) => r.action !== "grant_admin").length;
+  const grantReqN = isSuperAdmin ? requests.filter((r) => r.action === "grant_admin").length : 0;
+  const memberBadge = pendingMembers + grantReqN;    // 최고관리자는 승격 요청도 회원 관리에서 확인
   const setBadge = (id, n) => { const el = g(id); if (el) { el.textContent = n; el.hidden = !n; } };
-  setBadge("memberPendingCount", pendingMembers);
-  setBadge("adminMemberCount", pendingMembers);      // 관리자 페이지 '회원 관리' 탭 배지
-  setBadge("adminReviewCount", requests.length);     // 관리자 페이지 '승인 대기' 탭 배지
-  // 관리자 네비 링크 배지 = 승인대기 + 회원승인대기
-  setBadge("navAdminCount", (requests.length || 0) + pendingMembers);
+  setBadge("memberPendingCount", memberBadge);
+  setBadge("adminMemberCount", memberBadge);         // 관리자 페이지 '회원 관리' 탭 배지
+  setBadge("adminReviewCount", assetReqN);           // 관리자 페이지 '승인 대기' 탭 배지
+  // 관리자 네비 링크 배지 = 자산 결재 + 회원 승인 + (최고관리자) 승격 요청
+  setBadge("navAdminCount", assetReqN + memberBadge);
 
   if (loggedIn) {
     const uname = myProfile?.name || myProfile?.username || (currentUser.email || "").split("@")[0];
     g("userTag").textContent = isAdmin ? `관리자: ${uname}` : `${uname} 님`;
   }
-  g("pendingCount").textContent = requests.length;
+  g("pendingCount").textContent = assetReqN;
 
   const n = unseenCount();
   const badge = g("myReqCount");
@@ -771,7 +775,10 @@ function applyFilter(resetPage = true) {
     if (cost < minCost || cost > maxCost) return false;
     if (!kw) return true;
     const hay = [a.assetName, a.assetNumber, a.labelSticker, a.location, a.manager, a.dept, a.org, a.maker, a.model, a.spec].join(" ").toLowerCase();
-    return hay.includes(kw);
+    if (hay.includes(kw)) return true;
+    // 자산코드는 공백·하이픈·점을 무시하고도 검색되게 (예: "2026-0404 ..." 로 쳐도 매칭)
+    const kwNorm = kw.replace(/[\s.\-]/g, "");
+    return !!kwNorm && String(a.assetNumber || "").toLowerCase().replace(/[\s.\-]/g, "").includes(kwNorm);
   });
   sortFiltered();
   // 검색/필터를 바꿀 때만 1페이지로. 데이터 새로고침(실시간 동기화 등, applyFilter(false))은 보던 페이지 유지.
@@ -852,7 +859,7 @@ function render() {
     <tr>
       <td class="col-check"><input type="checkbox" class="row-check" data-id="${esc(a.id)}" ${selectedIds.has(String(a.id)) ? "checked" : ""} /></td>
       <td class="cell-name" title="${esc(a.assetName)}"><div class="name-wrap">${thumb}<span>${esc(a.assetName)} ${tag}</span></div></td>
-      <td class="cell-num" data-label="자산번호">${esc(a.assetNumber)}</td>
+      <td class="cell-num" data-label="자산코드">${esc(a.assetNumber)}</td>
       <td data-label="라벨" class="${labelHtml === "-" ? "m-empty" : ""}">${labelHtml}</td>
       <td class="cell-loc${mE(a.location)}" data-label="위치" title="${esc(a.location)}">${esc(val(a.location))}</td>
       <td data-label="사용자" class="${mE(a.manager).trim()}">${esc(val(a.manager))}</td>
@@ -1099,7 +1106,7 @@ function openDetail(id) {
   const isElec = groupOf(a) === GROUP_ELEC;
   const rows = [
     ["메뉴", groupLabel(groupOf(a))],
-    ["자산명", a.assetName], ["자산번호", a.assetNumber], ["라벨스티커", a.labelSticker],
+    ["자산명", a.assetName], ["자산코드", a.assetNumber], ["라벨스티커", a.labelSticker],
     ["라벨 파일", a.labelFile ? (a.labelFileName || "첨부됨") : ""],
     ["모델명", a.model], ["규격", a.spec], ["제작회사", a.maker],
     ["단가", a.unitPrice ? won(a.unitPrice) : ""], ["수량", a.qty],
@@ -1726,7 +1733,7 @@ function confusableAssetMatch(target, norm, pool) {
   // 유일하게 가장 적게 어긋난 후보만 인정 (동점이면 애매하므로 보정하지 않음)
   return best && !tie ? best : null;
 }
-// 자산번호를 정규화(공백·하이픈 제거)해 비교하며 자산을 찾는다.
+// 자산코드를 정규화(공백·하이픈 제거)해 비교하며 자산을 찾는다.
 // pool: 검색 대상 자산 배열(기본 전체). 일괄 검수의 '위치·자산명 필터'로 좁힌 후보를 넘길 수 있다.
 function findAssetByNumber(code, pool) {
   const list = pool || assets;
@@ -1742,7 +1749,7 @@ function findAssetByNumber(code, pool) {
   // 3) 혼동쌍 보정: 3↔8 처럼 OCR이 헷갈리는 숫자로만 어긋난 유일한 자산이면 그것으로 인정.
   hit = confusableAssetMatch(target, norm, list);
   if (hit) return hit;
-  // 4) 근접 매칭: 실제 등록된 자산번호 중 편집거리가 최소이면서 '유일하게 가까운' 후보만 채택.
+  // 4) 근접 매칭: 실제 등록된 자산코드 중 편집거리가 최소이면서 '유일하게 가까운' 후보만 채택.
   //    (연속 번호는 1자리 차이라, 애매하면 채택하지 않아 오인식을 막는다.)
   if (target.length >= 16 && target.length <= 24) {
     let best = null, bestD = Infinity, secondD = Infinity;
@@ -1774,7 +1781,7 @@ function extractAssetCodes(text) {
   cand.sort((a, b) => (b.length === 20) - (a.length === 20) || b.length - a.length);
   return [...new Set(cand)];
 }
-// 2024년도 자산번호(예: G20250019-0001)처럼 '문자+숫자(+하이픈)' 형식 후보를 뽑는다.
+// 2024년도 자산코드(예: G20250019-0001)처럼 '문자+숫자(+하이픈)' 형식 후보를 뽑는다.
 function extractAlnumCodes(text) {
   if (!text) return [];
   const runs = [];
@@ -1903,7 +1910,7 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
   } catch (e) {
     // 취소(직접 AbortError이거나, 취소로 워커가 종료돼 생긴 오류)는 위로 전달해 조용히 중단
     if (scanCancelRequested || (e && e.name === "AbortError")) { _numOcrProgress = null; throw makeCancelError(); }
-    console.error("자산번호 인식 오류:", e);
+    console.error("자산코드 인식 오류:", e);
   } finally {
     _numOcrProgress = null;
   }
@@ -1911,7 +1918,7 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
   // 우선순위: 숫자(20자리) 매칭 → 2024 문자형식 매칭 → 표시용 후보
   const hit = matched();
   if (hit) return hit;
-  if (alnumHit) return alnumHit.assetNumber; // 정확한 자산번호를 돌려주면 handleScanCapture가 그대로 매칭
+  if (alnumHit) return alnumHit.assetNumber; // 정확한 자산코드를 돌려주면 handleScanCapture가 그대로 매칭
   return candidates.find((c) => c.length === 20) || candidates[0] || null;
 }
 // 사진촬영 검수 버튼 → 촬영 안내 모달 표시
@@ -1927,7 +1934,7 @@ function launchScanCamera() {
   const input = document.getElementById("scanCameraInput");
   if (input) { input.value = ""; input.click(); }
 }
-// 카메라로 찍은 사진 처리: 자산번호 인식 → 매칭 자산의 검수 확인 화면 열기
+// 카메라로 찍은 사진 처리: 자산코드 인식 → 매칭 자산의 검수 확인 화면 열기
 async function handleScanCapture(file) {
   if (!file) return;
   if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
@@ -1941,12 +1948,12 @@ async function handleScanCapture(file) {
     const code = await recognizeAssetNumber(raw, mode, null, true);
     setScanLoading("", false);
     if (!code) {
-      alert("사진에서 자산번호를 인식하지 못했습니다.\n\n· 라벨의 ‘자산번호’가 잘리지 않게\n· 크고 반듯하게, 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
+      alert("사진에서 자산코드를 인식하지 못했습니다.\n\n· 라벨의 ‘자산코드’가 잘리지 않게\n· 크고 반듯하게, 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
       return;
     }
     const a = findAssetByNumber(code);
     if (!a) {
-      alert(`인식된 자산번호와 일치하는 자산을 찾지 못했습니다.\n\n인식된 번호: ${code}\n\n등록된 자산이 맞는지 확인 후 다시 시도해 주세요.`);
+      alert(`인식된 자산코드와 일치하는 자산을 찾지 못했습니다.\n\n인식된 번호: ${code}\n\n등록된 자산이 맞는지 확인 후 다시 시도해 주세요.`);
       return;
     }
     // 매칭 성공 → 이제서야 검수 기록용 사진을 압축하고 검수 확인 화면으로
@@ -2016,23 +2023,108 @@ function openBatchInspect() {
   const bAffil = document.getElementById("batch-affil");
   bAffil.innerHTML = deptOptionsHtml(affil);
   bAffil.value = affil;
-  document.getElementById("batchInspectTitle").textContent = isAdmin ? "라벨 여러 장 검수" : "라벨 여러 장 검수 요청";
-  const lead = document.getElementById("batchLead");
-  if (lead) lead.innerHTML = "<b>라벨 사진</b>을 여러 장 한꺼번에 올리면 각 사진의 자산번호를 인식해 한 번에 검수합니다. 한 곳에서 모아 찍었다면 아래 <b>위치·자산명</b>을 넣어 범위를 좁히면 더 정확합니다.";
+  setBatchMode("label");
   const note = document.getElementById("batchInspectNote");
   if (note) note.hidden = isAdmin;
   renderBatchList();
   show("batchInspectOverlay");
   return true;
 }
-// '📄 자산 등록 PDF 검수' 버튼 → 검수 창을 열고(제목·안내를 PDF용으로 바꾼 뒤) 곧바로 PDF 파일 선택창을 띄운다.
+// 검수 창을 '라벨 사진'용 / '자산 등록 PDF'용으로 전환 (제목·안내·버튼 노출을 함께 바꾼다)
+function setBatchMode(mode) {
+  const pdf = mode === "pdf";
+  const title = document.getElementById("batchInspectTitle");
+  const lead = document.getElementById("batchLead");
+  const verb = isAdmin ? "" : " 요청";
+  if (title) title.textContent = (pdf ? "자산 등록 PDF 검수" : "라벨 여러 장 검수") + verb;
+  if (lead) lead.innerHTML = pdf
+    ? "<b>자산 등록 PDF</b>(자산코드·위치 표)를 올리면 코드와 위치를 함께 인식해 한 번에 검수합니다. 등록 안 된 코드는 <b>‘미등록 코드’</b>로 표시되니 재확인하세요. 검수하면 <b>위치도 함께 저장</b>됩니다."
+    : "<b>라벨 사진</b>을 여러 장 한꺼번에 올리면 각 사진의 자산코드를 인식해 한 번에 검수합니다. 한 곳에서 모아 찍었다면 아래 <b>위치·자산명</b>을 넣어 범위를 좁히면 더 정확합니다.";
+  // 라벨용/PDF용 버튼을 모드에 맞게만 노출
+  const show1 = (id, on) => { const el = document.getElementById(id); if (el) el.hidden = !on; };
+  show1("batchPickBtn", !pdf);
+  show1("batchPdfBtn", pdf);
+  show1("batchTemplateRow", pdf);   // 양식 다운로드/등록 줄은 PDF 모드에서만
+  if (pdf) refreshTemplateUI();
+}
+// '📄 자산 등록 PDF 검수' 버튼 → 검수 창을 PDF 모드로 연다. (바로 파일창을 띄우지 않고, 창 안에서 직접 고르게 함)
 function openPdfInspect() {
   if (!openBatchInspect()) return;               // 로그인·메뉴 확인 실패 시 중단
-  document.getElementById("batchInspectTitle").textContent = isAdmin ? "자산 등록 PDF 검수" : "자산 등록 PDF 검수 요청";
-  const lead = document.getElementById("batchLead");
-  if (lead) lead.innerHTML = "<b>자산 등록 PDF</b>(자산코드·위치 표)를 올리면 코드와 위치를 함께 인식해 한 번에 검수합니다. 등록 안 된 코드는 <b>‘미등록 코드’</b>로 표시되니 재확인하세요. 검수하면 <b>위치도 함께 저장</b>됩니다.";
-  const input = document.getElementById("batchPdfInput");
-  if (input) { input.value = ""; input.click(); }
+  setBatchMode("pdf");
+}
+// ===== 자산 등록 PDF 양식(한글 파일) — 최고관리자가 등록, 모두가 다운로드 =====
+// 양식 정보(url·파일명)는 별도 테이블 없이 assets 테이블의 예약 행(kind='config')에 저장한다.
+const TEMPLATE_CFG_ID = "config-pdf-template";
+let templateCfgCache; // undefined=미로딩, null=없음, {url, filename}=등록됨
+async function loadTemplateConfig(force) {
+  if (!sb) return null;
+  if (!force && templateCfgCache !== undefined) return templateCfgCache;
+  try {
+    const { data } = await sb.from("assets").select("data").eq("id", TEMPLATE_CFG_ID).maybeSingle();
+    templateCfgCache = (data && data.data) || null;
+  } catch (e) { console.warn("양식 정보 로드 실패:", e?.message || e); templateCfgCache = null; }
+  return templateCfgCache;
+}
+async function saveTemplateConfig(cfg) {
+  const { error } = await sb.from("assets").upsert({ id: TEMPLATE_CFG_ID, kind: "config", data: cfg, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  templateCfgCache = cfg;
+}
+// PDF 모드가 열릴 때 양식 등록 여부/파일명, 업로드 버튼(최고관리자) 노출을 갱신
+async function refreshTemplateUI() {
+  const upBtn = document.getElementById("batchTemplateUpload");
+  if (upBtn) upBtn.hidden = !isSuperAdmin;   // 양식 등록/교체는 최고관리자만
+  const nameEl = document.getElementById("batchTemplateName");
+  if (nameEl) nameEl.textContent = "양식 확인 중…";
+  const cfg = await loadTemplateConfig(true);
+  if (!nameEl) return;
+  if (cfg && cfg.url) nameEl.textContent = `현재 양식: ${cfg.filename || "등록됨"}`;
+  else nameEl.textContent = isSuperAdmin ? "등록된 양식이 없습니다. ‘양식 등록/교체’로 올려주세요." : "아직 등록된 양식이 없습니다. (최고관리자 등록 후 이용 가능)";
+}
+// 임의 파일(한글 등)을 Storage에 올리고 공개 URL 반환 — 원본 확장자·파일명 보존
+async function uploadTemplateFile(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const safe = (file.name || "template").replace(/[^\w.\-가-힣]/g, "_");
+  const path = `templates/${Date.now()}-${safe}`;
+  const type = file.type || "application/octet-stream";
+  const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, new Blob([buf], { type }), { contentType: type, upsert: true });
+  if (error) throw error;
+  return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+// 최고관리자: 양식 파일 등록/교체
+async function handleTemplateUpload(file) {
+  if (!file) return;
+  if (!isSuperAdmin) { alert("양식 등록은 최고관리자만 할 수 있습니다."); return; }
+  if (file.size > 20 * 1024 * 1024) { alert("양식 파일은 20MB 이하로 올려주세요."); return; }
+  const nameEl = document.getElementById("batchTemplateName");
+  if (nameEl) nameEl.textContent = "양식 올리는 중…";
+  try {
+    const url = await uploadTemplateFile(file);
+    await saveTemplateConfig({ url, filename: file.name || "자산등록양식", updatedAt: new Date().toISOString() });
+    alert("양식이 등록되었습니다. 이제 모든 사용자가 ‘양식 다운로드’로 받을 수 있습니다.");
+  } catch (e) {
+    console.error("양식 등록 오류:", e);
+    alert("양식 등록에 실패했습니다. 다시 시도해 주세요.");
+  }
+  refreshTemplateUI();
+}
+// 양식 다운로드 (원본 파일명으로 저장되도록 blob으로 받아 내려줌)
+async function downloadPdfTemplate() {
+  const cfg = await loadTemplateConfig();
+  if (!cfg || !cfg.url) { alert("아직 등록된 양식이 없습니다.\n최고관리자가 ‘양식 등록/교체’로 파일을 올린 뒤 이용할 수 있습니다."); return; }
+  try {
+    const res = await fetch(cfg.url);
+    if (!res.ok) throw new Error("fetch 실패");
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = cfg.filename || "자산등록양식";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (e) {
+    console.warn("양식 blob 다운로드 실패 — 새 탭으로 엽니다:", e?.message || e);
+    window.open(cfg.url, "_blank");
+  }
 }
 // 여러 장 업로드 처리: 파일마다 순서대로 인식 → 결과를 즉시 목록에 반영
 async function handleBatchFiles(files) {
@@ -2102,12 +2194,12 @@ async function handleBatchFiles(files) {
     renderBatchList();
   }
   if (newDup && !scanCancelRequested) {
-    alert(`자산번호가 중복되는 사진이 ${newDup}장 있습니다.\n(같은 번호가 여러 장이거나, 이미 이번 회차에 검수된 자산)\n\n화면 아래 ‘⏭️ 건너뛰고 완료’ 또는 ‘🔁 덮어쓰기 완료’ 버튼으로 처리 방법을 한 번에 선택하세요.`);
+    alert(`자산코드가 중복되는 사진이 ${newDup}장 있습니다.\n(같은 번호가 여러 장이거나, 이미 이번 회차에 검수된 자산)\n\n화면 아래 ‘⏭️ 건너뛰고 완료’ 또는 ‘🔁 덮어쓰기 완료’ 버튼으로 처리 방법을 한 번에 선택하세요.`);
   }
 }
-// ===== PDF 목록으로 검수 (PDF 안의 자산번호를 모두 읽어 한 번에 검수) =====
+// ===== PDF 목록으로 검수 (PDF 안의 자산코드를 모두 읽어 한 번에 검수) =====
 // PDF의 모든 페이지에서 글자를 추출한다. 같은 줄(y좌표 근접) 아이템을 x순으로 이어 붙여
-// 표의 자산번호가 한 덩어리로 잡히게 한다. (텍스트가 들어있는 PDF에서 동작 — 스캔 이미지 PDF는 글자가 없음)
+// 표의 자산코드가 한 덩어리로 잡히게 한다. (텍스트가 들어있는 PDF에서 동작 — 스캔 이미지 PDF는 글자가 없음)
 async function extractPdfText(dataUrl, onProgress) {
   await ensurePdfjs();
   if (!window.pdfjsLib) throw new Error("PDF 라이브러리 미로드");
@@ -2368,7 +2460,7 @@ async function retryBatchItem(index, tryRotate = false) {
   finally { batchProcessing = false; batchSuppressScan = false; setScanLoading("", false); setBatchBusy(false); renderBatchList(); }
   if (it.status === "canceled") return;
   if (it.status === "nomatch" || it.status === "error") {
-    alert("이 사진은 여전히 자산번호를 인식하지 못했어요.\n\n· 위치·자산명 칸을 채우면 범위가 좁아져 잘 잡혀요\n· 옆으로 찍혔다면 ‘🔄 회전 재시도’를 눌러 보세요\n· 그래도 안 되면 그 자산은 상세 화면에서 직접 검수하세요.");
+    alert("이 사진은 여전히 자산코드를 인식하지 못했어요.\n\n· 위치·자산명 칸을 채우면 범위가 좁아져 잘 잡혀요\n· 옆으로 찍혔다면 ‘🔄 회전 재시도’를 눌러 보세요\n· 그래도 안 되면 그 자산은 상세 화면에서 직접 검수하세요.");
   }
 }
 // 인식 실패한 사진들만 한 번에 모두 다시 인식. tryRotate=true면 90·180·270도 회전까지 시도.
@@ -2412,7 +2504,7 @@ async function applyBatchInspect(policy) {
     const ov = policy === "overwrite";
     batchItems.forEach((it) => { if (it.status === "dup" || it.status === "already") it.overwrite = ov; });
   }
-  // 검수 준비됨 + '덮어쓰기' 선택 항목. 같은 자산번호는 한 번만(마지막 사진 우선) 처리.
+  // 검수 준비됨 + '덮어쓰기' 선택 항목. 같은 자산코드는 한 번만(마지막 사진 우선) 처리.
   const byId = new Map();
   batchItems.filter(batchWillApply).forEach((it) => byId.set(String(it.asset.id), it));
   const targets = [...byId.values()];
@@ -2468,7 +2560,7 @@ async function applyBatchInspect(policy) {
   await reloadAll(); rerender();
 }
 
-// 인식 텍스트에서 '자산번호(20자리)'와 '취득금액(천단위 숫자)'만 채운다.
+// 인식 텍스트에서 '자산코드(20자리)'와 '취득금액(천단위 숫자)'만 채운다.
 // (품명·비치호실 등 한글 항목은 OCR 정확도 한계로 자동입력하지 않음 — 직접 입력)
 function fillFromOcr(text) {
   const t = (text || "").replace(/\r/g, "");
@@ -2479,9 +2571,9 @@ function fillFromOcr(text) {
     el.value = value;
     filled.push(label || field);
   };
-  // 자산번호: 20자리 자산코드 (구입일·금액 등 다른 숫자와 섞이지 않게 줄 단위로 추출)
+  // 자산코드: 20자리 자산코드 (구입일·금액 등 다른 숫자와 섞이지 않게 줄 단위로 추출)
   const code = extractAssetCode(t);
-  if (code) setIfEmpty("assetNumber", code, "자산번호");
+  if (code) setIfEmpty("assetNumber", code, "자산코드");
   // 취득금액: 천단위 구분 숫자 중 가장 큰 값
   const money = (t.match(/\d{1,3}(?:[.,]\s?\d{3})+/g) || []).map((x) => Number(x.replace(/[^0-9]/g, ""))).filter((n) => n >= 1000 && n < 100000000);
   if (money.length) setIfEmpty("acquireCost", String(Math.max(...money)), "취득금액");
@@ -2496,13 +2588,13 @@ async function saveForm() {
   const isElec = group === GROUP_ELEC;
   // 전자 메뉴는 필수 입력 조건 없음 (등록/수정/삭제 자유)
   if (!isElec && (!assetName || !assetNumber || !location)) {
-    showFormError("필수 항목을 입력해주세요. (자산명, 자산번호, 위치)");
+    showFormError("필수 항목을 입력해주세요. (자산명, 자산코드, 위치)");
     return;
   }
-  // 자산번호 중복 (값이 있을 때만, 편집중인 자산/요청 제외)
+  // 자산코드 중복 (값이 있을 때만, 편집중인 자산/요청 제외)
   if (assetNumber && !editingRequestId) {
     const dup = assets.find((a) => a.assetNumber === assetNumber && String(a.id) !== String(id));
-    if (dup) { showFormError("이미 등록된 자산번호입니다."); return; }
+    if (dup) { showFormError("이미 등록된 자산코드입니다."); return; }
   }
 
   const fields = {
@@ -3081,16 +3173,18 @@ function setAdminTab(tab) {
 function renderReview() {
   const body = document.getElementById("adminReviewBody");
   if (!body) return;
-  if (requests.length === 0) { selectedReqIds.clear(); body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`; return; }
+  // 관리자 승격 요청(grant_admin)은 자산 결재 목록이 아니라 '회원 관리'에서 처리한다.
+  const reviewable = requests.filter((r) => r.action !== "grant_admin");
+  if (reviewable.length === 0) { selectedReqIds.clear(); body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`; return; }
   // 유효한 선택만 유지
-  const validIds = new Set(requests.map((r) => String(r.id)));
+  const validIds = new Set(reviewable.map((r) => String(r.id)));
   selectedReqIds.forEach((id) => { if (!validIds.has(id)) selectedReqIds.delete(id); });
   const actionLabel = { create: "등록 요청", update: "수정 요청", delete: "삭제 요청", inspect: "검수 요청" };
   const actionCls = { create: "req-create", update: "req-update", delete: "req-delete", inspect: "req-inspect" };
   // 묶음(batch) 요청은 하나의 그룹 카드로, 나머지는 개별 카드로
   const groups = new Map();
   const singles = [];
-  requests.forEach((r) => {
+  reviewable.forEach((r) => {
     const b = r.payload && r.payload.batch;
     if (b) {
       let g = groups.get(b);
@@ -3140,7 +3234,7 @@ function renderReqCard(r, actionLabel, actionCls) {
     ? `<b>${esc(p.assetName || "")}</b> (${esc(p.assetNumber || "")})`
     : `<div class="req-fields">
           <span><b>${esc(p.assetName || "")}</b></span>
-          <span>자산번호: ${esc(p.assetNumber || "-")}</span>
+          <span>자산코드: ${esc(p.assetNumber || "-")}</span>
           <span>위치: ${esc(p.location || "-")}</span>
           <span>사용자: ${esc(p.manager || "-")}</span>
           <span>상태: ${esc(p.status || "-")}</span>
@@ -3263,7 +3357,7 @@ async function bulkRejectSelected() {
 
 // ===== 결재/변경 이력 (관리자) =====
 function shortVal(v) { v = v === "" || v === null || v === undefined ? "(없음)" : String(v); return v.length > 28 ? v.slice(0, 28) + "…" : v; }
-const HIST_LABELS = { assetName: "자산명", assetNumber: "자산번호", labelSticker: "라벨스티커", labelFile: "라벨 파일", status: "상태", location: "위치", manager: "사용자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
+const HIST_LABELS = { assetName: "자산명", assetNumber: "자산코드", labelSticker: "라벨스티커", labelFile: "라벨 파일", status: "상태", location: "위치", manager: "사용자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
 function histSummary(h) {
   if (h.action === "inspect") return `🔍 ${esc(h.note || "검수 확인")}`;
   if (h.action === "delete") return `자산이 <b>삭제</b>되었습니다.`;
@@ -3343,26 +3437,39 @@ function renderMembers() {
         ${sorted.map((m) => {
           const isSelf = String(m.id) === String(myId);
           const isSuper = m.role === "superadmin";
+          const isAdminRole = m.role === "admin";
           const status = m.status || "pending";
-          // 가입 승인/거절 (관리자 가능)
+          const pendingGrant = pendingGrantFor(m.id);
+          // 가입 승인/거절 — '일반 사용자'에게만. 다른 관리자·최고관리자는 여기서 건드릴 수 없다.
           let approveBtns = "";
-          if (!isSelf && !isSuper) {
+          if (!isSelf && !isSuper && !isAdminRole) {
             if (status !== "approved") approveBtns += `<button class="btn-mini btn-view" data-setstatus="approved" data-id="${esc(m.id)}">승인</button> `;
             if (status === "pending") approveBtns += `<button class="btn-mini btn-del" data-setstatus="rejected" data-id="${esc(m.id)}">거절</button> `;
             if (status === "approved") approveBtns += `<button class="btn-mini btn-edit" data-setstatus="pending" data-id="${esc(m.id)}">승인취소</button> `;
           }
-          // 권한 변경/삭제 (최고관리자만)
+          // 관리자 승격: 일반 관리자는 '요청', 최고관리자는 즉시 지정 또는 요청 승인/거절 (승인된 일반 사용자만)
+          let promoBtns = "";
+          if (!isSelf && !isSuper && !isAdminRole && status === "approved") {
+            if (isSuperAdmin) {
+              promoBtns += pendingGrant
+                ? `<button class="btn-mini btn-view" data-approveadmin="${esc(m.id)}">✅ 승격 승인</button> <button class="btn-mini btn-del" data-rejectadmin="${esc(m.id)}">요청 거절</button> `
+                : `<button class="btn-mini btn-view" data-role="admin" data-id="${esc(m.id)}">관리자로</button> `;
+            } else {
+              promoBtns += pendingGrant
+                ? `<span class="member-pending">승격 요청됨 · 최고관리자 승인 대기</span> `
+                : `<button class="btn-mini btn-view" data-reqadmin="${esc(m.id)}">관리자 승격 요청</button> `;
+            }
+          }
+          // 관리자 강등/회원 삭제 — 최고관리자만
           let superBtns = "";
           if (!isSelf && !isSuper && isSuperAdmin) {
-            const toggle = m.role === "admin"
-              ? `<button class="btn-mini btn-edit" data-role="user" data-id="${esc(m.id)}">사용자로</button>`
-              : `<button class="btn-mini btn-view" data-role="admin" data-id="${esc(m.id)}">관리자로</button>`;
-            superBtns = `${toggle} <button class="btn-mini btn-del" data-delmember="${esc(m.id)}">삭제</button>`;
+            if (isAdminRole) superBtns += `<button class="btn-mini btn-edit" data-role="user" data-id="${esc(m.id)}">사용자로</button> `;
+            superBtns += `<button class="btn-mini btn-del" data-delmember="${esc(m.id)}">삭제</button>`;
           }
           let actions;
           if (isSelf) actions = `<span class="member-self">본인</span>`;
           else if (isSuper) actions = `<span class="member-self">최고관리자</span>`;
-          else actions = approveBtns + superBtns;
+          else actions = (approveBtns + promoBtns + superBtns).trim() || `<span class="member-self">—</span>`;
           return `
           <tr>
             <td>${esc(m.name || "-")}</td>
@@ -3377,11 +3484,65 @@ function renderMembers() {
         }).join("")}
       </tbody>
     </table>
-    <p class="member-count">총 ${members.length}명 · 가입 승인은 관리자가, 권한 변경·삭제는 최고관리자가 할 수 있습니다.</p>`;
+    <p class="member-count">총 ${members.length}명 · 가입 승인은 관리자가, <b>관리자 승격은 최고관리자 승인</b>으로, 권한 변경·삭제는 최고관리자만 할 수 있습니다. (관리자는 다른 관리자를 건드릴 수 없습니다.)</p>`;
+}
+// 이 회원에 대한 '관리자 승격' 대기 요청 (없으면 undefined)
+function pendingGrantFor(memberId) {
+  return requests.find((r) => r.action === "grant_admin" && String(r.target_id) === String(memberId));
+}
+// 일반 관리자: 사용자를 관리자로 '승격 요청' (최고관리자 승인 대기)
+async function requestAdminGrant(id) {
+  if (!isAdmin) return;
+  const m = members.find((x) => String(x.id) === String(id));
+  if (!m) return;
+  if (m.role === "admin" || m.role === "superadmin") { alert("이미 관리자입니다."); return; }
+  if ((m.status || "pending") !== "approved") { alert("가입 승인이 완료된 사용자만 관리자 승격을 요청할 수 있습니다."); return; }
+  if (pendingGrantFor(id)) { alert("이미 승격 요청이 접수되어 최고관리자 승인 대기 중입니다."); return; }
+  if (!confirm(`${m.name || m.username || m.email} 님을 관리자로 승격 요청하시겠습니까?\n최고관리자 승인 후 관리자가 됩니다.`)) return;
+  const who = myProfile?.name || myProfile?.username || (currentUser.email || "").split("@")[0];
+  try {
+    const { error } = await sb.from("requests").insert({
+      action: "grant_admin", target_id: String(id),
+      payload: { name: m.name || "", username: m.username || "", email: m.email || "", requestedRole: "admin", batchLabel: "관리자 승격" },
+      requester: who, note: `관리자 승격 요청 · 대상: ${m.name || m.username || m.email}`,
+      user_id: currentUser.id, status: "pending",
+    });
+    if (error) throw error;
+  } catch (e) { console.error(e); alert("승격 요청에 실패했습니다."); return; }
+  await sbLoadRequests(); renderMembers(); updateUI();
+  alert("관리자 승격 요청이 접수되었습니다. 최고관리자 승인 후 반영됩니다.");
+}
+// 최고관리자: 승격 요청 승인 → 실제 관리자로 지정
+async function approveAdminGrant(id) {
+  if (!isSuperAdmin) { alert("관리자 승격 승인은 최고관리자만 할 수 있습니다."); return; }
+  const m = members.find((x) => String(x.id) === String(id));
+  const req = pendingGrantFor(id);
+  if (!m) return;
+  if (!confirm(`${m.name || m.username || m.email} 님을 관리자로 승격하시겠습니까?`)) return;
+  try {
+    const { error } = await sb.from("profiles").update({ role: "admin" }).eq("id", id);
+    if (error) throw error;
+    if (req) await sb.from("requests").update({ status: "approved", decided_at: new Date().toISOString() }).eq("id", req.id);
+  } catch (e) { console.error(e); alert("승격 승인에 실패했습니다."); return; }
+  await sbLoadMembers(); await sbLoadRequests(); renderMembers(); updateUI();
+}
+// 최고관리자: 승격 요청 거절
+async function rejectAdminGrant(id) {
+  if (!isSuperAdmin) { alert("최고관리자만 처리할 수 있습니다."); return; }
+  const req = pendingGrantFor(id);
+  if (!req) { renderMembers(); return; }
+  if (!confirm("이 관리자 승격 요청을 거절하시겠습니까?")) return;
+  try {
+    const { error } = await sb.from("requests").update({ status: "rejected", decided_at: new Date().toISOString() }).eq("id", req.id);
+    if (error) throw error;
+  } catch (e) { console.error(e); alert("처리에 실패했습니다."); return; }
+  await sbLoadRequests(); renderMembers(); updateUI();
 }
 async function setMemberStatus(id, status) {
   const m = members.find((x) => String(x.id) === String(id));
   if (!m) return;
+  // 다른 관리자·최고관리자 계정은 최고관리자만 건드릴 수 있다.
+  if ((m.role === "admin" || m.role === "superadmin") && !isSuperAdmin) { alert("다른 관리자 계정은 최고관리자만 변경할 수 있습니다."); return; }
   const label = { approved: "승인", rejected: "거절", pending: "승인취소" }[status] || status;
   if (!confirm(`${m.name || m.username || m.email} 님을 ${label}하시겠습니까?`)) return;
   try {
@@ -3393,8 +3554,10 @@ async function setMemberStatus(id, status) {
   updateUI();
 }
 async function setMemberRole(id, role) {
+  if (!isSuperAdmin) { alert("권한 변경은 최고관리자만 할 수 있습니다."); return; }
   const m = members.find((x) => String(x.id) === String(id));
   if (!m) return;
+  if (m.role === "superadmin") { alert("최고관리자의 권한은 변경할 수 없습니다."); return; }
   const label = role === "admin" ? "관리자로 지정" : "사용자로 변경";
   if (!confirm(`${m.username || m.email} 님을 ${label}하시겠습니까?`)) return;
   try {
@@ -3405,8 +3568,10 @@ async function setMemberRole(id, role) {
   renderMembers();
 }
 async function deleteMember(id) {
+  if (!isSuperAdmin) { alert("회원 삭제는 최고관리자만 할 수 있습니다."); return; }
   const m = members.find((x) => String(x.id) === String(id));
   if (!m) return;
+  if (m.role === "superadmin") { alert("최고관리자 계정은 삭제할 수 없습니다."); return; }
   if (!confirm(`${m.username || m.email} 님을 삭제하시겠습니까?\n\n해당 회원의 권한과 프로필이 제거됩니다.`)) return;
   try {
     const { error } = await sb.from("profiles").delete().eq("id", id);
@@ -3573,7 +3738,7 @@ async function exportExcel() {
   try { await ensureXlsx(); } catch { alert("엑셀 모듈을 불러오지 못했습니다. 인터넷 연결을 확인해주세요."); return; }
   const rows = filtered.map((a) => ({
     "메뉴": groupLabel(groupOf(a)),
-    "자산명": a.assetName || "", "자산번호": a.assetNumber || "", "라벨스티커": a.labelSticker || "", "라벨파일": a.labelFile ? (a.labelFileName || "있음") : "",
+    "자산명": a.assetName || "", "자산코드": a.assetNumber || "", "라벨스티커": a.labelSticker || "", "라벨파일": a.labelFile ? (a.labelFileName || "있음") : "",
     "모델명": a.model || "", "규격": a.spec || "", "제작회사": a.maker || "",
     "단가": a.unitPrice || 0, "수량": a.qty || 0, "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "",
     "보관 위치": a.location || "", "관리 기관": a.org || "", "운영 부서": a.dept || "",
@@ -3707,6 +3872,13 @@ document.getElementById("batchPdfBtn").addEventListener("click", () => {
   if (input) { input.value = ""; input.click(); }
 });
 document.getElementById("batchPdfInput").addEventListener("change", (e) => { handlePdfInspect(e.target.files && e.target.files[0]); });
+// 자산 등록 PDF 양식: 다운로드 / (최고관리자) 등록·교체
+document.getElementById("batchTemplateDownload").addEventListener("click", downloadPdfTemplate);
+document.getElementById("batchTemplateUpload").addEventListener("click", () => {
+  const input = document.getElementById("batchTemplateInput");
+  if (input) { input.value = ""; input.click(); }
+});
+document.getElementById("batchTemplateInput").addEventListener("change", (e) => { handleTemplateUpload(e.target.files && e.target.files[0]); });
 // 여러 장/PDF 인식 취소
 document.getElementById("batchCancelBtn").addEventListener("click", () => { scanCancelRequested = true; terminateNumberOcrWorker(); });
 document.getElementById("batchRetryAllBtn").addEventListener("click", () => retryAllFailed(false));
@@ -3885,9 +4057,15 @@ document.getElementById("adminMembersBody").addEventListener("click", (e) => {
   const statusBtn = e.target.closest("button[data-setstatus]");
   const roleBtn = e.target.closest("button[data-role]");
   const delBtn = e.target.closest("button[data-delmember]");
+  const reqAdminBtn = e.target.closest("button[data-reqadmin]");
+  const approveAdminBtn = e.target.closest("button[data-approveadmin]");
+  const rejectAdminBtn = e.target.closest("button[data-rejectadmin]");
   if (statusBtn) setMemberStatus(statusBtn.dataset.id, statusBtn.dataset.setstatus);
   else if (roleBtn) setMemberRole(roleBtn.dataset.id, roleBtn.dataset.role);
   else if (delBtn) deleteMember(delBtn.dataset.delmember);
+  else if (reqAdminBtn) requestAdminGrant(reqAdminBtn.dataset.reqadmin);
+  else if (approveAdminBtn) approveAdminGrant(approveAdminBtn.dataset.approveadmin);
+  else if (rejectAdminBtn) rejectAdminGrant(rejectAdminBtn.dataset.rejectadmin);
 });
 
 // 건의 게시판
