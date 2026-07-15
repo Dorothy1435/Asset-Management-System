@@ -1097,6 +1097,8 @@ body {
 @keyframes scan-spin { to { transform: rotate(360deg); } }
 .scan-loading-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
 .scan-loading-msg { font-size: 13px; color: var(--text-light); line-height: 1.5; }
+.scan-cancel-btn { margin-top: 18px; width: 100%; }
+.batch-cancel-btn { color: #b91c1c; border-color: #fecaca; }
 
 /* 검수 촬영 안내 모달 */
 .scan-guide { text-align: center; padding: 0 28px 26px; overflow: hidden; }

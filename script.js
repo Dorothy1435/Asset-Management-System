@@ -1770,6 +1770,23 @@ function setScanLoading(msg, show) {
   if (msg) { const m = document.getElementById("scanLoadingMsg"); if (m) m.textContent = msg; }
   el.hidden = !show;
 }
+// 인식(OCR) 취소용 플래그 — 사용자가 '인식 취소'를 누르면 true. 각 인식 단계 앞에서 확인해 중단한다.
+let scanCancelRequested = false;
+function makeCancelError() { const e = new Error("인식이 취소되었습니다."); e.name = "AbortError"; return e; }
+// 재사용 중인 숫자 OCR 워커를 종료해 '진행 중인' 인식까지 즉시 끊는다(다음 사용 시 자동으로 새로 만든다).
+function terminateNumberOcrWorker() {
+  if (!_numOcrWorkerPromise) return;
+  const p = _numOcrWorkerPromise;
+  _numOcrWorkerPromise = null;
+  p.then((w) => { try { w && w.terminate && w.terminate(); } catch {} }).catch(() => {});
+}
+// 단일(카메라) 검수 인식 취소 — 로딩 오버레이의 '인식 취소' 버튼
+function cancelScanRecognition() {
+  scanCancelRequested = true;
+  terminateNumberOcrWorker();
+  batchSuppressScan = false;
+  setScanLoading("", false);
+}
 // 두 문자열의 편집 거리(Levenshtein) — 근접 매칭용
 function _editDistance(a, b) {
   const m = a.length, n = b.length;
@@ -1934,10 +1951,13 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
   let alnumHit = null; // 2024 형식(G20250019-0001 등) 매칭 자산
   const tryAlnum = (text) => { if (alnumHit) return; for (const c of extractAlnumCodes(text)) { const a = findAsset2024ByCode(c, pool); if (a) { alnumHit = a; break; } } };
   const done = () => !!matched() || !!alnumHit;
+  const ck = () => { if (scanCancelRequested) throw makeCancelError(); }; // 각 단계 앞에서 취소 여부 확인
   try {
+    ck();
     setScanLoading("글자를 인식하는 중입니다… 처음 실행은 몇 초 걸릴 수 있어요.", true);
     _numOcrProgress = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
     const worker = await getNumberOcrWorker();
+    ck();
     if (worker) {
       // 1차: 메뉴에 맞는 화이트리스트 + 중간 해상도 (한 번에 끝나도록)
       try { await worker.setParameters({ tessedit_char_whitelist: alnumMode ? OCR_WL_ALNUM : OCR_WL_DIGIT }); } catch {}
@@ -1946,6 +1966,7 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
       addFrom(data.text); if (alnumMode) tryAlnum(data.text);
       // 1차 실패 시에만 고해상도 + 넓은 인식으로 정밀 재시도 (양쪽 형식 모두)
       if (!done()) {
+        ck();
         setScanLoading("자산을 다시 확인하는 중…", true);
         const high = await preprocessOcrImage(dataUrl, 2400, 1800);
         try { await worker.setParameters({ tessedit_char_whitelist: "" }); } catch {}
@@ -1961,6 +1982,7 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
       if (tryRotate && !done()) {
         try { await worker.setParameters({ tessedit_char_whitelist: alnumMode ? OCR_WL_ALNUM : OCR_WL_DIGIT }); } catch {}
         for (const deg of [90, 270, 180]) {
+          ck();
           setScanLoading("사진을 돌려서 다시 확인하는 중…", true);
           const rimg = await preprocessOcrImage(dataUrl, 2000, 1400, deg);
           ({ data } = await worker.recognize(rimg));
@@ -1981,10 +2003,13 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
       }
     }
   } catch (e) {
+    // 취소(직접 AbortError이거나, 취소로 워커가 종료돼 생긴 오류)는 위로 전달해 조용히 중단
+    if (scanCancelRequested || (e && e.name === "AbortError")) { _numOcrProgress = null; throw makeCancelError(); }
     console.error("자산번호 인식 오류:", e);
   } finally {
     _numOcrProgress = null;
   }
+  if (scanCancelRequested) throw makeCancelError();
   // 우선순위: 숫자(20자리) 매칭 → 2024 문자형식 매칭 → 표시용 후보
   const hit = matched();
   if (hit) return hit;
@@ -2008,6 +2033,7 @@ function launchScanCamera() {
 async function handleScanCapture(file) {
   if (!file) return;
   if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
+  scanCancelRequested = false; // 새 촬영 시작 → 이전 취소 상태 초기화
   try {
     setScanLoading("사진을 준비하는 중…", true);
     const raw = await fileToDataURL(file);                 // 인식용 원본(고해상도)
@@ -2029,8 +2055,9 @@ async function handleScanCapture(file) {
     const photo = await compressImage(file, 900, 0.6);
     openInspect(a.id, photo);
   } catch (e) {
-    console.error("사진촬영 검수 오류:", e);
     setScanLoading("", false);
+    if (e && e.name === "AbortError") return; // 사용자가 '인식 취소'를 누름 → 조용히 종료
+    console.error("사진촬영 검수 오류:", e);
     alert("사진 처리 중 문제가 발생했습니다. 다시 시도해 주세요.");
   }
 }
@@ -2102,6 +2129,7 @@ async function handleBatchFiles(files) {
   const list = Array.from(files || []).filter((f) => f && f.type && f.type.startsWith("image/"));
   if (!list.length) { alert("이미지(사진) 파일을 선택해 주세요."); return; }
   if (batchProcessing) return;
+  scanCancelRequested = false; // 새 업로드 시작 → 이전 취소 상태 초기화
   batchProcessing = true;
   batchSuppressScan = true;
   batchDone = false;      // 새 사진을 추가하면 완료 상태 해제 → 완료 버튼 다시 표시
@@ -2115,6 +2143,7 @@ async function handleBatchFiles(files) {
     const period = document.getElementById("batch-period").value;
     batchRunTotal = list.length; batchRunDone = 0;
     for (const file of list) {
+      if (scanCancelRequested) break; // '인식 취소' → 남은 사진은 처리하지 않음
       const item = { name: file.name || "사진", file, thumb: "", photoData: "", code: null, asset: null, status: "processing", overwrite: false };
       // 같은 사진(파일)을 또 고른 경우 — 인식 없이 '이미 올린 사진'으로 표시해 헷갈리지 않게 한다.
       const sig = `${file.name || ""}|${file.size || 0}|${file.lastModified || 0}`;
@@ -2144,6 +2173,7 @@ async function handleBatchFiles(files) {
           if (item.status !== "matched") newDup++;
         }
       } catch (e) {
+        if (e && e.name === "AbortError") { item.status = "canceled"; renderBatchList(); break; } // 취소 → 이 사진 표시 후 중단
         console.error("일괄 검수 인식 오류:", e);
         item.status = "error";
       }
@@ -2161,8 +2191,116 @@ async function handleBatchFiles(files) {
     setBatchBusy(false);
     renderBatchList();
   }
-  if (newDup) {
+  if (newDup && !scanCancelRequested) {
     alert(`자산번호가 중복되는 사진이 ${newDup}장 있습니다.\n(같은 번호가 여러 장이거나, 이미 이번 회차에 검수된 자산)\n\n화면 아래 ‘⏭️ 건너뛰고 완료’ 또는 ‘🔁 덮어쓰기 완료’ 버튼으로 처리 방법을 한 번에 선택하세요.`);
+  }
+}
+// ===== PDF 목록으로 검수 (PDF 안의 자산번호를 모두 읽어 한 번에 검수) =====
+// PDF의 모든 페이지에서 글자를 추출한다. 같은 줄(y좌표 근접) 아이템을 x순으로 이어 붙여
+// 표의 자산번호가 한 덩어리로 잡히게 한다. (텍스트가 들어있는 PDF에서 동작 — 스캔 이미지 PDF는 글자가 없음)
+async function extractPdfText(dataUrl, onProgress) {
+  await ensurePdfjs();
+  if (!window.pdfjsLib) throw new Error("PDF 라이브러리 미로드");
+  const base64 = (dataUrl.split(",")[1]) || "";
+  const raw = atob(base64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  const pdf = await window.pdfjsLib.getDocument({
+    data: bytes,
+    cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/",
+    cMapPacked: true,
+    standardFontDataUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/",
+  }).promise;
+  let out = "";
+  const n = pdf.numPages;
+  for (let p = 1; p <= n; p++) {
+    if (scanCancelRequested) break;
+    if (onProgress) onProgress(p, n);
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    const lines = new Map();
+    tc.items.forEach((it) => {
+      if (!it.str) return;
+      const key = Math.round((it.transform[5] || 0) / 2); // 2px 단위로 묶어 같은 줄로
+      if (!lines.has(key)) lines.set(key, []);
+      lines.get(key).push({ x: it.transform[4] || 0, s: it.str });
+    });
+    [...lines.keys()].sort((a, b) => b - a).forEach((k) => {
+      out += lines.get(k).sort((a, b) => a.x - b.x).map((o) => o.s).join(" ") + "\n";
+    });
+  }
+  try { pdf.destroy && pdf.destroy(); } catch {}
+  return out;
+}
+// 일반 텍스트(PDF 추출본)에서 자산번호 후보를 뽑는다. 토큰 단위(가장 정확) + 줄 단위(조각난 코드 복구) 병행.
+function extractCodesFromPlainText(text) {
+  const codes = new Set();
+  // 1) 토큰 단위: 공백으로 나눈 각 토큰에서 구분자만 제거 후 형식 확인 (인접 숫자와 섞이지 않아 정확)
+  String(text || "").split(/\s+/).forEach((tok) => {
+    const digits = tok.replace(/[.\-]/g, "");
+    if (/^\d{16,24}$/.test(digits)) codes.add(digits);                 // 20자리 숫자형 자산코드
+    const up = tok.toUpperCase().replace(/[.]/g, "");
+    if (/^[A-Z0-9\-]{6,}$/.test(up) && /[A-Z]/.test(up) && /\d/.test(up)) codes.add(up); // 2024 문자+숫자형(G20250019-0001 등)
+  });
+  // 2) 줄 단위(공백 제거 후 정확히 20자리만): 숫자가 조각나 있던 코드를 복구. 병합 오탐을 줄이려 20자리로 한정.
+  String(text || "").split(/[\r\n]+/).forEach((line) => {
+    const m = line.replace(/[.\s\-]/g, "").match(/\d{20}/g);
+    if (m) m.forEach((c) => codes.add(c));
+  });
+  return [...codes];
+}
+// PDF 파일 하나를 읽어 자산번호를 인식하고, 매칭된 자산을 검수 목록(batchItems)에 추가한다.
+async function handlePdfInspect(file) {
+  if (!file) return;
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+  if (!isPdf) { alert("PDF 파일을 선택해 주세요."); return; }
+  if (batchProcessing) return;
+  scanCancelRequested = false;
+  batchProcessing = true; batchSuppressScan = true; batchDone = false; batchApplyMsg = "";
+  batchRunTotal = 0; batchRunDone = 0;
+  setBatchBusy(true);
+  const summary = document.getElementById("batchInspectSummary");
+  if (summary) summary.innerHTML = "📄 PDF를 여는 중…";
+  let matchN = 0, unmatched = 0, codeCount = 0;
+  try {
+    const dataUrl = await fileToDataURL(file);
+    const text = await extractPdfText(dataUrl, (p, n) => {
+      if (summary) summary.innerHTML = `📄 PDF 읽는 중… <b class="batch-prog">${p}/${n}</b>`;
+    });
+    if (scanCancelRequested) return;
+    const period = document.getElementById("batch-period").value;
+    const pool = buildInspectPool(document.getElementById("batch-location").value, document.getElementById("batch-name").value);
+    const codes = extractCodesFromPlainText(text);
+    codeCount = codes.length;
+    const addedIds = new Set(batchItems.filter((it) => it.asset).map((it) => String(it.asset.id)));
+    const nomatch = [];
+    for (const code of codes) {
+      const asset = findAssetByNumber(code, pool) || findAsset2024ByCode(code, pool)
+                 || findAssetByNumber(code) || findAsset2024ByCode(code);
+      if (!asset) { nomatch.push(code); continue; }
+      if (addedIds.has(String(asset.id))) continue; // 이미 목록에 있는 자산은 건너뜀
+      addedIds.add(String(asset.id));
+      const item = { name: asset.assetNumber, file: null, thumb: "", photoData: "", code, asset, status: "matched", overwrite: false, fromPdf: true };
+      item.status = classifyBatchItem(item, asset, period);
+      batchItems.push(item);
+      matchN++;
+    }
+    // 일치하는 자산을 못 찾은 번호도 보이도록 목록에 추가(최대 500개) — 어떤 번호가 빠졌는지 확인용
+    nomatch.slice(0, 500).forEach((code) => {
+      batchItems.push({ name: code, file: null, thumb: "", photoData: "", code, asset: null, status: "nomatch", overwrite: false, fromPdf: true });
+    });
+    unmatched = nomatch.length;
+  } catch (e) {
+    console.error("PDF 검수 처리 오류:", e);
+    if (!scanCancelRequested) alert("PDF를 읽는 중 문제가 발생했습니다.\n텍스트가 들어있는 PDF인지 확인해 주세요. (스캔한 이미지 PDF는 글자를 읽을 수 없습니다 — 이 경우 사진 검수를 이용하세요.)");
+  } finally {
+    batchProcessing = false; batchRunTotal = 0; batchSuppressScan = false; setBatchBusy(false); renderBatchList();
+  }
+  if (scanCancelRequested) return;
+  if (!codeCount) {
+    alert("PDF에서 자산번호를 찾지 못했습니다.\n\n· 표에 자산번호(20자리)가 글자로 들어있는 PDF인지 확인하세요.\n· 스캔한 이미지 PDF라면 글자를 읽을 수 없습니다 — ‘사진 선택’으로 라벨을 촬영해 검수하세요.");
+  } else {
+    alert(`📄 PDF에서 자산번호 ${codeCount}개를 읽었습니다.\n\n· 검수 대상으로 찾음: ${matchN}건${unmatched ? `\n· 일치하는 자산을 못 찾은 번호: ${unmatched}개` : ""}\n\n아래 목록에서 확인 후 하단의 ‘검수 완료’ 버튼을 누르세요.`);
   }
 }
 const BATCH_STATUS = {
@@ -2173,6 +2311,7 @@ const BATCH_STATUS = {
   samephoto: { cls: "b-same", label: "이미 올린 사진" },
   nomatch: { cls: "b-err", label: "인식 실패" },
   error: { cls: "b-err", label: "인식 실패" },
+  canceled: { cls: "b-same", label: "인식 취소됨" },
   done: { cls: "b-done", label: "완료" },
   savefail: { cls: "b-err", label: "저장 실패" },
 };
@@ -2253,9 +2392,13 @@ function renderBatchActions() {
 }
 function setBatchBusy(busy) {
   const pick = document.getElementById("batchPickBtn");
+  const pdf = document.getElementById("batchPdfBtn");
   const spin = document.getElementById("batchSpinner");
+  const cancel = document.getElementById("batchCancelBtn");
   if (pick) pick.disabled = busy;
+  if (pdf) pdf.disabled = busy;
   if (spin) spin.hidden = !busy;
+  if (cancel) cancel.hidden = !busy; // 인식 중일 때만 '인식 취소' 노출
 }
 // 한 항목(사진)을 원본 파일로 인식해 상태를 채운다. (업로드/재시도 공용)
 async function recognizeIntoItem(item, mode, pool, period, tryRotate = false) {
@@ -2281,12 +2424,14 @@ async function retryBatchItem(index, tryRotate = false) {
   if (batchProcessing) return;
   const it = batchItems[index];
   if (!it || !it.file) return;
+  scanCancelRequested = false;
   batchProcessing = true; batchSuppressScan = true; batchDone = false; batchApplyMsg = ""; setBatchBusy(true);
   it.status = "processing"; renderBatchList();
   const { mode, pool, period } = currentBatchScan();
   try { await recognizeIntoItem(it, mode, pool, period, tryRotate); }
-  catch (e) { console.error("재시도 인식 오류:", e); it.status = "error"; }
+  catch (e) { if (e && e.name === "AbortError") it.status = "canceled"; else { console.error("재시도 인식 오류:", e); it.status = "error"; } }
   finally { batchProcessing = false; batchSuppressScan = false; setScanLoading("", false); setBatchBusy(false); renderBatchList(); }
+  if (it.status === "canceled") return;
   if (it.status === "nomatch" || it.status === "error") {
     alert("이 사진은 여전히 자산번호를 인식하지 못했어요.\n\n· 위치·자산명 칸을 채우면 범위가 좁아져 잘 잡혀요\n· 옆으로 찍혔다면 ‘🔄 회전 재시도’를 눌러 보세요\n· 그래도 안 되면 그 자산은 상세 화면에서 직접 검수하세요.");
   }
@@ -2296,21 +2441,23 @@ async function retryAllFailed(tryRotate = false) {
   if (batchProcessing) return;
   const fails = batchItems.filter((it) => (it.status === "nomatch" || it.status === "error") && it.file);
   if (!fails.length) return;
+  scanCancelRequested = false;
   batchProcessing = true; batchSuppressScan = true; batchDone = false; batchApplyMsg = ""; setBatchBusy(true);
   const { mode, pool, period } = currentBatchScan();
   batchRunTotal = fails.length; batchRunDone = 0;
   try {
     for (const it of fails) {
+      if (scanCancelRequested) break;
       it.status = "processing"; renderBatchList();
       try { await recognizeIntoItem(it, mode, pool, period, tryRotate); }
-      catch (e) { console.error("일괄 재시도 오류:", e); it.status = "error"; }
+      catch (e) { if (e && e.name === "AbortError") { it.status = "canceled"; renderBatchList(); break; } console.error("일괄 재시도 오류:", e); it.status = "error"; }
       batchRunDone++; renderBatchList();
     }
   } finally {
     batchProcessing = false; batchRunTotal = 0; batchSuppressScan = false; setScanLoading("", false); setBatchBusy(false); renderBatchList();
   }
   const still = batchItems.filter((it) => it.status === "nomatch" || it.status === "error").length;
-  if (still) alert(`아직 ${still}장은 인식되지 않았어요.\n${tryRotate ? "" : "옆으로 찍힌 사진이면 ‘🔄 전체 회전 재시도’를 눌러 보세요.\n"}위치·자산명 칸을 채우고 다시 시도하거나, 그 자산은 상세 화면에서 직접 검수하세요.`);
+  if (still && !scanCancelRequested) alert(`아직 ${still}장은 인식되지 않았어요.\n${tryRotate ? "" : "옆으로 찍힌 사진이면 ‘🔄 전체 회전 재시도’를 눌러 보세요.\n"}위치·자산명 칸을 채우고 다시 시도하거나, 그 자산은 상세 화면에서 직접 검수하세요.`);
 }
 // 목록의 사진을 크게 확대해 확인 (원본 파일에서 즉석 생성 → 메모리 절약)
 async function previewBatchItem(index) {
@@ -2355,14 +2502,16 @@ async function applyBatchInspect(policy) {
     batchApplyMsg = `💾 ${verb} 처리 중… <b class="batch-prog">${ok + fail + 1}/${targets.length}</b>`;
     const summary = document.getElementById("batchInspectSummary");
     if (summary) summary.innerHTML = batchApplyMsg;
+    const viaPdf = !!it.fromPdf;                 // PDF 목록 검수는 증빙 사진이 없다
+    const srcLabel = viaPdf ? "PDF 목록 검수" : "여러 장 검수";
     try {
       if (isAdmin) {
-        await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: true });
+        await applyInspect(it.asset.id, { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf });
       } else {
         await submitRequest({
           action: "inspect", target_id: it.asset.id,
-          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: true, assetName: it.asset.assetName, assetNumber: it.asset.assetNumber, batch: bid, batchLabel: "여러 장 검수" },
-          requester: reqName, note: `${period} 검수 확인 · 여러 장 검수`,
+          payload: { periodType: "회차", period, inspector, affiliation, photo: it.photoData, photos: [], label: !viaPdf, assetName: it.asset.assetName, assetNumber: it.asset.assetNumber, batch: bid, batchLabel: srcLabel },
+          requester: reqName, note: `${period} 검수 확인 · ${srcLabel}`,
         });
       }
       it.status = "done"; ok++;
@@ -3606,6 +3755,8 @@ document.getElementById("scanGuideStart").addEventListener("click", launchScanCa
 document.getElementById("scanGuideCancel").addEventListener("click", () => hide("scanGuideOverlay"));
 document.getElementById("scanGuideOverlay").addEventListener("click", (e) => { if (e.target.id === "scanGuideOverlay") hide("scanGuideOverlay"); });
 document.getElementById("scanCameraInput").addEventListener("change", (e) => { handleScanCapture(e.target.files && e.target.files[0]); });
+// 단일(카메라) 검수 인식 취소
+document.getElementById("scanCancelBtn").addEventListener("click", cancelScanRecognition);
 // 여러 장 한번에 검수
 document.getElementById("batchInspectBtn").addEventListener("click", openBatchInspect);
 document.getElementById("batchPickBtn").addEventListener("click", () => {
@@ -3613,6 +3764,14 @@ document.getElementById("batchPickBtn").addEventListener("click", () => {
   if (input) { input.value = ""; input.click(); }
 });
 document.getElementById("batchInspectInput").addEventListener("change", (e) => { handleBatchFiles(e.target.files); });
+// PDF 목록으로 검수
+document.getElementById("batchPdfBtn").addEventListener("click", () => {
+  const input = document.getElementById("batchPdfInput");
+  if (input) { input.value = ""; input.click(); }
+});
+document.getElementById("batchPdfInput").addEventListener("change", (e) => { handlePdfInspect(e.target.files && e.target.files[0]); });
+// 여러 장/PDF 인식 취소
+document.getElementById("batchCancelBtn").addEventListener("click", () => { scanCancelRequested = true; terminateNumberOcrWorker(); });
 document.getElementById("batchRetryAllBtn").addEventListener("click", () => retryAllFailed(false));
 document.getElementById("batchRetryRotateBtn").addEventListener("click", () => retryAllFailed(true));
 document.getElementById("batchActions").addEventListener("click", (e) => {
@@ -3638,7 +3797,11 @@ document.getElementById("batchInspectList").addEventListener("click", (e) => {
     const files = e.dataTransfer && e.dataTransfer.files;
     if (!files || !files.length) return;
     e.preventDefault(); modal.classList.remove("batch-drag");
-    handleBatchFiles(files);
+    // PDF를 끌어다 놓으면 PDF 목록 검수로, 사진은 여러 장 검수로 처리
+    const arr = Array.from(files);
+    const pdf = arr.find((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name || ""));
+    if (pdf) handlePdfInspect(pdf);
+    else handleBatchFiles(files);
   });
 })();
 // 검수 화면: 물품 사진 이어 찍기(최대 3장)

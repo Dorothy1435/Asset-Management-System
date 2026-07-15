@@ -613,7 +613,7 @@
         <button class="modal-close" data-close>✕</button>
       </div>
       <div class="modal-body">
-        <p class="batch-lead">라벨 사진을 <b>여러 장 한꺼번에</b> 올리면 각 사진의 자산번호를 인식해 한 번에 검수합니다. 한 곳에서 모아 찍었다면 아래 <b>위치·자산명</b>을 넣어 범위를 좁히면 더 정확합니다.</p>
+        <p class="batch-lead">라벨 사진을 <b>여러 장 한꺼번에</b> 올리면 각 사진의 자산번호를 인식해 한 번에 검수합니다. 한 곳에서 모아 찍었다면 아래 <b>위치·자산명</b>을 넣어 범위를 좁히면 더 정확합니다.<br><b>📄 PDF 목록</b>을 올리면 그 안의 자산번호를 모두 읽어 한 번에 검수할 수도 있습니다.</p>
         <div class="batch-filters">
           <div class="form-row">
             <label>위치 <span class="label-hint">(선택)</span></label>
@@ -630,9 +630,12 @@
         </div>
         <div class="batch-pick-row">
           <input type="file" id="batchInspectInput" accept="image/*" multiple hidden />
+          <input type="file" id="batchPdfInput" accept="application/pdf,.pdf" hidden />
           <button type="button" class="btn btn-primary" id="batchPickBtn">🖼️ 사진 선택 (여러 장)</button>
+          <button type="button" class="btn btn-secondary" id="batchPdfBtn">📄 PDF 목록 불러오기</button>
           <button type="button" class="btn btn-secondary batch-retry" id="batchRetryAllBtn" hidden>↻ 전체 재시도</button>
           <button type="button" class="btn btn-secondary batch-retry" id="batchRetryRotateBtn" hidden>🔄 전체 회전 재시도</button>
+          <button type="button" class="btn btn-secondary batch-cancel-btn" id="batchCancelBtn" hidden>✕ 인식 취소</button>
           <span class="batch-spinner" id="batchSpinner" hidden></span>
           <span class="batch-summary" id="batchInspectSummary"></span>
         </div>
@@ -786,6 +789,7 @@
       <div class="scan-spinner"></div>
       <div class="scan-loading-title">📷 자산 인식 중…</div>
       <div class="scan-loading-msg" id="scanLoadingMsg">사진에서 자산번호를 읽고 있습니다.</div>
+      <button type="button" class="btn btn-secondary scan-cancel-btn" id="scanCancelBtn">✕ 인식 취소</button>
     </div>
   </div>
 
