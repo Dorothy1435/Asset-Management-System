@@ -385,11 +385,26 @@ create policy "assets_select_auth" on public.assets for select to authenticated 
 
 
 -- =====================================================================
--- [권한 개방] 되돌리기·기록 삭제를 '모든 관리자(admin+superadmin)'가 가능하도록
---  · 되돌리기(revert)는 자산 쓰기(is_admin)로 동작하므로 이미 모든 관리자가 가능합니다.
---  · 기록 삭제(history DELETE)만 최고관리자 전용(hist_delete_super)이었어서 → is_admin 으로 개방.
+-- [기록 권한 세분화] 조회는 모든 관리자 / 되돌리기·삭제는 '본인 기록'만 (최고관리자는 전체)
+--  · history.user_id : 그 기록을 처리한 관리자(auth.uid). 앱이 기록 생성 시 저장합니다.
+--  · 조회(SELECT)   : 모든 관리자(is_admin) — 누가 무엇을 했는지 전원이 확인 가능
+--  · 삭제(DELETE)   : 본인이 처리한 기록(user_id = auth.uid) 또는 최고관리자
+--  · 되돌리기(revert): 자산 쓰기로 동작 → 화면에서 '본인 기록'에만 버튼 노출(앱에서 제어)
+--  · user_id 가 없는 '옛 기록'은 최고관리자만 삭제 가능(안전한 기본값)
 -- 이 블록을 Supabase SQL Editor 에서 한 번 실행하세요. (재실행 안전)
 -- =====================================================================
+alter table public.history add column if not exists user_id uuid;
+
+-- INSERT: 관리자만, 본인 user_id 로만 기록(위조 방지). 미지정(null)도 허용(구버전 대비).
+drop policy if exists "hist_insert_admin" on public.history;
+create policy "hist_insert_admin" on public.history for insert to authenticated
+  with check (public.is_admin() and (user_id = auth.uid() or user_id is null));
+
+-- DELETE: 본인이 처리한 기록이거나 최고관리자
 drop policy if exists "hist_delete_super" on public.history;
 drop policy if exists "hist_delete_admin" on public.history;
-create policy "hist_delete_admin" on public.history for delete to authenticated using (public.is_admin());
+drop policy if exists "hist_delete_own_or_super" on public.history;
+create policy "hist_delete_own_or_super" on public.history for delete to authenticated
+  using (public.is_superadmin() or user_id = auth.uid());
+
+-- SELECT 는 기존대로 모든 관리자 조회 (hist_select_admin, is_admin) — 변경 없음

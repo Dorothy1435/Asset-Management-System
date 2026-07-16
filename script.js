@@ -2977,6 +2977,7 @@ async function logHistory(entry) {
       asset_id: String(entry.asset_id), asset_name: entry.asset_name || "", action: entry.action,
       before_snap: entry.before || null, after_snap: entry.after || null,
       requester: entry.requester || "", note: entry.note || "", approved_by: (myProfile?.username || currentUser?.email || ""),
+      user_id: currentUser?.id || null,   // 처리자(작성자) — '본인 기록만 되돌리기·삭제' 권한 판별용
     });
   } catch (e) { console.error("이력 기록 실패:", e); }
 }
@@ -3122,10 +3123,17 @@ async function applyState(assetId, snap) {
     if (error) throw error;
   }
 }
+// 이력 기록 관리(되돌리기·삭제) 권한: 최고관리자는 전체, 일반 관리자는 '본인이 처리한 기록'만.
+// (user_id 가 없는 옛 기록은 최고관리자만 관리 가능 — 안전한 기본값)
+function canManageHist(h) {
+  if (isSuperAdmin) return true;
+  return !!(h && h.user_id && currentUser && String(h.user_id) === String(currentUser.id));
+}
 async function revertHistory(histId) {
   if (!isAdmin) { alert("원상복구(되돌리기)는 관리자만 할 수 있습니다."); return; }
   const h = history.find((x) => String(x.id) === String(histId));
   if (!h) return;
+  if (!canManageHist(h)) { alert("본인이 처리한 기록만 되돌릴 수 있습니다.\n(다른 관리자의 기록은 최고관리자만 되돌릴 수 있습니다.)"); return; }
   if (h.action === "inspect") { alert("검수 기록은 되돌리기 대상이 아닙니다. 검수 기록 삭제는 상세 화면에서 가능합니다."); return; }
   if (!confirm(`이 변경을 취소하고 '이전 상태'로 되돌리시겠습니까?\n\n대상: ${h.asset_name || h.asset_id}`)) return;
   const beforeNow = snapshotOf(findAsset(h.asset_id));
@@ -3137,6 +3145,9 @@ async function revertHistory(histId) {
 }
 async function deleteHistory(histId) {
   if (!isAdmin) { alert("기록 삭제는 관리자만 할 수 있습니다."); return; }
+  const h = history.find((x) => String(x.id) === String(histId));
+  if (!h) return;
+  if (!canManageHist(h)) { alert("본인이 처리한 기록만 삭제할 수 있습니다.\n(다른 관리자의 기록은 최고관리자만 삭제할 수 있습니다.)"); return; }
   if (!confirm("이 기록을 삭제하시겠습니까?\n\n(기록만 지워지며 현재 자산 상태는 바뀌지 않습니다. 삭제 후 이 시점으로 되돌릴 수 없습니다.)")) return;
   try { const { error } = await sb.from("history").delete().eq("id", histId); if (error) throw error; }
   catch (e) { console.error(e); alert("기록 삭제에 실패했습니다."); return; }
@@ -3484,12 +3495,13 @@ function renderHistory() {
   if (rows.length === 0) { body.innerHTML = `<div class="empty-msg">기록이 없습니다.</div>`; return; }
   const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림", inspect: "검수" };
   const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert", inspect: "req-inspect" };
-  const notice = isAdmin ? "" : `<div class="notice" style="margin-bottom:12px;">되돌리기·기록 삭제는 <b>관리자</b>만 할 수 있습니다.</div>`;
+  const notice = isSuperAdmin ? "" : `<div class="notice" style="margin-bottom:12px;">전체 기록을 <b>확인</b>할 수 있습니다. 되돌리기·삭제는 <b>본인이 처리한 기록</b>만 가능합니다. (다른 관리자 기록은 최고관리자만)</div>`;
   body.innerHTML = notice + `<div class="hist-list">` + rows.map((h) => {
     const summary = histSummary(h);
     const who = [h.approved_by && `결재 ${esc(h.approved_by)}`, h.requester && `신청 ${esc(h.requester)}`].filter(Boolean).join(" · ");
-    const canRevert = h.action !== "inspect" && isAdmin;
-    const actions = isAdmin
+    const mine = canManageHist(h);
+    const canRevert = h.action !== "inspect" && mine;
+    const actions = mine
       ? `<span class="hist-actions">${canRevert ? `<button class="btn-mini btn-edit" data-revert="${h.id}">되돌리기</button>` : ""}<button class="btn-mini btn-del" data-delhist="${h.id}">삭제</button></span>`
       : "";
     const tip = stripTags(`${h.asset_name || h.asset_id} · ${summary}${who ? " · " + who : ""}`);
