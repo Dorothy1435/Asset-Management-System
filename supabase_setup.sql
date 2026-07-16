@@ -368,3 +368,17 @@ returns void language sql security definer set search_path = public as $$
    where id = auth.uid();
 $$;
 grant execute on function public.update_my_profile(text, text) to authenticated;
+
+
+-- =====================================================================
+-- [개인정보 보호 강화] 자산 오버레이 조회를 '로그인한 사용자'만 가능하도록 잠금
+--  · 배경: 담당자 이름 등 개인정보는 public.assets(오버레이)에 저장됩니다.
+--    기존 정책 assets_select_all 은 using(true) 라서 익명(anon 키)으로도 읽혔습니다.
+--    → 이 블록을 실행하면 '로그인한 사용자'만 오버레이(개인정보 포함)를 조회합니다.
+--  · 로그인 사용자는 영향 없음. 익명 방문자는 기본 카탈로그(assets.json, 개인정보 없음)만 보게 됩니다.
+--  · requests / history / profiles 는 이미 로그인 전용으로 잠겨 있습니다.
+-- 이 블록을 Supabase SQL Editor 에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+drop policy if exists "assets_select_all" on public.assets;
+drop policy if exists "public_select" on public.assets;
+create policy "assets_select_auth" on public.assets for select to authenticated using (true);
