@@ -3123,7 +3123,7 @@ async function applyState(assetId, snap) {
   }
 }
 async function revertHistory(histId) {
-  if (!isSuperAdmin) { alert("원상복구(되돌리기)는 최고관리자만 할 수 있습니다."); return; }
+  if (!isAdmin) { alert("원상복구(되돌리기)는 관리자만 할 수 있습니다."); return; }
   const h = history.find((x) => String(x.id) === String(histId));
   if (!h) return;
   if (h.action === "inspect") { alert("검수 기록은 되돌리기 대상이 아닙니다. 검수 기록 삭제는 상세 화면에서 가능합니다."); return; }
@@ -3136,7 +3136,7 @@ async function revertHistory(histId) {
   await reloadAll(); rerender(); renderHistory();
 }
 async function deleteHistory(histId) {
-  if (!isSuperAdmin) { alert("기록 삭제는 최고관리자만 할 수 있습니다."); return; }
+  if (!isAdmin) { alert("기록 삭제는 관리자만 할 수 있습니다."); return; }
   if (!confirm("이 기록을 삭제하시겠습니까?\n\n(기록만 지워지며 현재 자산 상태는 바뀌지 않습니다. 삭제 후 이 시점으로 되돌릴 수 없습니다.)")) return;
   try { const { error } = await sb.from("history").delete().eq("id", histId); if (error) throw error; }
   catch (e) { console.error(e); alert("기록 삭제에 실패했습니다."); return; }
@@ -3484,12 +3484,12 @@ function renderHistory() {
   if (rows.length === 0) { body.innerHTML = `<div class="empty-msg">기록이 없습니다.</div>`; return; }
   const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림", inspect: "검수" };
   const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert", inspect: "req-inspect" };
-  const notice = isSuperAdmin ? "" : `<div class="notice" style="margin-bottom:12px;">되돌리기·기록 삭제는 <b>최고관리자</b>만 할 수 있습니다.</div>`;
+  const notice = isAdmin ? "" : `<div class="notice" style="margin-bottom:12px;">되돌리기·기록 삭제는 <b>관리자</b>만 할 수 있습니다.</div>`;
   body.innerHTML = notice + `<div class="hist-list">` + rows.map((h) => {
     const summary = histSummary(h);
     const who = [h.approved_by && `결재 ${esc(h.approved_by)}`, h.requester && `신청 ${esc(h.requester)}`].filter(Boolean).join(" · ");
-    const canRevert = h.action !== "inspect" && isSuperAdmin;
-    const actions = isSuperAdmin
+    const canRevert = h.action !== "inspect" && isAdmin;
+    const actions = isAdmin
       ? `<span class="hist-actions">${canRevert ? `<button class="btn-mini btn-edit" data-revert="${h.id}">되돌리기</button>` : ""}<button class="btn-mini btn-del" data-delhist="${h.id}">삭제</button></span>`
       : "";
     const tip = stripTags(`${h.asset_name || h.asset_id} · ${summary}${who ? " · " + who : ""}`);

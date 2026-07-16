@@ -382,3 +382,14 @@ grant execute on function public.update_my_profile(text, text) to authenticated;
 drop policy if exists "assets_select_all" on public.assets;
 drop policy if exists "public_select" on public.assets;
 create policy "assets_select_auth" on public.assets for select to authenticated using (true);
+
+
+-- =====================================================================
+-- [권한 개방] 되돌리기·기록 삭제를 '모든 관리자(admin+superadmin)'가 가능하도록
+--  · 되돌리기(revert)는 자산 쓰기(is_admin)로 동작하므로 이미 모든 관리자가 가능합니다.
+--  · 기록 삭제(history DELETE)만 최고관리자 전용(hist_delete_super)이었어서 → is_admin 으로 개방.
+-- 이 블록을 Supabase SQL Editor 에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+drop policy if exists "hist_delete_super" on public.history;
+drop policy if exists "hist_delete_admin" on public.history;
+create policy "hist_delete_admin" on public.history for delete to authenticated using (public.is_admin());
