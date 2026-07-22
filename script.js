@@ -2254,7 +2254,9 @@ async function handleBatchFiles(files) {
         // 목록에서 어떤 사진인지 바로 알아볼 수 있도록 모든 사진에 작은 썸네일을 만든다(실패 사진 확인용).
         try { item.thumb = await resizeDataUrl(raw, 160, 0.5); } catch {}
         renderBatchList();
-        const { asset, code } = await recognizeAssetInPool(raw, mode, pool);
+        // tryRotate=true: 검수 촬영과 동일하게, 갤러리 사진이 EXIF 회전으로 눕혀져 실패하면
+        // 90·180·270도 돌려가며 재인식. (회전은 일반 패스 실패 시에만 → 정상 사진은 속도 손해 없음)
+        const { asset, code } = await recognizeAssetInPool(raw, mode, pool, true);
         item.code = code || null;
         if (!asset) {
           item.status = "nomatch";
