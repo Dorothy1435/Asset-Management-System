@@ -83,7 +83,10 @@ async function ensurePdfjs() {
   }
 }
 async function ensureTesseract() {
-  if (!window.Tesseract) await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js");
+  // 로컬 번들 우선(첫 인식 다운로드 지연·CDN 장애 제거). 실패 시에만 CDN 폴백.
+  if (window.Tesseract) return;
+  try { await loadScript("/vendor/tesseract/tesseract.min.js"); } catch {}
+  if (!window.Tesseract) await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
 }
 async function ensureJsQR() {
   if (!window.jsQR) await loadScript("https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js");
@@ -1857,11 +1860,28 @@ async function getNumberOcrWorker() {
   if (!window.Tesseract || typeof Tesseract.createWorker !== "function") return null;
   if (!_numOcrWorkerPromise) {
     _numOcrWorkerPromise = (async () => {
-      const w = await Tesseract.createWorker("eng", 1, {
-        // fast 언어모델(약 2MB) — 표준(약 11MB)보다 다운로드·초기화·인식이 모두 빠르다. 숫자 인식엔 충분.
-        langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
-        logger: (m) => { if (_numOcrProgress) _numOcrProgress(m); },
-      });
+      const logger = (m) => { if (_numOcrProgress) _numOcrProgress(m); };
+      // 1순위: 로컬 번들(엔진·워커·코어·언어모델 모두 같은 서버에서 제공) → 첫 인식 다운로드 지연 제거.
+      //   · corePath: LSTM 전용 SIMD 코어(약 3.9MB, wasm 내장 단일파일). eng+숫자만 쓰므로 legacy 불필요.
+      //   · langPath: /vendor/tesseract/eng.traineddata.gz (fast 모델)
+      let w = null;
+      try {
+        w = await Tesseract.createWorker("eng", 1, {
+          workerPath: "/vendor/tesseract/worker.min.js",
+          corePath: "/vendor/tesseract/tesseract-core-simd-lstm.wasm.js",
+          langPath: "/vendor/tesseract",
+          gzip: false, // 압축 해제된 eng.traineddata 제공(호스팅의 Content-Encoding 이중해제 문제 회피)
+          logger,
+        });
+      } catch (e) {
+        // 로컬 번들 접근 실패(경로·SIMD 미지원 등) → CDN으로 폴백해 어떤 환경에서도 동작 보장.
+        console.warn("로컬 OCR 엔진 로드 실패 → CDN 폴백:", e);
+        w = await Tesseract.createWorker("eng", 1, {
+          // fast 언어모델(약 2MB) — 표준(약 11MB)보다 다운로드·초기화·인식이 모두 빠르다. 숫자 인식엔 충분.
+          langPath: "https://tessdata.projectnaptha.com/4.0.0_fast",
+          logger,
+        });
+      }
       try { await w.setParameters({ tessedit_pageseg_mode: "6", tessedit_char_whitelist: "0123456789" }); } catch {}
       return w;
     })().catch((e) => { _numOcrWorkerPromise = null; throw e; });
