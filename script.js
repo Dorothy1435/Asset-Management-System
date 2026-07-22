@@ -12,7 +12,12 @@ const DOMAIN = "inje.ac.kr";
 // 여기에 본인 이메일을 넣으면 SQL 없이도 바로 최고관리자가 됩니다. 예: ["admin@inje.ac.kr"]
 // (또는 Supabase에서 profiles.role 을 'superadmin' 으로 지정해도 됩니다.)
 const SUPER_ADMINS = ["bbui0284@inje.ac.kr"];
-const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+// 로그인 유지: 세션을 localStorage에 저장하고 토큰을 자동 갱신(기본값이지만 명시).
+// (storageKey는 기본값 유지 — 바꾸면 기존 로그인 세션을 못 찾아 한 번 로그아웃되므로 건드리지 않음)
+const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: window.localStorage },
+}) : null;
+const REMEMBER_ID_KEY = "assetmgr.rememberId"; // '아이디 저장' 체크 시 보관하는 로그인 아이디
 
 let baseAssets = [];
 let overlay = [];
@@ -508,7 +513,6 @@ function openAuth(mode) {
   authMode = mode;
   document.getElementById("authError").hidden = true;
   document.getElementById("authInfo").hidden = true;
-  document.getElementById("authId").value = "";
   document.getElementById("authPw").value = "";
   document.getElementById("authName").value = "";
   document.getElementById("authAffil").innerHTML = deptSignupOptionsHtml();
@@ -537,6 +541,13 @@ function applyAuthMode() {
   document.getElementById("forgotBtn").style.display = isSignup ? "none" : "";
   document.getElementById("authPw").setAttribute("autocomplete", isSignup ? "new-password" : "current-password");
   document.querySelectorAll(".signup-only").forEach((el) => (el.style.display = isSignup ? "" : "none"));
+  document.querySelectorAll(".login-only").forEach((el) => (el.style.display = isSignup ? "none" : ""));
+  // 로그인 모드에서는 '아이디 저장'된 아이디를 미리 채우고 체크박스도 반영(회원가입은 비움).
+  const savedId = localStorage.getItem(REMEMBER_ID_KEY) || "";
+  const idEl = document.getElementById("authId");
+  if (idEl) idEl.value = isSignup ? "" : savedId;
+  const rememberEl = document.getElementById("rememberId");
+  if (rememberEl) rememberEl.checked = !isSignup && !!savedId;
 }
 
 async function authSubmit() {
@@ -600,6 +611,10 @@ async function authSubmit() {
       const email = idToEmail(idVal, false);
       const { error } = await sb.auth.signInWithPassword({ email, password: pw });
       if (error) { errEl.textContent = "로그인 실패: 아이디 또는 비밀번호를 확인하세요."; errEl.hidden = false; return; }
+      // '아이디 저장' 체크 시 아이디 보관, 해제 시 삭제
+      const rememberEl = document.getElementById("rememberId");
+      if (rememberEl && rememberEl.checked) localStorage.setItem(REMEMBER_ID_KEY, idVal);
+      else localStorage.removeItem(REMEMBER_ID_KEY);
       hide("authOverlay");
     }
   } finally {
@@ -1882,7 +1897,9 @@ async function getNumberOcrWorker() {
           logger,
         });
       }
-      try { await w.setParameters({ tessedit_pageseg_mode: "6", tessedit_char_whitelist: "0123456789" }); } catch {}
+      // tessedit_do_invert=0: 라벨은 항상 '흰 바탕·검은 글자'이므로 반전 이미지 재인식(기본 ON)을
+      // 끈다 → 이미지당 인식 시간이 거의 절반. (흰 글자 라벨은 없으므로 정확도 손해 없음)
+      try { await w.setParameters({ tessedit_pageseg_mode: "6", tessedit_char_whitelist: "0123456789", tessedit_do_invert: "0" }); } catch {}
       return w;
     })().catch((e) => { _numOcrWorkerPromise = null; throw e; });
   }

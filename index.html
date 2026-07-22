@@ -405,6 +405,9 @@
           <label>비밀번호</label>
           <input type="password" id="authPw" autocomplete="current-password" required />
         </div>
+        <label class="remember-id login-only" for="rememberId" style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;user-select:none;">
+          <input type="checkbox" id="rememberId" /> <span>아이디 저장</span>
+        </label>
         <div class="consent-box signup-only" id="consentBox">
           <label class="consent-all"><input type="checkbox" id="agreeAll" /> <b>아래 내용에 모두 동의합니다</b></label>
           <label class="consent-item"><input type="checkbox" class="agree-item" id="agreePrivacy" /> <span>[필수] 개인정보 수집·이용 동의</span>
@@ -758,6 +761,7 @@
       <ul class="scan-guide-list">
         <li><span class="sg-ic">📱</span> <span>휴대폰을 <b>세로</b>로 들고 촬영하세요.</span></li>
         <li><span class="sg-ic">🔍</span> <span>자산코드가 화면에 <b>크고 반듯하게</b> 담기도록.</span></li>
+        <li><span class="sg-ic">🔳</span> <span>라벨의 <b>QR코드</b>도 함께 화면에 나오도록 찍어주세요.</span></li>
         <li><span class="sg-ic">💡</span> <span><b>밝은 곳</b>에서 그림자·흔들림 없이.</span></li>
       </ul>
       <div class="scan-guide-actions">
