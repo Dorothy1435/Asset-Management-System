@@ -2124,8 +2124,9 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
     // 진행률은 원형 링으로 표시(숫자 %가 차오름). 메시지는 안정적인 안내문 유지.
     _numOcrProgress = (m) => { if (m.status === "recognizing text") setScanProgress(Math.round((m.progress || 0) * 100)); };
     // 원본을 한 번만 디코드해 모든 인식 패스에서 재사용(큰 폰 사진의 반복 디코딩 비용 제거 → 빠름)
+    //  · dataUrl이 이미 디코드된 이미지(ImageBitmap 등)면 그대로 사용(디코드 생략 → 초반 지연 제거)
     let ocrSrc = dataUrl;
-    try { ocrSrc = await decodeImageOnce(dataUrl); } catch {}
+    if (typeof dataUrl === "string") { try { ocrSrc = await decodeImageOnce(dataUrl); } catch {} }
     const worker = await getNumberOcrWorker();
     ck();
     if (worker) {
@@ -2224,12 +2225,16 @@ async function handleScanCapture(file) {
   try {
     setScanLoading("사진을 준비하는 중…", true);
     setScanProgress(null);
-    const raw = await fileToDataURL(file);                 // 인식용 원본(고해상도)
+    // 파일에서 '바로' 디코드(하드웨어 가속) → base64 인코딩·재디코딩 왕복 제거로 초반 지연 감소.
+    // imageOrientation:'from-image'로 EXIF 회전 반영(세로 사진이 눕지 않게). 미지원 시 기존 방식 폴백.
+    let ocrInput;
+    try { ocrInput = await createImageBitmap(file, { imageOrientation: "from-image" }); }
+    catch { try { ocrInput = await createImageBitmap(file); } catch { ocrInput = await fileToDataURL(file); } }
     // 지금 메뉴가 2024면 문자+숫자(G형식) 우선 인식, 아니면 숫자(20자리) 우선
     const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
     // tryRotate=true: 옆으로/거꾸로 찍힌 라벨도 회전해가며 자동 인식(회전 해상도는 낮춰 빠르게).
     // 인식이 길어지면 로딩창의 '✏️ 직접 입력'으로 언제든 빠져 자산코드를 손으로 칠 수 있다.
-    const code = await recognizeAssetNumber(raw, mode, null, true);
+    const code = await recognizeAssetNumber(ocrInput, mode, null, true);
     if (!code) {
       setScanLoading("", false);
       scanHaptic(false);
