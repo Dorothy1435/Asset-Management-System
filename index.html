@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://pmjwwvgcmaywbatryibc.supabase.co" crossorigin />
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="style.css?v=20260729c" />
+  <link rel="stylesheet" href="style.css?v=20260729d" />
 </head>
 <body>
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -205,6 +205,7 @@
        <button class="admin-tab" data-atab="review">승인 대기 <span class="tab-badge" id="adminReviewCount" hidden>0</span></button>
        <button class="admin-tab" data-atab="hist">결재 내역</button>
        <button class="admin-tab" data-atab="members">회원 관리 <span class="tab-badge" id="adminMemberCount" hidden>0</span></button>
+       <button class="admin-tab" data-atab="access" hidden>🧾 접속 로그</button>
      </div>
      <div class="admin-panel" id="admin-review" hidden>
        <div id="adminReviewBody"></div>
@@ -215,6 +216,9 @@
      </div>
      <div class="admin-panel" id="admin-members" hidden>
        <div id="adminMembersBody"></div>
+     </div>
+     <div class="admin-panel" id="admin-access" hidden>
+       <div id="adminAccessBody"></div>
      </div>
    </section>
   </main>
@@ -793,6 +797,6 @@
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20260729c"></script>
+  <script src="script.js?v=20260729d"></script>
 </body>
 </html>

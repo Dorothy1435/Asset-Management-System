@@ -284,6 +284,32 @@ async function sbLoadMembers() {
   if (error) { console.error("회원 로드 오류:", error.message); return; }
   members = data || [];
 }
+// ===== 접속 로그 (최고관리자 전용 조회) =====
+let accessLogs = [];
+async function sbLoadAccessLogs() {
+  if (!sb || !isSuperAdmin) { accessLogs = []; return; }
+  const { data, error } = await sb.from("access_logs").select("*").order("created_at", { ascending: false }).limit(500);
+  if (error) { console.error("접속 로그 로드 오류:", error.message); return; }
+  accessLogs = data || [];
+}
+// 접속 기록: '로그인 유지' 특성상 매번 로그인하지 않으므로, 사용자·기기별 하루 1회만 남긴다(새로고침 스팸 방지).
+async function recordAccessLog() {
+  try {
+    if (!sb || !currentUser) return;
+    const key = "assetmgr.access." + currentUser.id;
+    const today = fmtDate(new Date().toISOString());
+    if (localStorage.getItem(key) === today) return; // 오늘 이미 기록됨
+    localStorage.setItem(key, today);
+    const meta = currentUser.user_metadata || {};
+    await sb.from("access_logs").insert({
+      user_id: currentUser.id,
+      email: currentUser.email || "",
+      name: (myProfile && myProfile.name) || meta.name || "",
+      affiliation: (myProfile && myProfile.affiliation) || meta.affiliation || "",
+      event: "login",
+    });
+  } catch (e) { /* 접속 로그 실패는 본 기능에 영향 없도록 조용히 무시 */ }
+}
 
 function buildAssets() {
   const addedRows = overlay.filter((o) => o.kind === "added");
@@ -326,7 +352,7 @@ function parseHash() {
   if (h === "board") return { page: "board" };
   if (h === "admin" || h.startsWith("admin/")) {
     const tab = h.split("/")[1] || "review";
-    return { page: "admin", tab: ["review", "hist", "members"].includes(tab) ? tab : "review" };
+    return { page: "admin", tab: ["review", "hist", "members", "access"].includes(tab) ? tab : "review" };
   }
   if (ROUTES[h]) return { page: "assets", group: ROUTES[h] };
   return { page: "assets", group: GROUP_2024 };
@@ -533,6 +559,8 @@ async function applySession(session) {
     const auth = document.getElementById("authOverlay");
     if (auth && !auth.hidden) ALL_MODALS.forEach(hide);
   }
+  // 접속 기록(하루 1회) — 승인된 사용자만. 실패해도 무시(fire-and-forget).
+  if (currentUser && isApproved) recordAccessLog();
 }
 
 function idToEmail(input, forceDomain) {
@@ -753,6 +781,8 @@ function updateUI() {
   g("reviewBtn").hidden = !isAdmin;
   g("histBtn").hidden = !isAdmin;
   g("membersBtn").hidden = !isAdmin; // 가입 승인은 관리자도 가능 (권한변경·삭제는 최고관리자만)
+  const accessTab = document.querySelector('.admin-tab[data-atab="access"]');
+  if (accessTab) accessTab.hidden = !isSuperAdmin; // 접속 로그 탭은 최고관리자만
   const navAdmin = g("navAdmin");
   if (navAdmin) navAdmin.hidden = !isAdmin;
   const pendingMembers = members.filter((m) => (m.status || "pending") === "pending").length;
@@ -3342,11 +3372,13 @@ function renderMyRequests() {
 // 관리자 페이지를 열고 데이터를 최신화한 뒤 선택 탭을 렌더링한다.
 async function openAdminPage(tab) {
   if (!isAdmin) { navTo("2025"); return; }
-  currentAdminTab = ["review", "hist", "members"].includes(tab) ? tab : "review";
+  let t = ["review", "hist", "members", "access"].includes(tab) ? tab : "review";
+  if (t === "access" && !isSuperAdmin) t = "review"; // 접속 로그는 최고관리자 전용
+  currentAdminTab = t;
   renderNav();
   setAdminTab(currentAdminTab);        // 먼저 화면 틀을 보여주고
   // 최신 데이터 로드 후 다시 렌더 (탭 전환도 빠르게 보이도록)
-  await Promise.all([sbLoadRequests(), sbLoadHistory(), sbLoadMembers()]);
+  await Promise.all([sbLoadRequests(), sbLoadHistory(), sbLoadMembers(), sbLoadAccessLogs()]);
   updateUI();
   setAdminTab(currentAdminTab);
 }
@@ -3354,10 +3386,32 @@ async function openAdminPage(tab) {
 function setAdminTab(tab) {
   currentAdminTab = tab;
   document.querySelectorAll(".admin-tab").forEach((b) => b.classList.toggle("active", b.dataset.atab === tab));
-  ["review", "hist", "members"].forEach((t) => { const el = document.getElementById("admin-" + t); if (el) el.hidden = t !== tab; });
+  ["review", "hist", "members", "access"].forEach((t) => { const el = document.getElementById("admin-" + t); if (el) el.hidden = t !== tab; });
   if (tab === "review") renderReview();
   else if (tab === "hist") renderHistory();
   else if (tab === "members") renderMembers();
+  else if (tab === "access") renderAccessLog();
+}
+// 접속 로그 렌더 (최고관리자 전용): 누가 언제 접속했는지
+function renderAccessLog() {
+  const body = document.getElementById("adminAccessBody");
+  if (!body) return;
+  if (!isSuperAdmin) { body.innerHTML = `<div class="empty-msg">최고관리자만 볼 수 있습니다.</div>`; return; }
+  if (!accessLogs.length) {
+    body.innerHTML = `<div class="empty-msg"><div class="empty-ic">🧾</div><div class="empty-title">접속 기록이 없습니다</div><div class="empty-sub">사용자가 로그인하면 여기에 표시됩니다.</div></div>`;
+    return;
+  }
+  const fmtDT = (iso) => { try { const d = new Date(iso); const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; } catch { return iso; } };
+  const rows = accessLogs.map((l) => `
+    <tr>
+      <td class="al-time">${fmtDT(l.created_at)}</td>
+      <td>${esc(l.name || "-")}</td>
+      <td class="al-email">${esc(l.email || "-")}</td>
+      <td>${esc(l.affiliation || "-")}</td>
+    </tr>`).join("");
+  body.innerHTML =
+    `<div class="notice" style="margin-bottom:12px;">사용자별 <b>하루 1회</b> 접속을 기록합니다. 최근 ${accessLogs.length.toLocaleString()}건 (최대 500건) · 최고관리자 전용</div>` +
+    `<div class="table-wrap"><table class="asset-table access-log-table"><thead><tr><th>접속 일시</th><th>이름</th><th>아이디(이메일)</th><th>소속</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function renderReview() {
   const body = document.getElementById("adminReviewBody");

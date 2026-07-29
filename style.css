@@ -1761,3 +1761,7 @@ body { max-width: 100%; overflow-x: hidden; }
 .toast-warn { border-left-color: #d97706; }
 .toast-info { border-left-color: #3b82f6; }
 @media (max-width: 520px) { .toast-wrap { bottom: 14px; } .toast-msg { font-size: 15px; } }
+
+/* 접속 로그 (최고관리자) */
+.access-log-table .al-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.access-log-table .al-email { font-size: 12px; color: var(--text-light); word-break: break-all; }

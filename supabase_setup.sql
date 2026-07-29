@@ -408,3 +408,37 @@ create policy "hist_delete_own_or_super" on public.history for delete to authent
   using (public.is_superadmin() or user_id = auth.uid());
 
 -- SELECT 는 기존대로 모든 관리자 조회 (hist_select_admin, is_admin) — 변경 없음
+
+-- =====================================================================
+-- [접속 로그] 최고관리자가 "누가 언제 접속했는지" 확인 (access_logs)
+--  · 기록(INSERT) : 로그인한 본인만(user_id = auth.uid). 앱이 사용자·기기별 하루 1회 남깁니다.
+--  · 조회(SELECT) : 최고관리자(superadmin)만 — 개인정보 보호
+--  · 삭제(DELETE) : 최고관리자만
+-- 이 블록을 Supabase SQL Editor 에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+create table if not exists public.access_logs (
+  id bigint generated always as identity primary key,
+  user_id uuid,
+  email text,
+  name text,
+  affiliation text,
+  event text not null default 'login',
+  created_at timestamptz not null default now()
+);
+create index if not exists access_logs_created_idx on public.access_logs (created_at desc);
+alter table public.access_logs enable row level security;
+
+-- INSERT: 로그인한 사용자가 '본인' 접속만 기록 가능(위조 방지)
+drop policy if exists "access_insert_own" on public.access_logs;
+create policy "access_insert_own" on public.access_logs for insert to authenticated
+  with check (user_id = auth.uid());
+
+-- SELECT: 최고관리자만 조회
+drop policy if exists "access_select_super" on public.access_logs;
+create policy "access_select_super" on public.access_logs for select to authenticated
+  using (public.is_superadmin());
+
+-- DELETE: 최고관리자만
+drop policy if exists "access_delete_super" on public.access_logs;
+create policy "access_delete_super" on public.access_logs for delete to authenticated
+  using (public.is_superadmin());
