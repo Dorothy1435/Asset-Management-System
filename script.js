@@ -2094,6 +2094,9 @@ async function getNumberOcrWorker() {
       // tessedit_do_invert=0: 라벨은 항상 '흰 바탕·검은 글자'이므로 반전 이미지 재인식(기본 ON)을
       // 끈다 → 이미지당 인식 시간이 거의 절반. (흰 글자 라벨은 없으므로 정확도 손해 없음)
       try { await w.setParameters({ tessedit_pageseg_mode: "6", tessedit_char_whitelist: "0123456789", tessedit_do_invert: "0" }); } catch {}
+      // 예열 더미 인식: Tesseract는 '첫 recognize'에서 인식 엔진을 늦게 초기화한다(~1.5초+).
+      // 작은 더미 이미지로 그 초기화를 예열 단계에 미리 끝내 두면, 사용자의 첫 촬영이 즉시 인식된다.
+      try { const dc = document.createElement("canvas"); dc.width = 40; dc.height = 40; const dx = dc.getContext("2d"); dx.fillStyle = "#fff"; dx.fillRect(0, 0, 40, 40); dx.fillStyle = "#000"; dx.font = "20px monospace"; dx.fillText("0", 12, 28); await w.recognize(dc); } catch {}
       return w;
     })().catch((e) => { _numOcrWorkerPromise = null; throw e; });
   }
