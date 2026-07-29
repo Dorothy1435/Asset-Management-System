@@ -2098,13 +2098,14 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
       const first = await preprocessOcrImage(ocrSrc, alnumMode ? 1800 : 1500, 0);
       let { data } = await worker.recognize(first);
       addFrom(data.text); if (alnumMode) tryAlnum(data.text);
-      // 1차 실패 시에만 고해상도 + 넓은 인식으로 정밀 재시도 (양쪽 형식 모두)
+      // 1차 실패 시에만 고해상도로 정밀 재시도. 화이트리스트는 '비우지 않고' 메뉴에 맞게 유지
+      // (숫자/영숫자만) → 모든 문자를 훑는 느린 인식을 피해 빠르고 정확하게. (2024는 영숫자 포함)
       if (!done()) {
         ck();
         setScanLoading("자산을 다시 확인하는 중…", true);
         setScanProgress(null);
         const high = await preprocessOcrImage(ocrSrc, 2000, 1600);
-        try { await worker.setParameters({ tessedit_char_whitelist: "" }); } catch {}
+        try { await worker.setParameters({ tessedit_char_whitelist: alnumMode ? OCR_WL_ALNUM : OCR_WL_DIGIT }); } catch {}
         try {
           ({ data } = await worker.recognize(high));
           addFrom(data.text);
@@ -3209,10 +3210,17 @@ async function uploadMedia(dataUrl, folder) {
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const ext = mime.includes("pdf") ? "pdf" : (mime.split("/")[1] || "jpg").split("+")[0];
-  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-  const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, new Blob([bytes], { type: mime }), { contentType: mime, upsert: false });
-  if (error) throw error;
-  return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+  const blob = new Blob([bytes], { type: mime });
+  // 일시적 업로드 실패(네트워크·순간 오류)는 조용히 2번 더 재시도 → 대부분 자동 복구.
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+    const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+    if (!error) return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+    lastErr = error;
+    await new Promise((r) => setTimeout(r, 400 * (attempt + 1))); // 0.4s → 0.8s 백오프
+  }
+  throw lastErr;
 }
 // 자산 필드의 이미지들을 모두 Storage URL로 치환. 업로드 실패 시 원본(base64) 유지.
 async function withUploadedMedia(fields) {
@@ -3251,16 +3259,13 @@ let _storageIssueNotified = false;
 function notifyStorageIssue(err) {
   if (_storageIssueNotified) return;
   _storageIssueNotified = true;
-  const msg = String(err?.message || "").toLowerCase();
-  const full = msg.includes("exceed") || msg.includes("quota") || msg.includes("limit") || msg.includes("payload") || msg.includes("413");
+  console.warn("사진 업로드 실패:", err?.message || err);
   setTimeout(() => {
+    // 저장 공간은 넉넉하므로(용량 문제 아님) 겁주지 않고, 대부분 일시적임을 안내한다.
     alert(
-      (full
-        ? "⚠️ 사진 저장 공간이 가득 찼을 수 있습니다.\n\n"
-        : "⚠️ 사진을 클라우드 저장소에 올리지 못했습니다.\n\n") +
-      "방금 사진은 임시로 보존되었지만, 저장소 상태를 확인해 주세요.\n" +
-      "· Supabase 대시보드 → Settings → Usage 에서 Storage 사용량 확인\n" +
-      "· 용량이 가득 찼다면 요금제 업그레이드(무제한 종량제)가 필요합니다."
+      "⚠️ 사진을 저장소에 올리지 못했어요. (일시적 오류일 수 있어요)\n\n" +
+      "방금 사진은 임시로 보존됐어요. 잠시 후 다시 저장하면 대부분 정상 처리됩니다.\n" +
+      "계속 반복되면 관리자 비상연락처(☎ 3123)로 알려 주세요."
     );
   }, 200);
 }
