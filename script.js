@@ -19,6 +19,39 @@ const sb = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE
 }) : null;
 const REMEMBER_ID_KEY = "assetmgr.rememberId"; // '아이디 저장' 체크 시 보관하는 로그인 아이디
 
+// ===== 토스트 알림 (기존 alert 대체) =====
+// alert()은 흐름을 끊고 투박해서, 화면 위에 잠깐 떴다 사라지는 부드러운 알림으로 바꾼다.
+// window.alert를 오버라이드하므로 기존 alert(...) 호출 83곳이 코드 수정 없이 전부 토스트가 된다.
+// (확인/취소가 필요한 confirm()은 값을 돌려줘야 하므로 그대로 둔다.)
+function toast(msg, kind) {
+  try {
+    const text = String(msg == null ? "" : msg);
+    if (!kind) {
+      if (/(실패|오류|불가|없습니다|없어요|못\s|못했|않았|않습니다|할 수 없|잘못|확인하세요|주세요)/.test(text)) kind = "error";
+      else if (/(완료|접수|되었|저장|등록되|반영|환영|성공|승인)/.test(text)) kind = "success";
+      else kind = "info";
+    }
+    const icons = { success: "✅", error: "⚠️", warn: "⚠️", info: "ℹ️" };
+    let c = document.getElementById("toastWrap");
+    if (!c) { c = document.createElement("div"); c.id = "toastWrap"; c.className = "toast-wrap"; (document.body || document.documentElement).appendChild(c); }
+    const el = document.createElement("div");
+    el.className = "toast toast-" + kind;
+    const ic = document.createElement("span"); ic.className = "toast-ic"; ic.textContent = icons[kind] || "ℹ️";
+    const m = document.createElement("span"); m.className = "toast-msg"; m.textContent = text; // textContent = XSS 안전, \n은 CSS pre-line로 표시
+    const x = document.createElement("button"); x.className = "toast-x"; x.setAttribute("aria-label", "닫기"); x.textContent = "✕";
+    el.append(ic, m, x);
+    c.appendChild(el);
+    while (c.children.length > 4) c.removeChild(c.firstChild); // 오래된 것 정리
+    requestAnimationFrame(() => el.classList.add("show"));
+    const dur = Math.min(9000, Math.max(kind === "error" ? 5200 : 3200, text.length * 90));
+    let timer = setTimeout(close, dur);
+    function close() { clearTimeout(timer); el.classList.remove("show"); el.classList.add("hide"); setTimeout(() => el.remove(), 280); }
+    el.addEventListener("click", close);
+  } catch { try { window.__nativeAlert && window.__nativeAlert(String(msg)); } catch {} }
+}
+window.__nativeAlert = window.alert.bind(window);
+window.alert = (m) => toast(m);
+
 let baseAssets = [];
 let overlay = [];
 let requests = [];     // 대기중 요청 (관리자 결재용)
