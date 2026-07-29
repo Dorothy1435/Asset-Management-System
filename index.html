@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://pmjwwvgcmaywbatryibc.supabase.co" crossorigin />
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="style.css?v=20260729i" />
+  <link rel="stylesheet" href="style.css?v=20260729j" />
 </head>
 <body>
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -583,6 +583,7 @@
       </div>
       <form id="inspectForm" class="modal-body">
         <p class="del-target" id="inspectTarget"></p>
+        <button type="button" class="btn btn-secondary btn-sm" id="inspFixCodeBtn" hidden style="margin:-6px 0 12px;">✏️ 다른 자산이에요 · 자산코드 수정</button>
         <div class="form-row" id="insp-photo-row" style="margin-bottom:12px;" hidden>
           <label>검수 사진 (촬영됨)</label>
           <div class="insp-photo-preview" id="inspPhotoPreview"></div>
@@ -818,6 +819,6 @@
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20260729i"></script>
+  <script src="script.js?v=20260729j"></script>
 </body>
 </html>

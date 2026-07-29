@@ -1629,15 +1629,20 @@ function preprocessOcrImage(src, max, min, rotate = 0) {
     const s = longest > MAX ? MAX / longest : (MIN && longest < MIN ? MIN / longest : 1);
     const w0 = Math.round(img.width * s), h0 = Math.round(img.height * s);
     const rot = ((rotate % 360) + 360) % 360;
-    const swap = rot === 90 || rot === 270;
-    const w = swap ? h0 : w0, h = swap ? w0 : h0;   // 90/270도는 가로세로 뒤바뀜
+    const rad = rot * Math.PI / 180;
+    // 회전 후 이미지 전체가 들어가도록 캔버스를 '바운딩 박스'로 확장(모서리·오른쪽 끝 잘림 방지).
+    // 대각선 보정 시 마지막 자리가 잘리지 않도록 하는 핵심. 0/90/180/270도 정확히 처리됨.
+    const cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+    const w = Math.max(1, Math.round(w0 * cos + h0 * sin));
+    const h = Math.max(1, Math.round(w0 * sin + h0 * cos));
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); // 회전 여백은 라벨 배경과 같은 흰색(투명→검정 방지)
     // 흑백+대비를 GPU 가속 필터로 처리(픽셀 루프보다 훨씬 빠름). 미지원 브라우저는 수동 처리로 폴백.
     let filtered = false;
     try { ctx.filter = "grayscale(1) contrast(1.35)"; filtered = ctx.filter && ctx.filter !== "none"; } catch {}
-    if (rot) { ctx.save(); ctx.translate(w / 2, h / 2); ctx.rotate(rot * Math.PI / 180); ctx.drawImage(img, -w0 / 2, -h0 / 2, w0, h0); ctx.restore(); }
+    if (rot) { ctx.save(); ctx.translate(w / 2, h / 2); ctx.rotate(rad); ctx.drawImage(img, -w0 / 2, -h0 / 2, w0, h0); ctx.restore(); }
     else ctx.drawImage(img, 0, 0, w, h);
     if (!filtered) {
       try {
@@ -1878,6 +1883,7 @@ function updateScanCountBadge() {
 }
 // ===== 인식 실패 시 자산코드 직접 입력(현장 안전장치) =====
 let scanPendingFile = null; // 직접입력에서 재사용할 촬영 사진(있으면 검수 사진으로 저장)
+let scanLastCode = "";      // 마지막으로 인식된 자산코드(수정 시 프리필용)
 function openManualCode(file, prefill) {
   scanPendingFile = file || null;
   const inp = document.getElementById("manualCodeInput");
@@ -1901,8 +1907,8 @@ async function submitManualCode() {
   hide("manualCodeOverlay");
   let photo = "";
   try { if (scanPendingFile) photo = await compressImage(scanPendingFile, 900, 0.6); } catch {}
-  scanPendingFile = null;
-  openInspect(a.id, photo);
+  scanLastCode = code; // 다시 틀렸을 때 또 고칠 수 있게 유지(scanPendingFile도 유지)
+  openInspect(a.id, photo, true);
 }
 // 인식(OCR) 취소용 플래그 — 사용자가 '인식 취소'를 누르면 true. 각 인식 단계 앞에서 확인해 중단한다.
 let scanCancelRequested = false;
@@ -2160,7 +2166,7 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
       // 회전 재시도(옵션): 사진이 옆으로/거꾸로 찍힌 경우 → 90·270·180도 돌려가며 재시도
       if (tryRotate && !done()) {
         try { await worker.setParameters({ tessedit_char_whitelist: alnumMode ? OCR_WL_ALNUM : OCR_WL_DIGIT }); } catch {}
-        for (const deg of [90, 270, 180]) {
+        for (const deg of [90, 270]) {
           ck();
           setScanLoading("사진을 돌려서 다시 확인하는 중…", true);
           setScanProgress(null);
@@ -2175,7 +2181,7 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
       let { data } = await Tesseract.recognize(image, "eng");
       addFrom(data.text); tryAlnum(data.text);
       // 회전 재시도(옵션)
-      if (tryRotate) for (const deg of [90, 270, 180]) {
+      if (tryRotate) for (const deg of [90, 270]) {
         if (done()) break;
         const rimg = await preprocessOcrImage(ocrSrc, 1500, 1200, deg);
         ({ data } = await Tesseract.recognize(rimg, "eng"));
@@ -2242,8 +2248,9 @@ async function handleScanCapture(file) {
     showScanSuccess();
     await new Promise((r) => setTimeout(r, 320));
     setScanLoading("", false);
+    scanLastCode = typeof code === "string" ? code : (a.assetNumber || "");
     const photo = await compressImage(file, 900, 0.6);
-    openInspect(a.id, photo);
+    openInspect(a.id, photo, true); // fromScan=true → '코드 수정' 버튼 노출
   } catch (e) {
     setScanLoading("", false);
     if (e && e.name === "AbortError") return; // 사용자가 '인식 취소'를 누름 → 조용히 종료
@@ -3043,7 +3050,7 @@ async function submitDeleteRequest() {
 // ===== 검수 확인 =====
 // 검수 확인 화면 열기. photo(촬영 사진)가 있으면 검수 기록에 첨부한다.
 // 카메라 검수(handleScanCapture)에서는 사진과 함께, 상세 화면에서는 사진 없이 호출된다.
-function openInspect(id, photo) {
+function openInspect(id, photo, fromScan) {
   if (!requireLogin()) return;
   const a = findAsset(id);
   if (!a) return;
@@ -3052,6 +3059,9 @@ function openInspect(id, photo) {
   inspectExtraPhotos = [];
   renderInspExtra();
   document.getElementById("inspectError").hidden = true;
+  // 촬영/직접입력으로 열렸을 때만 '자산코드 수정' 버튼 노출(잘못 인식된 자산을 바로잡기 위함).
+  const fixBtn = document.getElementById("inspFixCodeBtn");
+  if (fixBtn) fixBtn.hidden = !fromScan;
   fillInspPeriod();
   document.getElementById("insp-inspector").value = myProfile?.name || "";
   const affil = myProfile?.affiliation || "";
@@ -4268,6 +4278,11 @@ document.getElementById("scanCameraInput").addEventListener("change", (e) => { h
 document.getElementById("scanCancelBtn").addEventListener("click", cancelScanRecognition);
 // 인식 중 '직접 입력'으로 전환(느릴 때 기다리지 않고 바로 손입력)
 document.getElementById("scanManualBtn").addEventListener("click", switchToManualInput);
+// 검수 화면에서 '자산코드 수정'(인식된 자산이 틀렸을 때) → 코드 입력창으로(인식된 코드 프리필)
+document.getElementById("inspFixCodeBtn").addEventListener("click", () => {
+  hide("inspectOverlay");
+  openManualCode(scanPendingFile, scanLastCode);
+});
 // 자산코드 직접 입력(인식 실패 폴백)
 document.getElementById("manualCodeSubmit").addEventListener("click", submitManualCode);
 document.getElementById("manualCodeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitManualCode(); } });
