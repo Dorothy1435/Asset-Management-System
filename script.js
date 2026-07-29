@@ -2132,9 +2132,9 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
     if (worker) {
       // 1차: 메뉴에 맞는 화이트리스트 + 중간 해상도 (한 번에 끝나도록)
       try { await worker.setParameters({ tessedit_char_whitelist: alnumMode ? OCR_WL_ALNUM : OCR_WL_DIGIT }); } catch {}
-      // 1차는 해상도를 조금 낮춰(1200) '% 뜨기 전' 준비 시간을 줄인다(체감 속도↑).
-      // 여기서 못 읽으면 아래 고해상도(2000) 패스가 잡아주므로 정확도는 backstop된다.
-      const first = await preprocessOcrImage(ocrSrc, alnumMode ? 1500 : 1200, 0);
+      // 1차 해상도: 안정적으로 한 번에 읽히도록 1500(너무 낮추면 애매한 사진이 자주 2차로 넘어가
+      // '다시 인식중'이 잦아지고 결과가 들쭉날쭉해진다). 초반 지연은 디코딩 최적화로 이미 줄임.
+      const first = await preprocessOcrImage(ocrSrc, alnumMode ? 1800 : 1500, 0);
       let { data } = await worker.recognize(first);
       addFrom(data.text); if (alnumMode) tryAlnum(data.text);
       // 대각선(살짝 기울어진) 라벨 보정: 기울기를 감지해 '한 번에' 펴서 재시도(직각 회전보다 먼저).
