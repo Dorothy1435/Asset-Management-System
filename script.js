@@ -1933,6 +1933,12 @@ function switchToManualInput() {
   cancelScanRecognition();        // 진행 중이던 인식 중단(없어도 안전)
   openManualCode(f, "");
 }
+// 인식 중 '다시 촬영': 진행 중 인식을 멈추고 카메라를 다시 연다(느리거나 안 잡힐 때 즉시 재촬영).
+function retakeFromScan() {
+  cancelScanRecognition();
+  const input = document.getElementById("scanCameraInput");
+  if (input) { input.value = ""; input.click(); }
+}
 // 두 문자열의 편집 거리(Levenshtein) — 근접 매칭용
 function _editDistance(a, b) {
   const m = a.length, n = b.length;
@@ -4288,6 +4294,8 @@ document.getElementById("scanCameraInput").addEventListener("change", (e) => { h
 document.getElementById("scanCancelBtn").addEventListener("click", cancelScanRecognition);
 // 인식 중 '직접 입력'으로 전환(느릴 때 기다리지 않고 바로 손입력)
 document.getElementById("scanManualBtn").addEventListener("click", switchToManualInput);
+// 인식 중 '다시 촬영'(안 잡히거나 느릴 때 즉시 재촬영)
+document.getElementById("scanRetakeBtn").addEventListener("click", retakeFromScan);
 // 검수 화면에서 '자산코드 수정'(인식된 자산이 틀렸을 때) → 코드 입력창으로(인식된 코드 프리필)
 document.getElementById("inspFixCodeBtn").addEventListener("click", () => {
   hide("inspectOverlay");

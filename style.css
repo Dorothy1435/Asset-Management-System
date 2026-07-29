@@ -1134,6 +1134,7 @@ body {
 .scan-loading-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
 .scan-loading-msg { font-size: 13px; color: var(--text-light); line-height: 1.5; }
 .scan-manual-btn { margin-top: 18px; width: 100%; }
+.scan-retake-btn { margin-top: 10px; width: 100%; }
 .scan-cancel-btn { margin-top: 10px; width: 100%; }
 .batch-cancel-btn { color: #b91c1c; border-color: #fecaca; }
 
