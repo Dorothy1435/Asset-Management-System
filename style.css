@@ -1096,16 +1096,30 @@ body {
   text-align: center;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.35);
 }
-.scan-spinner {
-  width: 40px;
-  height: 40px;
-  margin: 0 auto 16px;
-  border: 4px solid #e0f2fe;
-  border-top-color: #0284c7;
+/* 인식 진행률 링: --p(0~100)만큼 파란색이 차오른다. .indet면 진행률 미상 → 회전 */
+.scan-ring {
+  --p: 0;
+  width: 88px; height: 88px; margin: 0 auto 16px;
   border-radius: 50%;
+  display: grid; place-items: center;
+  background: conic-gradient(#2563eb calc(var(--p) * 1%), #e5e7eb 0);
+  transition: background 0.25s ease;
+  position: relative;
+}
+.scan-ring::before {
+  content: ""; position: absolute; inset: 8px; border-radius: 50%; background: #fff;
+}
+.scan-ring-num { position: relative; font-size: 21px; font-weight: 800; color: var(--primary-dark); font-variant-numeric: tabular-nums; }
+.scan-ring.indet {
+  background: conic-gradient(#2563eb 0 25%, #e5e7eb 0);
   animation: scan-spin 0.9s linear infinite;
 }
 @keyframes scan-spin { to { transform: rotate(360deg); } }
+.scan-spinner { /* 하위호환: 옛 스피너 클래스 사용처 대비 */
+  width: 40px; height: 40px; margin: 0 auto 16px;
+  border: 4px solid #e0f2fe; border-top-color: #0284c7; border-radius: 50%;
+  animation: scan-spin 0.9s linear infinite;
+}
 .scan-loading-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
 .scan-loading-msg { font-size: 13px; color: var(--text-light); line-height: 1.5; }
 .scan-cancel-btn { margin-top: 18px; width: 100%; }

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://pmjwwvgcmaywbatryibc.supabase.co" crossorigin />
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="style.css?v=20260729d" />
+  <link rel="stylesheet" href="style.css?v=20260729e" />
 </head>
 <body>
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -784,7 +784,7 @@
   <!-- 검수 사진 인식 로딩 -->
   <div class="scan-loading" id="scanLoading" hidden>
     <div class="scan-loading-box">
-      <div class="scan-spinner"></div>
+      <div class="scan-ring indet" id="scanRing" style="--p:0"><span class="scan-ring-num" id="scanRingNum"></span></div>
       <div class="scan-loading-title">📷 자산 인식 중…</div>
       <div class="scan-loading-msg" id="scanLoadingMsg">사진에서 자산코드를 읽고 있습니다.</div>
       <button type="button" class="btn btn-secondary scan-cancel-btn" id="scanCancelBtn">✕ 인식 취소</button>
@@ -797,6 +797,6 @@
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20260729d"></script>
+  <script src="script.js?v=20260729e"></script>
 </body>
 </html>

@@ -1790,7 +1790,26 @@ function setScanLoading(msg, show) {
   if (batchSuppressScan) { el.hidden = true; return; } // 배치 진행 중엔 항상 숨김
   if (msg) { const m = document.getElementById("scanLoadingMsg"); if (m) m.textContent = msg; }
   el.hidden = !show;
+  if (!show) setScanProgress(null); // 닫힐 때 링 초기화(다음 촬영 대비)
 }
+// 인식 진행률 링 갱신: pct(0~100)면 파란색이 그만큼 차오르고 숫자 표시, null이면 회전(진행률 미상).
+function setScanProgress(pct) {
+  const ring = document.getElementById("scanRing");
+  if (!ring) return;
+  const num = document.getElementById("scanRingNum");
+  if (pct == null || isNaN(pct)) {
+    ring.classList.add("indet");
+    ring.style.setProperty("--p", 0);
+    if (num) num.textContent = "";
+  } else {
+    const p = Math.max(0, Math.min(100, Math.round(pct)));
+    ring.classList.remove("indet");
+    ring.style.setProperty("--p", p);
+    if (num) num.textContent = p + "%";
+  }
+}
+// 촬영 결과 피드백용 진동(햅틱) — 지원 기기에서만. 성공은 짧게 톡, 실패는 두 번.
+function scanHaptic(ok) { try { navigator.vibrate && navigator.vibrate(ok ? 35 : [40, 55, 40]); } catch {} }
 // 인식(OCR) 취소용 플래그 — 사용자가 '인식 취소'를 누르면 true. 각 인식 단계 앞에서 확인해 중단한다.
 let scanCancelRequested = false;
 function makeCancelError() { const e = new Error("인식이 취소되었습니다."); e.name = "AbortError"; return e; }
@@ -1994,8 +2013,10 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
   const ck = () => { if (scanCancelRequested) throw makeCancelError(); }; // 각 단계 앞에서 취소 여부 확인
   try {
     ck();
-    setScanLoading("글자를 인식하는 중입니다… 처음 실행은 몇 초 걸릴 수 있어요.", true);
-    _numOcrProgress = (m) => { if (m.status === "recognizing text") setScanLoading(`자산 인식 중… ${Math.round((m.progress || 0) * 100)}%`, true); };
+    setScanLoading("자산코드를 읽는 중이에요…", true);
+    setScanProgress(null); // 준비 단계는 진행률 미상 → 회전
+    // 진행률은 원형 링으로 표시(숫자 %가 차오름). 메시지는 안정적인 안내문 유지.
+    _numOcrProgress = (m) => { if (m.status === "recognizing text") setScanProgress(Math.round((m.progress || 0) * 100)); };
     const worker = await getNumberOcrWorker();
     ck();
     if (worker) {
@@ -2008,6 +2029,7 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
       if (!done()) {
         ck();
         setScanLoading("자산을 다시 확인하는 중…", true);
+        setScanProgress(null);
         const high = await preprocessOcrImage(dataUrl, 2400, 1800);
         try { await worker.setParameters({ tessedit_char_whitelist: "" }); } catch {}
         try {
@@ -2024,6 +2046,7 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
         for (const deg of [90, 270, 180]) {
           ck();
           setScanLoading("사진을 돌려서 다시 확인하는 중…", true);
+          setScanProgress(null);
           const rimg = await preprocessOcrImage(dataUrl, 2000, 1400, deg);
           ({ data } = await worker.recognize(rimg));
           addFrom(data.text); if (alnumMode) tryAlnum(data.text);
@@ -2076,6 +2099,7 @@ async function handleScanCapture(file) {
   scanCancelRequested = false; // 새 촬영 시작 → 이전 취소 상태 초기화
   try {
     setScanLoading("사진을 준비하는 중…", true);
+    setScanProgress(null);
     const raw = await fileToDataURL(file);                 // 인식용 원본(고해상도)
     // 지금 메뉴가 2024면 문자+숫자(G형식) 우선 인식, 아니면 숫자(20자리) 우선
     const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
@@ -2083,15 +2107,18 @@ async function handleScanCapture(file) {
     const code = await recognizeAssetNumber(raw, mode, null, true);
     setScanLoading("", false);
     if (!code) {
+      scanHaptic(false);
       alert("사진에서 자산코드를 인식하지 못했습니다.\n\n· 라벨의 ‘자산코드’가 잘리지 않게\n· 크고 반듯하게, 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
       return;
     }
     const a = findAssetByNumber(code);
     if (!a) {
+      scanHaptic(false);
       alert(`인식된 자산코드와 일치하는 자산을 찾지 못했습니다.\n\n인식된 번호: ${code}\n\n등록된 자산이 맞는지 확인 후 다시 시도해 주세요.`);
       return;
     }
     // 매칭 성공 → 이제서야 검수 기록용 사진을 압축하고 검수 확인 화면으로
+    scanHaptic(true);
     const photo = await compressImage(file, 900, 0.6);
     openInspect(a.id, photo);
   } catch (e) {
