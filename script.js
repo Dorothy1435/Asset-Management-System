@@ -1663,6 +1663,36 @@ function preprocessOcrImage(src, max, min, rotate = 0) {
     img.src = src;
   });
 }
+// 텍스트 기울기(대각선) 자동 감지: 작은 이미지를 여러 각도로 돌려보며 '행별 검은 픽셀 합의 분산'이
+// 최대인 각도를 찾는다(수평일수록 글자가 특정 행에 몰려 분산↑). 반환값만큼 돌리면 수평이 된다.
+// 작은 이미지에서만 계산해 빠르다(~수십 ms). 감지 실패/애매하면 0(보정 안 함).
+function estimateSkew(img, limit = 32, step = 2) {
+  try {
+    if (!img || typeof img === "string" || !img.width) return 0;
+    const W = 360, s = W / Math.max(img.width, img.height);
+    const w = Math.max(1, Math.round(img.width * s)), h = Math.max(1, Math.round(img.height * s));
+    const base = document.createElement("canvas"); base.width = w; base.height = h;
+    const bx = base.getContext("2d");
+    try { bx.filter = "grayscale(1) contrast(2.2)"; } catch {}
+    bx.drawImage(img, 0, 0, w, h);
+    const size = Math.ceil(Math.hypot(w, h));
+    const t = document.createElement("canvas"); t.width = size; t.height = size;
+    const tx = t.getContext("2d");
+    const score = (deg) => {
+      tx.save(); tx.fillStyle = "#fff"; tx.fillRect(0, 0, size, size);
+      tx.translate(size / 2, size / 2); tx.rotate(deg * Math.PI / 180); tx.drawImage(base, -w / 2, -h / 2); tx.restore();
+      const d = tx.getImageData(0, 0, size, size).data;
+      const rows = new Float64Array(size);
+      for (let y = 0; y < size; y++) { let sum = 0; const off = y * size * 4; for (let x = 0; x < size; x++) { if (d[off + x * 4] < 128) sum++; } rows[y] = sum; }
+      let m = 0; for (let y = 0; y < size; y++) m += rows[y]; m /= size;
+      let v = 0; for (let y = 0; y < size; y++) { const dv = rows[y] - m; v += dv * dv; }
+      return v;
+    };
+    let best = 0, bs = -1;
+    for (let a = -limit; a <= limit; a += step) { const sc = score(a); if (sc > bs) { bs = sc; best = a; } }
+    return best;
+  } catch { return 0; }
+}
 // 캔버스에서 QR 디코드
 function _qrFromCanvas(canvas) {
   try {
@@ -2098,6 +2128,19 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
       const first = await preprocessOcrImage(ocrSrc, alnumMode ? 1800 : 1500, 0);
       let { data } = await worker.recognize(first);
       addFrom(data.text); if (alnumMode) tryAlnum(data.text);
+      // 대각선(살짝 기울어진) 라벨 보정: 기울기를 감지해 '한 번에' 펴서 재시도(직각 회전보다 먼저).
+      // 감지가 빨라 여러 각도를 OCR로 훑지 않아 빠르다. 똑바른 사진은 감지≈0이라 건드리지 않음.
+      if (!done() && typeof ocrSrc !== "string") {
+        ck();
+        const skew = estimateSkew(ocrSrc);
+        if (Math.abs(skew) >= 4) {
+          setScanLoading("사진 기울기를 바로잡는 중…", true);
+          setScanProgress(null);
+          const desk = await preprocessOcrImage(ocrSrc, alnumMode ? 1800 : 1600, 0, skew);
+          ({ data } = await worker.recognize(desk));
+          addFrom(data.text); if (alnumMode) tryAlnum(data.text);
+        }
+      }
       // 1차 실패 시에만 고해상도로 정밀 재시도. 화이트리스트는 '비우지 않고' 메뉴에 맞게 유지
       // (숫자/영숫자만) → 모든 문자를 훑는 느린 인식을 피해 빠르고 정확하게. (2024는 영숫자 포함)
       if (!done()) {
