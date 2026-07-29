@@ -796,9 +796,15 @@ function renderStats() {
   const showInsp = currentGroup !== GROUP_ELEC; // 검수율은 2025년도 자산 전용
   const inspectedCnt = showInsp ? inGroup.filter((a) => inspectedRound(a, inspRound)).length : 0;
   const inspRate = total ? Math.round((inspectedCnt / total) * 100) : 0;
+  const remaining = Math.max(0, total - inspectedCnt);
   const roundSel = `<select id="inspRoundSel" class="stat-sel">${Array.from({ length: 8 }, (_, i) => `${i + 1}회차`).map((r) => `<option value="${r}"${r === inspRound ? " selected" : ""}>${r}</option>`).join("")}</select>`;
+  // 검수 진행 대시보드: 진행률 바 + 미검수 바로가기(재물조사 진척을 한눈에)
   const inspCard = showInsp
-    ? `<div class="stat-card stat-insp"><div class="num">${inspectedCnt.toLocaleString()}/${total.toLocaleString()} <span class="rate">(${inspRate}%)</span></div><div class="label">${roundSel} 검수 완료</div></div>`
+    ? `<div class="stat-card stat-insp">
+         <div class="num">${inspectedCnt.toLocaleString()}/${total.toLocaleString()} <span class="rate">(${inspRate}%)</span></div>
+         <div class="insp-bar" title="${inspRate}% 검수 완료"><div class="insp-bar-fill" style="width:${inspRate}%"></div></div>
+         <div class="label">${roundSel} 검수 진행${remaining ? ` · <button type="button" class="insp-jump" data-insp-jump="uninsp">미검수 ${remaining.toLocaleString()}건 →</button>` : ` · <span class="insp-done-all">✅ 전체 완료</span>`}</div>
+       </div>`
     : "";
   document.getElementById("stats").innerHTML = `
     <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">${esc(groupLabel(currentGroup))}</div></div>
@@ -3953,6 +3959,15 @@ document.getElementById("inspDoneBtn").addEventListener("click", () => { inspVie
 document.getElementById("inspRoundFilter").addEventListener("change", (e) => { inspRound = e.target.value; renderStats(); applyFilter(); });
 document.getElementById("stats").addEventListener("change", (e) => {
   if (e.target && e.target.id === "inspRoundSel") { inspRound = e.target.value; renderStats(); applyFilter(); }
+});
+// 검수 대시보드의 '미검수 N건 →' 클릭 → 미검수 필터로 이동 + 목록으로 스크롤
+document.getElementById("stats").addEventListener("click", (e) => {
+  const jump = e.target.closest("[data-insp-jump]");
+  if (!jump) return;
+  inspView = "uninsp";
+  applyFilter();
+  const tbl = document.querySelector(".table-wrap");
+  if (tbl) tbl.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 document.getElementById("addBtn").addEventListener("click", () => openForm(null));
 

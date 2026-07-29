@@ -590,6 +590,13 @@ body {
 #inspDoneBtn.active { background: #16a34a; border-color: #16a34a; color: #fff; }
 .stat-insp .rate { font-size: 0.7em; color: #1d4ed8; }
 .stat-sel { font-size: 12px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; cursor: pointer; }
+/* 검수 진행 대시보드 */
+.stat-insp { min-width: 200px; }
+.insp-bar { height: 8px; border-radius: 999px; background: #e5e7eb; overflow: hidden; margin: 8px 0 6px; }
+.insp-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #3b82f6, #2563eb); transition: width 0.5s ease; }
+.insp-jump { border: none; background: none; padding: 0; margin: 0; font: inherit; color: #1d4ed8; font-weight: 700; cursor: pointer; }
+.insp-jump:hover { text-decoration: underline; }
+.insp-done-all { color: #16a34a; font-weight: 700; }
 
 /* 폼 */
 .form-grid {
