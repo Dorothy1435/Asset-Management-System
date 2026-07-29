@@ -1114,6 +1114,17 @@ body {
   background: conic-gradient(#2563eb 0 25%, #e5e7eb 0);
   animation: scan-spin 0.9s linear infinite;
 }
+/* 인식 성공: 꽉 찬 초록 원 + 흰 체크 */
+.scan-ring.done { background: #16a34a; animation: none; }
+.scan-ring.done::before { background: #16a34a; }
+.scan-ring.done .scan-ring-num { color: #fff; font-size: 42px; line-height: 1; }
+/* 연속 검수 카운터 배지 (검수 버튼) */
+.scan-count-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px; margin-left: 6px;
+  border-radius: 999px; background: #16a34a; color: #fff;
+  font-size: 12px; font-weight: 700; vertical-align: middle;
+}
 @keyframes scan-spin { to { transform: rotate(360deg); } }
 .scan-spinner { /* 하위호환: 옛 스피너 클래스 사용처 대비 */
   width: 40px; height: 40px; margin: 0 auto 16px;

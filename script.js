@@ -1796,6 +1796,7 @@ function setScanLoading(msg, show) {
 function setScanProgress(pct) {
   const ring = document.getElementById("scanRing");
   if (!ring) return;
+  ring.classList.remove("done");
   const num = document.getElementById("scanRingNum");
   if (pct == null || isNaN(pct)) {
     ring.classList.add("indet");
@@ -1808,8 +1809,58 @@ function setScanProgress(pct) {
     if (num) num.textContent = p + "%";
   }
 }
+// 인식 성공 순간: 링을 초록 ✓로 (아주 짧게 보여준 뒤 검수 화면으로)
+function showScanSuccess() {
+  const ring = document.getElementById("scanRing");
+  const num = document.getElementById("scanRingNum");
+  if (!ring) return;
+  ring.classList.remove("indet");
+  ring.classList.add("done");
+  ring.style.setProperty("--p", 100);
+  if (num) num.textContent = "✓";
+}
 // 촬영 결과 피드백용 진동(햅틱) — 지원 기기에서만. 성공은 짧게 톡, 실패는 두 번.
 function scanHaptic(ok) { try { navigator.vibrate && navigator.vibrate(ok ? 35 : [40, 55, 40]); } catch {} }
+// ===== 연속 검수 카운터 (이번 세션에 처리한 검수 건수) =====
+let scanSessionCount = 0;
+function bumpScanCount() { scanSessionCount++; updateScanCountBadge(); }
+function updateScanCountBadge() {
+  const btn = document.getElementById("scanInspectBtn");
+  if (!btn) return;
+  let b = document.getElementById("scanCountBadge");
+  if (scanSessionCount <= 0) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement("span"); b.id = "scanCountBadge"; b.className = "scan-count-badge"; btn.appendChild(b); }
+  b.textContent = scanSessionCount;
+  b.title = `이번 세션에 ${scanSessionCount}건 검수`;
+}
+// ===== 인식 실패 시 자산코드 직접 입력(현장 안전장치) =====
+let scanPendingFile = null; // 직접입력에서 재사용할 촬영 사진(있으면 검수 사진으로 저장)
+function openManualCode(file, prefill) {
+  scanPendingFile = file || null;
+  const inp = document.getElementById("manualCodeInput");
+  const err = document.getElementById("manualCodeErr");
+  const hint = document.getElementById("manualCodeHint");
+  if (err) err.hidden = true;
+  if (inp) inp.value = prefill || "";
+  if (hint) hint.textContent = prefill
+    ? `인식된 번호(${prefill})와 맞는 자산이 없어요. 번호를 확인해 고쳐 주세요.`
+    : "라벨이 잘 안 읽혔어요. 자산코드를 직접 입력하거나 다시 촬영하세요.";
+  show("manualCodeOverlay");
+  setTimeout(() => { if (inp) inp.focus(); }, 120);
+}
+async function submitManualCode() {
+  const inp = document.getElementById("manualCodeInput");
+  const err = document.getElementById("manualCodeErr");
+  const code = (inp && inp.value || "").trim();
+  if (!code) { if (err) { err.textContent = "자산코드를 입력해 주세요."; err.hidden = false; } return; }
+  const a = findAssetByNumber(code) || findAsset2024ByCode(code);
+  if (!a) { if (err) { err.textContent = "일치하는 자산이 없어요. 번호를 다시 확인해 주세요."; err.hidden = false; } return; }
+  hide("manualCodeOverlay");
+  let photo = "";
+  try { if (scanPendingFile) photo = await compressImage(scanPendingFile, 900, 0.6); } catch {}
+  scanPendingFile = null;
+  openInspect(a.id, photo);
+}
 // 인식(OCR) 취소용 플래그 — 사용자가 '인식 취소'를 누르면 true. 각 인식 단계 앞에서 확인해 중단한다.
 let scanCancelRequested = false;
 function makeCancelError() { const e = new Error("인식이 취소되었습니다."); e.name = "AbortError"; return e; }
@@ -2105,20 +2156,24 @@ async function handleScanCapture(file) {
     const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
     // tryRotate=true: 옆으로/거꾸로 찍힌 라벨도 90·180·270도 돌려가며 자동 인식
     const code = await recognizeAssetNumber(raw, mode, null, true);
-    setScanLoading("", false);
     if (!code) {
+      setScanLoading("", false);
       scanHaptic(false);
-      alert("사진에서 자산코드를 인식하지 못했습니다.\n\n· 라벨의 ‘자산코드’가 잘리지 않게\n· 크고 반듯하게, 흔들림 없이 밝은 곳에서\n다시 촬영해 주세요.");
+      openManualCode(file, ""); // 인식 실패 → 번호 직접 입력(또는 다시 촬영) 폴백
       return;
     }
     const a = findAssetByNumber(code);
     if (!a) {
+      setScanLoading("", false);
       scanHaptic(false);
-      alert(`인식된 자산코드와 일치하는 자산을 찾지 못했습니다.\n\n인식된 번호: ${code}\n\n등록된 자산이 맞는지 확인 후 다시 시도해 주세요.`);
+      openManualCode(file, code); // 인식은 됐으나 매칭 실패 → 인식된 번호 프리필해 수정
       return;
     }
-    // 매칭 성공 → 이제서야 검수 기록용 사진을 압축하고 검수 확인 화면으로
+    // 매칭 성공 → 초록 ✓를 잠깐 보여주고(확신 피드백) 검수 확인 화면으로
     scanHaptic(true);
+    showScanSuccess();
+    await new Promise((r) => setTimeout(r, 320));
+    setScanLoading("", false);
     const photo = await compressImage(file, 900, 0.6);
     openInspect(a.id, photo);
   } catch (e) {
@@ -3028,10 +3083,12 @@ async function submitInspect() {
   hide("inspectOverlay");
   inspectPhoto = "";
   inspectExtraPhotos = [];
+  bumpScanCount(); // 이번 세션 검수 건수 +1 (검수 버튼에 배지로 표시)
   await reloadAll(); rerender();
   const photoMsg = photos.length ? `물품 사진 ${photos.length}장이 자산에 추가되었습니다. ` : "";
-  if (isAdmin) { openDetail(inspectTargetId); alert(`검수가 완료되었습니다. ${photoMsg}${photo ? "검수 사진이 기록에 추가되었습니다." : ""}`.trim()); }
-  else { hide("detailOverlay"); alert(`검수 승인 신청이 접수되었습니다. 관리자 승인 후 ${photos.length ? "물품 사진과 함께 " : ""}${photo ? "검수 사진과 함께 " : ""}기록에 반영됩니다.`); }
+  const sessN = `이번 세션 ${scanSessionCount}건째`;
+  if (isAdmin) { openDetail(inspectTargetId); alert(`✅ 검수가 완료되었습니다 (${sessN}). ${photoMsg}${photo ? "검수 사진이 기록에 추가되었습니다." : ""}`.trim()); }
+  else { hide("detailOverlay"); alert(`검수 승인 신청이 접수되었습니다 (${sessN}). 관리자 승인 후 ${photos.length ? "물품 사진과 함께 " : ""}${photo ? "검수 사진과 함께 " : ""}기록에 반영됩니다.`); }
 }
 // 검수 목록(+선택적으로 병합된 물품 사진)을 오버레이에 저장(기존 데이터 보존)
 // photoFields: { imageUrl, imageUrls } 가 있으면 자산 사진도 함께 갱신한다.
@@ -4137,6 +4194,14 @@ document.getElementById("scanGuideOverlay").addEventListener("click", (e) => { i
 document.getElementById("scanCameraInput").addEventListener("change", (e) => { handleScanCapture(e.target.files && e.target.files[0]); });
 // 단일(카메라) 검수 인식 취소
 document.getElementById("scanCancelBtn").addEventListener("click", cancelScanRecognition);
+// 자산코드 직접 입력(인식 실패 폴백)
+document.getElementById("manualCodeSubmit").addEventListener("click", submitManualCode);
+document.getElementById("manualCodeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitManualCode(); } });
+document.getElementById("manualCodeRetake").addEventListener("click", () => {
+  hide("manualCodeOverlay"); scanPendingFile = null;
+  const input = document.getElementById("scanCameraInput");
+  if (input) { input.value = ""; input.click(); }
+});
 // 여러 장 한번에 검수
 document.getElementById("batchInspectBtn").addEventListener("click", openBatchInspect);
 // PDF 검수: 버튼 클릭 → 검수 창 + PDF 파일 선택창 바로 열기
@@ -4384,7 +4449,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay", "manualCodeOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
 // 배경(어두운 부분) 클릭 시 닫기 — 단, 여러 장 검수 창은 실수로 닫히면 인식한 사진이 날아가므로 제외(‘닫기’ 버튼으로만)
 // 모바일: 카메라·사진 선택창을 다녀올 때 배경에 '유령 클릭'이 들어가 창이 꺼지는 문제 방지

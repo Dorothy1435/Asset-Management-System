@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://pmjwwvgcmaywbatryibc.supabase.co" crossorigin />
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="style.css?v=20260729e" />
+  <link rel="stylesheet" href="style.css?v=20260729f" />
 </head>
 <body>
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -791,12 +791,32 @@
     </div>
   </div>
 
+  <!-- 인식 실패 시 자산코드 직접 입력 (현장 안전장치) -->
+  <div class="modal-overlay" id="manualCodeOverlay" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>자산코드 직접 입력</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="form-info" id="manualCodeHint">라벨이 잘 안 읽혔어요. 자산코드를 직접 입력하거나 다시 촬영하세요.</p>
+        <input type="text" id="manualCodeInput" inputmode="numeric" placeholder="자산코드 입력" autocomplete="off" style="margin-top:10px;width:100%;font-size:16px;padding:12px;" />
+        <p class="form-error" id="manualCodeErr" hidden></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="manualCodeSubmit">이 코드로 검수</button>
+        <button class="btn btn-secondary" id="manualCodeRetake">📷 다시 촬영</button>
+        <button class="btn btn-secondary" data-close>취소</button>
+      </div>
+    </div>
+  </div>
+
   <footer class="footer">
     <p>© 글로컬대학사업본부 자산관리 시스템 · 관리자 비상연락처 ☎ 3123</p>
   </footer>
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20260729e"></script>
+  <script src="script.js?v=20260729f"></script>
 </body>
 </html>
