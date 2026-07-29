@@ -1610,44 +1610,57 @@ function setOcrStatus(msg, kind) {
   st.textContent = msg;
   st.className = "ocr-status" + (kind ? " ocr-" + kind : "");
 }
-// 인식률을 높이기 위해 그레이스케일 + 대비 보정 후 캔버스로 변환. rotate(0/90/180/270)로 회전도 지원.
-function preprocessOcrImage(dataUrl, max, min, rotate = 0) {
+// dataUrl을 한 번만 디코드해 두고 여러 인식 패스에서 재사용(큰 폰 사진의 반복 디코드 비용 제거).
+function decodeImageOnce(dataUrl) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => {
-      const longest = Math.max(img.width, img.height);
-      // max/min 인자로 해상도 조절(1차 저해상도=빠름, 2차 고해상도=정확).
-      const MAX = max || 2400, MIN = (min === undefined ? 1800 : min);
-      const s = longest > MAX ? MAX / longest : (MIN && longest < MIN ? MIN / longest : 1);
-      const w0 = Math.round(img.width * s), h0 = Math.round(img.height * s);
-      const rot = ((rotate % 360) + 360) % 360;
-      const swap = rot === 90 || rot === 270;
-      const w = swap ? h0 : w0, h = swap ? w0 : h0;   // 90/270도는 가로세로 뒤바뀜
-      const canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      // 흑백+대비를 GPU 가속 필터로 처리(픽셀 루프보다 훨씬 빠름). 미지원 브라우저는 수동 처리로 폴백.
-      let filtered = false;
-      try { ctx.filter = "grayscale(1) contrast(1.35)"; filtered = ctx.filter && ctx.filter !== "none"; } catch {}
-      if (rot) { ctx.save(); ctx.translate(w / 2, h / 2); ctx.rotate(rot * Math.PI / 180); ctx.drawImage(img, -w0 / 2, -h0 / 2, w0, h0); ctx.restore(); }
-      else ctx.drawImage(img, 0, 0, w, h);
-      if (!filtered) {
-        try {
-          const d = ctx.getImageData(0, 0, w, h);
-          const p = d.data;
-          for (let i = 0; i < p.length; i += 4) {
-            let g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
-            g = (g - 128) * 1.35 + 128;            // 대비 강화
-            g = g < 0 ? 0 : g > 255 ? 255 : g;
-            p[i] = p[i + 1] = p[i + 2] = g;
-          }
-          ctx.putImageData(d, 0, 0);
-        } catch { /* 전처리 실패해도 원본 캔버스로 진행 */ }
-      }
-      resolve(canvas);
-    };
+    img.onload = () => resolve(img);
     img.onerror = reject;
     img.src = dataUrl;
+  });
+}
+// 인식률을 높이기 위해 그레이스케일 + 대비 보정 후 캔버스로 변환. rotate(0/90/180/270)로 회전도 지원.
+// src: dataUrl(문자열) 또는 이미 로드된 이미지(HTMLImageElement/ImageBitmap) — 이미지면 재디코딩 없이 즉시 처리.
+function preprocessOcrImage(src, max, min, rotate = 0) {
+  const render = (img) => {
+    const longest = Math.max(img.width, img.height);
+    // max/min 인자로 해상도 조절(1차 저해상도=빠름, 2차 고해상도=정확).
+    const MAX = max || 2400, MIN = (min === undefined ? 1800 : min);
+    const s = longest > MAX ? MAX / longest : (MIN && longest < MIN ? MIN / longest : 1);
+    const w0 = Math.round(img.width * s), h0 = Math.round(img.height * s);
+    const rot = ((rotate % 360) + 360) % 360;
+    const swap = rot === 90 || rot === 270;
+    const w = swap ? h0 : w0, h = swap ? w0 : h0;   // 90/270도는 가로세로 뒤바뀜
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    // 흑백+대비를 GPU 가속 필터로 처리(픽셀 루프보다 훨씬 빠름). 미지원 브라우저는 수동 처리로 폴백.
+    let filtered = false;
+    try { ctx.filter = "grayscale(1) contrast(1.35)"; filtered = ctx.filter && ctx.filter !== "none"; } catch {}
+    if (rot) { ctx.save(); ctx.translate(w / 2, h / 2); ctx.rotate(rot * Math.PI / 180); ctx.drawImage(img, -w0 / 2, -h0 / 2, w0, h0); ctx.restore(); }
+    else ctx.drawImage(img, 0, 0, w, h);
+    if (!filtered) {
+      try {
+        const d = ctx.getImageData(0, 0, w, h);
+        const p = d.data;
+        for (let i = 0; i < p.length; i += 4) {
+          let g = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+          g = (g - 128) * 1.35 + 128;            // 대비 강화
+          g = g < 0 ? 0 : g > 255 ? 255 : g;
+          p[i] = p[i + 1] = p[i + 2] = g;
+        }
+        ctx.putImageData(d, 0, 0);
+      } catch { /* 전처리 실패해도 원본 캔버스로 진행 */ }
+    }
+    return canvas;
+  };
+  // 이미 디코드된 이미지면 즉시 렌더(재디코딩 없음)
+  if (src && typeof src !== "string" && src.width) return Promise.resolve(render(src));
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(render(img));
+    img.onerror = reject;
+    img.src = src;
   });
 }
 // 캔버스에서 QR 디코드
@@ -1878,6 +1891,12 @@ function cancelScanRecognition() {
   batchSuppressScan = false;
   setScanLoading("", false);
 }
+// 인식 중 '직접 입력'으로 전환: 진행 중 인식을 멈추고 방금 촬영본으로 직접 입력창을 연다.
+function switchToManualInput() {
+  const f = scanPendingFile;      // 방금 촬영한 사진(있으면 검수 사진으로 저장)
+  cancelScanRecognition();        // 진행 중이던 인식 중단(없어도 안전)
+  openManualCode(f, "");
+}
 // 두 문자열의 편집 거리(Levenshtein) — 근접 매칭용
 function _editDistance(a, b) {
   const m = a.length, n = b.length;
@@ -2068,12 +2087,15 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
     setScanProgress(null); // 준비 단계는 진행률 미상 → 회전
     // 진행률은 원형 링으로 표시(숫자 %가 차오름). 메시지는 안정적인 안내문 유지.
     _numOcrProgress = (m) => { if (m.status === "recognizing text") setScanProgress(Math.round((m.progress || 0) * 100)); };
+    // 원본을 한 번만 디코드해 모든 인식 패스에서 재사용(큰 폰 사진의 반복 디코딩 비용 제거 → 빠름)
+    let ocrSrc = dataUrl;
+    try { ocrSrc = await decodeImageOnce(dataUrl); } catch {}
     const worker = await getNumberOcrWorker();
     ck();
     if (worker) {
       // 1차: 메뉴에 맞는 화이트리스트 + 중간 해상도 (한 번에 끝나도록)
       try { await worker.setParameters({ tessedit_char_whitelist: alnumMode ? OCR_WL_ALNUM : OCR_WL_DIGIT }); } catch {}
-      const first = await preprocessOcrImage(dataUrl, alnumMode ? 1800 : 1500, 0);
+      const first = await preprocessOcrImage(ocrSrc, alnumMode ? 1800 : 1500, 0);
       let { data } = await worker.recognize(first);
       addFrom(data.text); if (alnumMode) tryAlnum(data.text);
       // 1차 실패 시에만 고해상도 + 넓은 인식으로 정밀 재시도 (양쪽 형식 모두)
@@ -2081,7 +2103,7 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
         ck();
         setScanLoading("자산을 다시 확인하는 중…", true);
         setScanProgress(null);
-        const high = await preprocessOcrImage(dataUrl, 2400, 1800);
+        const high = await preprocessOcrImage(ocrSrc, 2000, 1600);
         try { await worker.setParameters({ tessedit_char_whitelist: "" }); } catch {}
         try {
           ({ data } = await worker.recognize(high));
@@ -2098,20 +2120,20 @@ async function recognizeAssetNumber(dataUrl, mode, pool, tryRotate = false) {
           ck();
           setScanLoading("사진을 돌려서 다시 확인하는 중…", true);
           setScanProgress(null);
-          const rimg = await preprocessOcrImage(dataUrl, 2000, 1400, deg);
+          const rimg = await preprocessOcrImage(ocrSrc, 1500, 1200, deg);
           ({ data } = await worker.recognize(rimg));
           addFrom(data.text); if (alnumMode) tryAlnum(data.text);
           if (done()) break;
         }
       }
     } else {
-      const image = await preprocessOcrImage(dataUrl, 2400, 1800);
+      const image = await preprocessOcrImage(ocrSrc, 2000, 1600);
       let { data } = await Tesseract.recognize(image, "eng");
       addFrom(data.text); tryAlnum(data.text);
       // 회전 재시도(옵션)
       if (tryRotate) for (const deg of [90, 270, 180]) {
         if (done()) break;
-        const rimg = await preprocessOcrImage(dataUrl, 2000, 1400, deg);
+        const rimg = await preprocessOcrImage(ocrSrc, 1500, 1200, deg);
         ({ data } = await Tesseract.recognize(rimg, "eng"));
         addFrom(data.text); tryAlnum(data.text);
       }
@@ -2148,13 +2170,15 @@ async function handleScanCapture(file) {
   if (!file) return;
   if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
   scanCancelRequested = false; // 새 촬영 시작 → 이전 취소 상태 초기화
+  scanPendingFile = file;       // 인식 중 '직접 입력' 버튼이 이 촬영본을 재사용
   try {
     setScanLoading("사진을 준비하는 중…", true);
     setScanProgress(null);
     const raw = await fileToDataURL(file);                 // 인식용 원본(고해상도)
     // 지금 메뉴가 2024면 문자+숫자(G형식) 우선 인식, 아니면 숫자(20자리) 우선
     const mode = currentGroup === GROUP_PAST ? "alnum" : "digit";
-    // tryRotate=true: 옆으로/거꾸로 찍힌 라벨도 90·180·270도 돌려가며 자동 인식
+    // tryRotate=true: 옆으로/거꾸로 찍힌 라벨도 회전해가며 자동 인식(회전 해상도는 낮춰 빠르게).
+    // 인식이 길어지면 로딩창의 '✏️ 직접 입력'으로 언제든 빠져 자산코드를 손으로 칠 수 있다.
     const code = await recognizeAssetNumber(raw, mode, null, true);
     if (!code) {
       setScanLoading("", false);
@@ -4194,6 +4218,8 @@ document.getElementById("scanGuideOverlay").addEventListener("click", (e) => { i
 document.getElementById("scanCameraInput").addEventListener("change", (e) => { handleScanCapture(e.target.files && e.target.files[0]); });
 // 단일(카메라) 검수 인식 취소
 document.getElementById("scanCancelBtn").addEventListener("click", cancelScanRecognition);
+// 인식 중 '직접 입력'으로 전환(느릴 때 기다리지 않고 바로 손입력)
+document.getElementById("scanManualBtn").addEventListener("click", switchToManualInput);
 // 자산코드 직접 입력(인식 실패 폴백)
 document.getElementById("manualCodeSubmit").addEventListener("click", submitManualCode);
 document.getElementById("manualCodeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitManualCode(); } });
