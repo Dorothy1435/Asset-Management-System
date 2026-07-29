@@ -413,10 +413,13 @@ body {
 }
 
 .empty-msg {
-  padding: 48px;
+  padding: 56px 24px;
   text-align: center;
   color: var(--text-light);
 }
+.empty-ic { font-size: 44px; line-height: 1; opacity: 0.45; margin-bottom: 12px; }
+.empty-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.empty-sub { font-size: 13px; color: var(--text-light); }
 
 /* 페이지네이션 */
 .pagination {
