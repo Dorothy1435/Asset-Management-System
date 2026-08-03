@@ -3280,14 +3280,16 @@ async function uploadMedia(dataUrl, folder) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const ext = mime.includes("pdf") ? "pdf" : (mime.split("/")[1] || "jpg").split("+")[0];
   const blob = new Blob([bytes], { type: mime });
-  // 일시적 업로드 실패(네트워크·순간 오류)는 조용히 2번 더 재시도 → 대부분 자동 복구.
+  // 약한 네트워크·순간 오류에 대비해 최대 5회 재시도(백오프 0.5→2.5s). 현장 와이파이가 약해도 대부분 성공.
   let lastErr = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-    const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, blob, { contentType: mime, upsert: false });
-    if (!error) return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
-    lastErr = error;
-    await new Promise((r) => setTimeout(r, 400 * (attempt + 1))); // 0.4s → 0.8s 백오프
+    try {
+      const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+      if (!error) return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+      lastErr = error;
+    } catch (e) { lastErr = e; } // 네트워크 예외도 재시도 대상
+    await new Promise((r) => setTimeout(r, 500 * (attempt + 1))); // 0.5 → 1.0 → 1.5 → 2.0s
   }
   throw lastErr;
 }
