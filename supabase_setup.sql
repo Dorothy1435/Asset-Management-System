@@ -461,3 +461,15 @@ drop policy if exists "media_update_admin" on storage.objects;
 drop policy if exists "media_update_auth" on storage.objects;
 create policy "media_update_auth" on storage.objects for update to authenticated
   using (bucket_id = 'asset-media') with check (bucket_id = 'asset-media');
+
+-- =====================================================================
+-- [핵심 버그 수정] is_admin() 이 superadmin 을 포함하지 않아, 최고관리자조차
+-- 자산 저장/사진 업로드(관리자 전용 쓰기)가 "violates row-level security policy"로 막히던 문제.
+-- (원격 진단: is_admin()=false, is_superadmin()=true 확인)
+-- is_admin() 을 admin + superadmin 모두 true 가 되도록 재정의한다.
+-- 이 블록을 Supabase SQL Editor 에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+create or replace function public.is_admin() returns boolean
+language sql security definer stable set search_path = public as $$
+  select exists(select 1 from public.profiles where id = auth.uid() and role in ('admin','superadmin'));
+$$;
