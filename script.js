@@ -1918,7 +1918,7 @@ function openManualCode(file, prefill) {
   if (inp) inp.value = prefill || "";
   if (hint) hint.textContent = prefill
     ? `인식된 번호(${prefill})와 맞는 자산이 없어요. 번호를 확인해 고쳐 주세요.`
-    : "라벨이 잘 안 읽혔어요. 자산코드를 직접 입력하거나 다시 촬영하세요.";
+    : "자산코드를 못 읽었어요. 📷 다시 찍을 땐 라벨의 ‘자산번호(자산코드)’가 화면에 크고 또렷하게 나오도록 찍어 주세요. 또는 아래에 번호를 직접 입력하세요.";
   show("manualCodeOverlay");
   setTimeout(() => { if (inp) inp.focus(); }, 120);
 }
