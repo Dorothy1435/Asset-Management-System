@@ -442,3 +442,22 @@ create policy "access_select_super" on public.access_logs for select to authenti
 drop policy if exists "access_delete_super" on public.access_logs;
 create policy "access_delete_super" on public.access_logs for delete to authenticated
   using (public.is_superadmin());
+
+-- =====================================================================
+-- [사진 업로드 개방] Storage 업로드를 '모든 로그인 사용자'에게 허용
+--  · 문제: 기존 정책이 업로드를 '관리자(is_admin)만' 허용 → 일반 검수원(비관리자)이
+--    물품/검수 사진을 올리면 "new row violates row-level security policy" 로 실패.
+--  · 조치: 로그인(authenticated)한 사용자면 asset-media 버킷에 업로드 가능하도록 개방.
+--    (버킷은 원래 공개 읽기이고, 승인된 회원만 로그인하므로 내부 도구로서 안전)
+--  · 삭제(DELETE)는 관리자만 유지(실수·악의 삭제 방지).
+-- 이 블록을 Supabase SQL Editor 에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+drop policy if exists "media_insert_admin" on storage.objects;
+drop policy if exists "media_insert_auth" on storage.objects;
+create policy "media_insert_auth" on storage.objects for insert to authenticated
+  with check (bucket_id = 'asset-media');
+
+drop policy if exists "media_update_admin" on storage.objects;
+drop policy if exists "media_update_auth" on storage.objects;
+create policy "media_update_auth" on storage.objects for update to authenticated
+  using (bucket_id = 'asset-media') with check (bucket_id = 'asset-media');
