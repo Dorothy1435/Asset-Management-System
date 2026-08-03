@@ -3184,19 +3184,31 @@ async function submitInspect() {
   const origLabel = btn.textContent;
   btn.disabled = true;
   if (photos.length) btn.textContent = "사진 저장 중…";
-  try {
-    if (isAdmin) {
-      await applyInspect(inspectTargetId, { periodType, period, inspector, affiliation, photo, photos });
-    } else {
-      await submitRequest({
+  const saveInspect = (ph, phs) => isAdmin
+    ? applyInspect(inspectTargetId, { periodType, period, inspector, affiliation, photo: ph, photos: phs })
+    : submitRequest({
         action: "inspect", target_id: inspectTargetId,
-        payload: { periodType, period, inspector, affiliation, photo, photos, assetName: a.assetName, assetNumber: a.assetNumber },
-        requester: reqName, note: `${period} 검수 확인${photos.length ? ` · 물품사진 ${photos.length}장` : ""}`,
+        payload: { periodType, period, inspector, affiliation, photo: ph, photos: phs, assetName: a.assetName, assetNumber: a.assetNumber },
+        requester: reqName, note: `${period} 검수 확인${phs.length ? ` · 물품사진 ${phs.length}장` : ""}${!ph && !phs.length && (photo || photos.length) ? " (사진 업로드 실패)" : ""}`,
       });
-    }
+  let photoDropped = false;
+  try {
+    await saveInspect(photo, photos);
   } catch (e) {
-    console.error(e); btn.disabled = false; btn.textContent = origLabel;
-    errEl.textContent = "처리에 실패했습니다. 잠시 후 다시 시도해주세요."; errEl.hidden = false; return;
+    console.error("검수 저장 1차 실패:", e);
+    // 사진(업로드/네트워크) 때문에 실패했을 수 있으니 '사진 없이 검수만' 저장 재시도.
+    // → 검수 기록은 절대 사진 때문에 날리지 않는다. 사진은 나중에 좋은 환경에서 상세화면에서 추가.
+    if (photo || photos.length) {
+      try { await saveInspect("", []); photoDropped = true; }
+      catch (e2) {
+        console.error("검수 저장 2차(사진 제외) 실패:", e2);
+        btn.disabled = false; btn.textContent = origLabel;
+        errEl.textContent = "저장 실패: " + (e2 && e2.message ? e2.message : String(e2)); errEl.hidden = false; return;
+      }
+    } else {
+      btn.disabled = false; btn.textContent = origLabel;
+      errEl.textContent = "저장 실패: " + (e && e.message ? e.message : String(e)); errEl.hidden = false; return;
+    }
   }
   btn.disabled = false; btn.textContent = origLabel;
   hide("inspectOverlay");
@@ -3204,8 +3216,14 @@ async function submitInspect() {
   inspectExtraPhotos = [];
   bumpScanCount(); // 이번 세션 검수 건수 +1 (검수 버튼에 배지로 표시)
   await reloadAll(); rerender();
-  const photoMsg = photos.length ? `물품 사진 ${photos.length}장이 자산에 추가되었습니다. ` : "";
   const sessN = `이번 세션 ${scanSessionCount}건째`;
+  if (photoDropped) {
+    // 검수는 저장됨, 사진만 실패 → 명확히 안내(검수를 잃지 않았음을 강조)
+    if (isAdmin) openDetail(inspectTargetId); else hide("detailOverlay");
+    alert(`✅ 검수는 저장됐어요 (${sessN}).\n다만 네트워크 문제로 사진 업로드에 실패해 사진은 빠졌습니다.\n와이파이가 좋은 곳에서 상세화면 → 사진만 다시 올려 주세요.`);
+    return;
+  }
+  const photoMsg = photos.length ? `물품 사진 ${photos.length}장이 자산에 추가되었습니다. ` : "";
   if (isAdmin) { openDetail(inspectTargetId); alert(`✅ 검수가 완료되었습니다 (${sessN}). ${photoMsg}${photo ? "검수 사진이 기록에 추가되었습니다." : ""}`.trim()); }
   else { hide("detailOverlay"); alert(`검수 승인 신청이 접수되었습니다 (${sessN}). 관리자 승인 후 ${photos.length ? "물품 사진과 함께 " : ""}${photo ? "검수 사진과 함께 " : ""}기록에 반영됩니다.`); }
 }
