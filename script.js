@@ -1588,7 +1588,7 @@ function rotateImageDataUrl(dataUrl, deg = 90) {
     img.src = dataUrl;
   });
 }
-const MAX_PHOTOS = 8; // 자산당 물품 사진 최대 장수 (저장공간 보호)
+const MAX_PHOTOS = 6; // 자산당 물품 사진 최대 장수 (저장공간 보호)
 async function handlePhotoUpload(files) {
   const list = Array.from(files || []).filter(Boolean);
   if (!list.length) return;
@@ -1599,7 +1599,7 @@ async function handlePhotoUpload(files) {
   for (const f of imgs) {
     if (currentPhotos.length >= MAX_PHOTOS) { showFormError(`물품 사진은 최대 ${MAX_PHOTOS}장까지 등록할 수 있습니다.`); break; }
     try {
-      const data = await compressImage(f, 800, 0.62); // 저장공간 절약(무료 용량 연장)
+      const data = await compressImage(f, 780, 0.55); // 저장공간 절약(무료 용량 연장)
       currentPhotos.push(data);
       renderPhotoPreview();
     } catch { /* 한 장 실패해도 나머지는 계속 */ }
@@ -1931,7 +1931,7 @@ async function submitManualCode() {
   if (!a) { if (err) { err.textContent = "일치하는 자산이 없어요. 번호를 다시 확인해 주세요."; err.hidden = false; } return; }
   hide("manualCodeOverlay");
   let photo = "";
-  try { if (scanPendingFile) photo = await compressImage(scanPendingFile, 900, 0.6); } catch {}
+  try { if (scanPendingFile) photo = await compressImage(scanPendingFile, 780, 0.55); } catch {}
   scanLastCode = code; // 다시 틀렸을 때 또 고칠 수 있게 유지(scanPendingFile도 유지)
   openInspect(a.id, photo, true);
 }
@@ -2290,7 +2290,7 @@ async function handleScanCapture(file) {
     await new Promise((r) => setTimeout(r, 320));
     setScanLoading("", false);
     scanLastCode = typeof code === "string" ? code : (a.assetNumber || "");
-    const photo = await compressImage(file, 900, 0.6);
+    const photo = await compressImage(file, 780, 0.55);
     openInspect(a.id, photo, true); // fromScan=true → '코드 수정' 버튼 노출
   } catch (e) {
     setScanLoading("", false);
@@ -2529,7 +2529,7 @@ async function handleBatchFiles(files) {
           item.status = "nomatch";
         } else {
           item.asset = asset;
-          item.photoData = await compressImage(file, 900, 0.6); // 라벨/검수 사진(압축).
+          item.photoData = await compressImage(file, 780, 0.55); // 라벨/검수 사진(압축).
           item.status = classifyBatchItem(item, asset, period);
           // '중복 처리 방법 선택'(건너뛰기/덮어쓰기) 안내는 PDF 검수 모드에만 해당. 라벨 등록 모드는 자동 처리.
           if (batchMode === "pdf" && (item.status === "dup" || item.status === "already")) newDup++;
@@ -2815,7 +2815,7 @@ async function recognizeIntoItem(item, mode, pool, period, tryRotate = false) {
   item.code = code || null;
   if (!asset) { item.status = "nomatch"; return; }
   item.asset = asset;
-  item.photoData = await compressImage(item.file, 900, 0.6); // 검수 증빙 사진(압축)
+  item.photoData = await compressImage(item.file, 780, 0.55); // 검수 증빙 사진(압축)
   item.status = classifyBatchItem(item, asset, period);
 }
 // 현재 위치·자산명·회차 기준 인식 설정
@@ -3156,7 +3156,7 @@ async function handleInspExtraCapture(file) {
   if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
   if (inspectExtraPhotos.length >= INSP_EXTRA_MAX) return;
   try {
-    const data = await compressImage(file, 800, 0.62); // 저장공간 절약(무료 용량 연장)
+    const data = await compressImage(file, 780, 0.55); // 저장공간 절약(무료 용량 연장)
     inspectExtraPhotos.push(data);
     renderInspExtra();
   } catch (e) {
@@ -3257,7 +3257,8 @@ async function applyInspect(id, { periodType, period, inspector, affiliation, ph
   let mediaFields = {};
   // 이어 찍은 물품 사진(최대 3장)이 있으면 기존 자산 사진 뒤에 병합해 함께 저장
   const extra = Array.isArray(photos) ? photos.filter(Boolean) : [];
-  if (extra.length) mediaFields.imageUrls = [...photosOf(current), ...extra];
+  // 자산당 사진 장수 제한(최근 MAX_PHOTOS장 유지) — 검수마다 사진이 무한정 쌓여 용량이 커지는 것 방지
+  if (extra.length) mediaFields.imageUrls = [...photosOf(current), ...extra].slice(-MAX_PHOTOS);
   // 검수한 라벨 사진을 자산의 '라벨 파일'로도 저장.
   // label === true 이면 '검수 사진을 라벨로도 사용'(요청 payload에 사진을 중복 저장하지 않기 위함).
   const labelImg = label === true ? (photoStored || photo) : label;
@@ -4302,7 +4303,7 @@ document.getElementById("bulk-photo-input").addEventListener("change", async (e)
   if (!file) return;
   if (!file.type || !file.type.startsWith("image/")) { alert("이미지(사진)만 사용할 수 있습니다."); return; }
   try {
-    bulkEditPhotoData = await compressImage(file, 1000, 0.65);
+    bulkEditPhotoData = await compressImage(file, 820, 0.58);
     document.getElementById("bulk-photo-preview").innerHTML = `<img src="${bulkEditPhotoData}" alt="선택한 사진" />`;
   } catch (err) { console.error("사진 처리 오류:", err); alert("사진 처리 중 문제가 발생했습니다."); }
 });
