@@ -49,6 +49,31 @@ function toast(msg, kind) {
     el.addEventListener("click", close);
   } catch { try { window.__nativeAlert && window.__nativeAlert(String(msg)); } catch {} }
 }
+
+// ===== 인앱 브라우저(카카오톡·인스타 등) 감지 안내 =====
+// 인앱 브라우저는 파일 업로드(사진 저장)가 막히거나 불안정하다. 감지되면 상단 배너로
+// 기본 브라우저(Chrome/Safari)로 열도록 유도한다.
+function checkInAppBrowser() {
+  try {
+    const ua = navigator.userAgent || "";
+    const kakao = /KAKAOTALK/i.test(ua);
+    const inApp = kakao || /Instagram|FBAN|FBAV|FB_IAB|Line\/|NAVER|DaumApps|everytimeApp|; wv\)/i.test(ua);
+    if (!inApp) return;
+    const bar = document.createElement("div");
+    bar.className = "inapp-warn";
+    bar.innerHTML =
+      '<span>⚠️ 지금 <b>' + (kakao ? "카카오톡" : "인앱") + ' 브라우저</b>예요. 여기선 <b>사진 업로드가 안 됩니다</b>.<br>' +
+      '오른쪽 아래/위 <b>메뉴(⋮)</b> → <b>“다른 브라우저로 열기”</b>(Chrome/Safari)로 열어 주세요.</span>' +
+      (kakao ? '<button type="button" id="inappOpenBtn" class="btn btn-primary btn-sm">브라우저로 열기</button>' : '') +
+      '<button type="button" id="inappCloseBtn" class="inapp-x" aria-label="닫기">✕</button>';
+    document.body.insertBefore(bar, document.body.firstChild);
+    const cb = document.getElementById("inappCloseBtn");
+    if (cb) cb.addEventListener("click", () => bar.remove());
+    const ob = document.getElementById("inappOpenBtn");
+    if (ob) ob.addEventListener("click", () => { try { location.href = "kakaotalk://web/openExternal?url=" + encodeURIComponent(location.href); } catch {} });
+  } catch {}
+}
+checkInAppBrowser();
 window.__nativeAlert = window.alert.bind(window);
 window.alert = (m) => toast(m);
 
@@ -3280,16 +3305,17 @@ async function uploadMedia(dataUrl, folder) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const ext = mime.includes("pdf") ? "pdf" : (mime.split("/")[1] || "jpg").split("+")[0];
   const blob = new Blob([bytes], { type: mime });
-  // 약한 네트워크·순간 오류에 대비해 최대 5회 재시도(백오프 0.5→2.5s). 현장 와이파이가 약해도 대부분 성공.
+  // 일시적 실패(약한 네트워크·순간 오류)는 3회까지 재시도(짧은 백오프). 정상 브라우저는 1회에 성공.
+  // (인앱 브라우저는 아무리 재시도해도 실패하므로 과도한 재시도로 버튼이 오래 잠기지 않게 3회로 제한)
   let lastErr = null;
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
     try {
       const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, blob, { contentType: mime, upsert: false });
       if (!error) return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
       lastErr = error;
     } catch (e) { lastErr = e; } // 네트워크 예외도 재시도 대상
-    await new Promise((r) => setTimeout(r, 500 * (attempt + 1))); // 0.5 → 1.0 → 1.5 → 2.0s
+    await new Promise((r) => setTimeout(r, 350 * (attempt + 1))); // 0.35 → 0.7s
   }
   throw lastErr;
 }

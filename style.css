@@ -1792,3 +1792,15 @@ body { max-width: 100%; overflow-x: hidden; }
 /* 접속 로그 (최고관리자) */
 .access-log-table .al-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .access-log-table .al-email { font-size: 12px; color: var(--text-light); word-break: break-all; }
+
+/* 인앱 브라우저(카카오톡 등) 경고 배너 */
+.inapp-warn {
+  position: sticky; top: 0; z-index: 10000;
+  background: #b91c1c; color: #fff;
+  padding: 12px 40px 12px 14px;
+  font-size: 13px; line-height: 1.55;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.inapp-warn b { font-weight: 800; }
+.inapp-warn .btn-sm { flex: none; }
+.inapp-warn .inapp-x { position: absolute; top: 8px; right: 10px; background: none; border: none; color: #fff; font-size: 17px; cursor: pointer; line-height: 1; padding: 2px 6px; }
