@@ -3245,7 +3245,7 @@ async function applyInspect(id, { periodType, period, inspector, affiliation, ph
   let photoStored = photo || "";
   if (photoStored && photoStored.startsWith("data:")) {
     try { photoStored = await uploadMedia(photoStored, "inspections"); }
-    catch (e) { console.warn("검수 사진 업로드 실패 — base64로 저장합니다:", e?.message || e); }
+    catch (e) { console.warn("검수 사진 업로드 실패 — base64로 저장합니다:", e?.message || e); notifyStorageIssue(e); }
   }
   // labelOnly=true: 검수 기록은 추가하지 않고 '라벨 사진만' 자산에 붙인다(이미 검수된 자산 재등록 방지).
   const prevList = Array.isArray(current.inspections) ? current.inspections.slice() : [];
@@ -3372,6 +3372,20 @@ async function withUploadedMedia(fields) {
 // 저장소 업로드 실패(용량 초과 등) 시 1회 안내. 사진은 임시 보존되지만 조치가 필요함을 알린다.
 let _storageIssueNotified = false;
 function notifyStorageIssue(err) {
+  // 실제 업로드 에러를 서버에 남겨(access_logs 재사용) 최고관리자가 원인을 확인할 수 있게 한다.
+  // (아이폰 등 특정 기기 오류를 개발자가 직접 못 보므로 원격 진단용) — 알림과 별개로 매번 기록.
+  try {
+    if (sb && currentUser) {
+      const detail = String((err && (err.message || err.error || err.name)) || err || "unknown").slice(0, 250);
+      const ua = (navigator.userAgent || "").slice(0, 120);
+      sb.from("access_logs").insert({
+        user_id: currentUser.id, email: currentUser.email || "",
+        name: (myProfile && myProfile.name) || "",
+        affiliation: (myProfile && myProfile.affiliation) || "",
+        event: "upload_error: " + detail + " | UA: " + ua,
+      }).then(() => {}, () => {});
+    }
+  } catch {}
   if (_storageIssueNotified) return;
   _storageIssueNotified = true;
   console.warn("사진 업로드 실패:", err?.message || err);
