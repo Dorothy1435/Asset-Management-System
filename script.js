@@ -926,6 +926,13 @@ function applyFilter(resetPage = true) {
 function sortFiltered() {
   const { key, dir } = sortState;
   if (!key) return;
+  // 검수일은 자산의 직접 속성이 아니라 '가장 최근 검수 기록'의 시각으로 정렬한다.
+  // (미검수 자산은 날짜가 없어 0으로 취급 → 오름차순이면 위, 내림차순이면 아래)
+  if (key === "inspDate") {
+    const t = (x) => { const li = lastInspection(x); const v = li && li.checkedAt ? Date.parse(li.checkedAt) : NaN; return isNaN(v) ? 0 : v; };
+    filtered.sort((a, b) => (t(a) - t(b)) * dir);
+    return;
+  }
   filtered.sort((a, b) => {
     let va = a[key] ?? "", vb = b[key] ?? "";
     const na = parseFloat(va), nb = parseFloat(vb);
