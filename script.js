@@ -2374,6 +2374,8 @@ async function handleScanCapture(file) {
     await new Promise((r) => setTimeout(r, 320));
     setScanLoading("", false);
     scanLastCode = typeof code === "string" ? code : (a.assetNumber || "");
+    // 이미 이번 회차 검수된 자산이면 스캔 즉시 안내(중복 검수 방지) — 상세는 검수 화면 배너로도 표시.
+    if (inspectedRound(a, inspRound)) toast(`⚠️ 이미 ${inspRound} 검수된 자산이에요.`, "warn");
     const photo = await compressImage(file, 780, 0.55);
     openInspect(a.id, photo, true); // fromScan=true → '코드 수정' 버튼 노출
   } catch (e) {
@@ -3195,6 +3197,24 @@ function openInspect(id, photo, fromScan) {
   affilSel.value = affil;
   document.getElementById("insp-checked").checked = true;
   document.getElementById("inspectTarget").innerHTML = `<b>${esc(a.assetName)}</b> (${esc(a.assetNumber)})`;
+  // 이미 검수된 자산이면 '몇 회차 검수됨'을 안내(중복 검수 방지). 회차·검수일 요약.
+  const already = document.getElementById("inspAlreadyMsg");
+  if (already) {
+    const insps = Array.isArray(a.inspections) ? a.inspections : [];
+    if (insps.length) {
+      const byRound = {};
+      insps.forEach((i) => { const p = i && i.period ? i.period : "(회차없음)"; const d = (i && i.checkedAt) || ""; if (!byRound[p] || d > byRound[p]) byRound[p] = d; });
+      const parts = Object.keys(byRound).sort().map((p) => `${p}${byRound[p] ? ` (${fmtDate(byRound[p])})` : ""}`);
+      const thisRound = inspectedRound(a, inspRound);
+      already.className = "insp-already" + (thisRound ? " warn" : "");
+      already.innerHTML = (thisRound
+        ? `⚠️ <b>${esc(inspRound)}에 이미 검수된 자산이에요.</b> 다시 저장하면 검수 기록이 하나 더 추가됩니다.<br>`
+        : `ℹ️ 이미 검수된 자산이에요.<br>`) + `검수 이력: <b>${parts.map(esc).join(" · ")}</b>`;
+      already.hidden = false;
+    } else {
+      already.hidden = true;
+    }
+  }
   // 촬영된 검수 사진 미리보기 (사진 검수일 때만 표시)
   const photoRow = document.getElementById("insp-photo-row");
   const photoPrev = document.getElementById("inspPhotoPreview");

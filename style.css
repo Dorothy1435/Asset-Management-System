@@ -1824,3 +1824,8 @@ body { max-width: 100%; overflow-x: hidden; }
 }
 .install-steps { margin: 10px 0 0; padding-left: 20px; }
 .install-steps li { font-size: 14px; line-height: 1.7; margin-bottom: 6px; color: var(--text); }
+
+/* 검수 화면: 이미 검수됨 안내 배너 */
+.insp-already { margin: -2px 0 12px; padding: 9px 12px; border-radius: 8px; font-size: 13px; line-height: 1.55; background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+.insp-already.warn { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }
+.insp-already[hidden] { display: none; }
