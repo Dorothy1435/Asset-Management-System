@@ -1860,3 +1860,10 @@ body { max-width: 100%; overflow-x: hidden; }
 .al-day-count { color: var(--primary-dark); font-size: 13px; }
 .al-day-times { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; }
 .al-time-chip { display: inline-block; background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* 접속 로그 메인: 날짜 안 사용자 목록 */
+.al-day-users { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; }
+.al-dayuser { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+.al-dayuser:hover { border-color: var(--primary); background: #f8faff; }
+.al-dayuser-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.al-dayuser-count { font-size: 13px; font-weight: 700; color: var(--primary-dark); }

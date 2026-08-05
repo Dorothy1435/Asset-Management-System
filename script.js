@@ -3785,19 +3785,32 @@ function renderAccessLog() {
       `<div class="al-daygroups">${groupHtml}</div>`;
     return;
   }
-  // ── 사용자 목록 화면 ──
-  const users = [...byUser.values()].map((u) => ({
-    ...u,
-    count: u.logs.length,
-    last: u.logs.reduce((m, x) => (String(x.created_at) > m ? String(x.created_at) : m), ""),
-  })).sort((a, b) => (b.last > a.last ? 1 : b.last < a.last ? -1 : 0)); // 최근 접속순
+  // ── 메인 화면: 날짜별 → 그날 접속한 사람 + 횟수 ──
+  const byDate = {};
+  for (const l of logs) {
+    const d = fmtDate(l.created_at);
+    const key = l.email || l.user_id || "(알수없음)";
+    byDate[d] = byDate[d] || {};
+    const e = byDate[d][key] || (byDate[d][key] = { name: "", email: l.email || "", count: 0 });
+    if (l.name && !e.name) e.name = l.name;
+    e.count++;
+  }
+  const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a)); // 최신 날짜 위로
+  const html = dates.map((d) => {
+    const dayUsers = Object.values(byDate[d]).sort((a, b) => b.count - a.count || String(a.name).localeCompare(String(b.name))); // 많이 온 순
+    const totalDay = dayUsers.reduce((s, u) => s + u.count, 0);
+    return `<div class="al-daygroup">
+      <div class="al-day-head"><span class="al-day-date">📅 ${d}</span><span class="al-day-count">${dayUsers.length}명 · ${totalDay}회</span></div>
+      <div class="al-day-users">${dayUsers.map((u) => `
+        <button type="button" class="al-dayuser" data-al-user="${esc(u.email)}">
+          <span class="al-dayuser-name">${esc(u.name || u.email)}</span>
+          <span class="al-dayuser-count">${u.count}회</span>
+        </button>`).join("")}</div>
+    </div>`;
+  }).join("");
   body.innerHTML =
-    `<div class="notice" style="margin-bottom:12px;">이름을 누르면 그 사용자의 접속 기록·날짜별 횟수가 보여요. (사용자별 하루 1회 기록 · 최고관리자 전용)</div>` +
-    `<div class="al-userlist">${users.map((u) => `
-      <button type="button" class="al-user" data-al-user="${esc(u.email)}">
-        <span class="al-user-main"><span class="al-user-name">${esc(u.name || u.email)}</span><span class="al-user-meta">${esc(u.email)}${u.affiliation ? " · " + esc(u.affiliation) : ""}</span></span>
-        <span class="al-user-right"><b class="al-user-count">${u.count}회</b><span class="al-user-last">최근 ${fmtDate(u.last)}</span></span>
-      </button>`).join("")}</div>`;
+    `<div class="notice" style="margin-bottom:12px;">날짜별 접속 현황. 이름을 누르면 그 사용자의 전체 접속 기록이 보여요. (사용자별 하루 1회 기록 · 최고관리자 전용)</div>` +
+    `<div class="al-daygroups">${html}</div>`;
 }
 function renderReview() {
   const body = document.getElementById("adminReviewBody");
