@@ -1852,3 +1852,11 @@ body { max-width: 100%; overflow-x: hidden; }
 .al-date-row b { color: var(--primary-dark); }
 .al-times { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
 .al-time-row { font-size: 13px; color: var(--text-light); padding: 4px 2px; border-bottom: 1px solid #f1f5f9; font-variant-numeric: tabular-nums; }
+
+/* 접속 로그 상세: 날짜별 그룹 */
+.al-daygroups { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.al-daygroup { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.al-day-head { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; background: #f1f5f9; font-size: 14px; font-weight: 700; color: var(--text); }
+.al-day-count { color: var(--primary-dark); font-size: 13px; }
+.al-day-times { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; }
+.al-time-chip { display: inline-block; background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }

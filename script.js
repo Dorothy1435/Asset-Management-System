@@ -3766,18 +3766,23 @@ function renderAccessLog() {
   // ── 상세 화면(특정 사용자) ──
   if (_accessLogUser && byUser.has(_accessLogUser)) {
     const u = byUser.get(_accessLogUser);
-    const byDate = {};
-    u.logs.forEach((l) => { const d = fmtDate(l.created_at); byDate[d] = (byDate[d] || 0) + 1; });
-    const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
-    const items = u.logs.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    const hhmm = (iso) => { try { const d = new Date(iso); const p = (n) => String(n).padStart(2, "0"); return `${p(d.getHours())}:${p(d.getMinutes())}`; } catch { return iso; } };
+    // 날짜별로 묶기(최신 날짜 위로), 각 날짜 안 시각은 최근순
+    const groups = {};
+    u.logs.forEach((l) => { const d = fmtDate(l.created_at); (groups[d] = groups[d] || []).push(l); });
+    const dates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+    const groupHtml = dates.map((d) => {
+      const times = groups[d].slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return `<div class="al-daygroup">
+        <div class="al-day-head"><span class="al-day-date">📅 ${d}</span><span class="al-day-count">${times.length}회</span></div>
+        <div class="al-day-times">${times.map((l) => `<span class="al-time-chip">${hhmm(l.created_at)}</span>`).join("")}</div>
+      </div>`;
+    }).join("");
     body.innerHTML =
       `<button type="button" class="btn btn-secondary btn-sm" data-al-back>← 사용자 목록</button>` +
-      `<h3 class="al-detail-h">${esc(u.name || u.email)} <span class="al-detail-sub">· 총 <b>${u.logs.length}</b>회 접속</span></h3>` +
+      `<h3 class="al-detail-h">${esc(u.name || u.email)} <span class="al-detail-sub">· 총 <b>${u.logs.length}</b>회 접속 · ${dates.length}일</span></h3>` +
       `<div class="al-detail-meta">${esc(u.email)}${u.affiliation ? " · " + esc(u.affiliation) : ""}</div>` +
-      `<h4 class="al-sec">📅 날짜별 접속 횟수</h4>` +
-      `<div class="al-dates">${dates.map((d) => `<div class="al-date-row"><span>${d}</span><b>${byDate[d]}회</b></div>`).join("")}</div>` +
-      `<h4 class="al-sec">🕒 접속 일시 (최근순)</h4>` +
-      `<div class="al-times">${items.map((l) => `<div class="al-time-row">${_fmtLogDT(l.created_at)}</div>`).join("")}</div>`;
+      `<div class="al-daygroups">${groupHtml}</div>`;
     return;
   }
   // ── 사용자 목록 화면 ──
