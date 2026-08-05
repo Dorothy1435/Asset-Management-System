@@ -1829,3 +1829,6 @@ body { max-width: 100%; overflow-x: hidden; }
 .insp-already { margin: -2px 0 12px; padding: 9px 12px; border-radius: 8px; font-size: 13px; line-height: 1.55; background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
 .insp-already.warn { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }
 .insp-already[hidden] { display: none; }
+
+/* 목록 검수일 셀의 검수자 이름 */
+.cell-insp .insp-by { display: inline-block; font-size: 11px; color: var(--text-light); margin-top: 1px; }

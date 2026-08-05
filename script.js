@@ -1069,6 +1069,7 @@ function render() {
     if (li) tag += ` <span class="tag tag-inspected">검수 ${esc(li.period || "완료")}</span>`;
     if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
     const inspDate = li ? fmtDate(li.checkedAt) : "—";
+    const inspBy = li && li.inspector ? `<span class="insp-by">${esc(li.inspector)}</span>` : ""; // 검수자 이름
     const thumbSrc = a.thumbUrl || a.imageUrl; // 목록은 가벼운 썸네일 우선(없으면 원본)
     const thumb = thumbSrc ? `<img class="thumb" src="${thumbSrc}" alt="" loading="lazy" decoding="async" />` : "";
     // 모바일 카드에서 빈 값은 숨기기 위한 표식(m-empty). 데스크톱 표에는 영향 없음.
@@ -1085,7 +1086,7 @@ function render() {
       <td data-label="부서" class="${mE(a.dept).trim()}">${esc(val(a.dept))}</td>
       <td data-label="상태">${statusBadge(a.status)}</td>
       <td data-label="등재일">${esc(val(a.regDate))}</td>
-      <td class="col-insp cell-insp${li ? "" : " m-empty"}" data-label="검수일">${inspDate}</td>
+      <td class="col-insp cell-insp${li ? "" : " m-empty"}" data-label="검수일">${inspDate}${inspBy ? `<br>${inspBy}` : ""}</td>
       <td class="cell-actions">
         <button class="btn-mini btn-view" data-id="${esc(a.id)}">상세</button>
         <button class="btn-mini btn-edit" data-id="${esc(a.id)}">${isAdmin ? "수정" : "수정요청"}</button>
