@@ -3738,28 +3738,61 @@ function setAdminTab(tab) {
   if (tab === "review") renderReview();
   else if (tab === "hist") renderHistory();
   else if (tab === "members") renderMembers();
-  else if (tab === "access") renderAccessLog();
+  else if (tab === "access") { _accessLogUser = null; renderAccessLog(); } // 탭 열면 사용자 목록부터
 }
 // 접속 로그 렌더 (최고관리자 전용): 누가 언제 접속했는지
+let _accessLogUser = null; // 상세를 보고 있는 사용자(이메일). null이면 사용자 목록.
+function _fmtLogDT(iso) { try { const d = new Date(iso); const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; } catch { return iso; } }
 function renderAccessLog() {
   const body = document.getElementById("adminAccessBody");
   if (!body) return;
   if (!isSuperAdmin) { body.innerHTML = `<div class="empty-msg">최고관리자만 볼 수 있습니다.</div>`; return; }
-  if (!accessLogs.length) {
+  // 실제 '접속(login)'만. 업로드 오류 등 진단 로그는 접속 로그에서 제외.
+  const logs = accessLogs.filter((l) => String(l.event || "") === "login");
+  if (!logs.length) {
     body.innerHTML = `<div class="empty-msg"><div class="empty-ic">🧾</div><div class="empty-title">접속 기록이 없습니다</div><div class="empty-sub">사용자가 로그인하면 여기에 표시됩니다.</div></div>`;
     return;
   }
-  const fmtDT = (iso) => { try { const d = new Date(iso); const p = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; } catch { return iso; } };
-  const rows = accessLogs.map((l) => `
-    <tr>
-      <td class="al-time">${fmtDT(l.created_at)}</td>
-      <td>${esc(l.name || "-")}</td>
-      <td class="al-email">${esc(l.email || "-")}</td>
-      <td>${esc(l.affiliation || "-")}</td>
-    </tr>`).join("");
+  // 사용자별 그룹(이메일 기준)
+  const byUser = new Map();
+  for (const l of logs) {
+    const key = l.email || l.user_id || "(알수없음)";
+    const o = byUser.get(key) || { name: "", email: l.email || "", affiliation: "", logs: [] };
+    if (l.name && !o.name) o.name = l.name;
+    if (l.affiliation && !o.affiliation) o.affiliation = l.affiliation;
+    o.logs.push(l);
+    byUser.set(key, o);
+  }
+  // ── 상세 화면(특정 사용자) ──
+  if (_accessLogUser && byUser.has(_accessLogUser)) {
+    const u = byUser.get(_accessLogUser);
+    const byDate = {};
+    u.logs.forEach((l) => { const d = fmtDate(l.created_at); byDate[d] = (byDate[d] || 0) + 1; });
+    const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+    const items = u.logs.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    body.innerHTML =
+      `<button type="button" class="btn btn-secondary btn-sm" data-al-back>← 사용자 목록</button>` +
+      `<h3 class="al-detail-h">${esc(u.name || u.email)} <span class="al-detail-sub">· 총 <b>${u.logs.length}</b>회 접속</span></h3>` +
+      `<div class="al-detail-meta">${esc(u.email)}${u.affiliation ? " · " + esc(u.affiliation) : ""}</div>` +
+      `<h4 class="al-sec">📅 날짜별 접속 횟수</h4>` +
+      `<div class="al-dates">${dates.map((d) => `<div class="al-date-row"><span>${d}</span><b>${byDate[d]}회</b></div>`).join("")}</div>` +
+      `<h4 class="al-sec">🕒 접속 일시 (최근순)</h4>` +
+      `<div class="al-times">${items.map((l) => `<div class="al-time-row">${_fmtLogDT(l.created_at)}</div>`).join("")}</div>`;
+    return;
+  }
+  // ── 사용자 목록 화면 ──
+  const users = [...byUser.values()].map((u) => ({
+    ...u,
+    count: u.logs.length,
+    last: u.logs.reduce((m, x) => (String(x.created_at) > m ? String(x.created_at) : m), ""),
+  })).sort((a, b) => (b.last > a.last ? 1 : b.last < a.last ? -1 : 0)); // 최근 접속순
   body.innerHTML =
-    `<div class="notice" style="margin-bottom:12px;">사용자별 <b>하루 1회</b> 접속을 기록합니다. 최근 ${accessLogs.length.toLocaleString()}건 (최대 500건) · 최고관리자 전용</div>` +
-    `<div class="table-wrap"><table class="asset-table access-log-table"><thead><tr><th>접속 일시</th><th>이름</th><th>아이디(이메일)</th><th>소속</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    `<div class="notice" style="margin-bottom:12px;">이름을 누르면 그 사용자의 접속 기록·날짜별 횟수가 보여요. (사용자별 하루 1회 기록 · 최고관리자 전용)</div>` +
+    `<div class="al-userlist">${users.map((u) => `
+      <button type="button" class="al-user" data-al-user="${esc(u.email)}">
+        <span class="al-user-main"><span class="al-user-name">${esc(u.name || u.email)}</span><span class="al-user-meta">${esc(u.email)}${u.affiliation ? " · " + esc(u.affiliation) : ""}</span></span>
+        <span class="al-user-right"><b class="al-user-count">${u.count}회</b><span class="al-user-last">최근 ${fmtDate(u.last)}</span></span>
+      </button>`).join("")}</div>`;
 }
 function renderReview() {
   const body = document.getElementById("adminReviewBody");
@@ -4713,6 +4746,12 @@ document.getElementById("adminReviewBody").addEventListener("change", (e) => {
 });
 // 결재/변경 이력
 document.getElementById("adminHistSearch").addEventListener("input", renderHistory);
+// 접속 로그: 사용자 이름 클릭 → 그 사용자 상세 / '← 사용자 목록' 뒤로
+document.getElementById("adminAccessBody").addEventListener("click", (e) => {
+  const u = e.target.closest("[data-al-user]");
+  if (u) { _accessLogUser = u.dataset.alUser; renderAccessLog(); return; }
+  if (e.target.closest("[data-al-back]")) { _accessLogUser = null; renderAccessLog(); }
+});
 document.getElementById("adminHistBody").addEventListener("click", (e) => {
   const rv = e.target.closest("button[data-revert]");
   const dl = e.target.closest("button[data-delhist]");
