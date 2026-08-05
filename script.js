@@ -74,6 +74,50 @@ function checkInAppBrowser() {
   } catch {}
 }
 checkInAppBrowser();
+
+// ===== 앱 설치(홈 화면에 추가) 안내 =====
+let _deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); _deferredInstallPrompt = e; updateInstallButton(); });
+window.addEventListener("appinstalled", () => { _deferredInstallPrompt = null; updateInstallButton(); });
+function isStandaloneApp() {
+  try { return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true; } catch { return false; }
+}
+function updateInstallButton() {
+  const btn = document.getElementById("installAppBtn");
+  if (!btn) return;
+  // 이미 '앱으로 설치'되어 standalone으로 실행 중이면 숨김. 설치 개념 없는 데스크톱도 숨김(모바일만 노출).
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+  btn.hidden = isStandaloneApp() || !isMobile;
+}
+function openInstallGuide() {
+  const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+  const body = document.getElementById("installGuideBody");
+  if (body) body.innerHTML = ios
+    ? `<p class="form-info">아이폰(사파리)에서 앱처럼 쓰려면:</p>
+       <ol class="install-steps">
+         <li>이 페이지를 <b>사파리</b>로 여세요. (카카오톡·인스타 안이면 먼저 '다른 브라우저로 열기')</li>
+         <li>하단 <b>공유 버튼 ⬆️</b> 을 누르세요.</li>
+         <li><b>'홈 화면에 추가'</b> → <b>추가</b>.</li>
+         <li>홈에 생긴 <b>자산관리 아이콘</b>으로 실행하면 앱처럼 열려요.</li>
+       </ol>`
+    : `<p class="form-info">안드로이드(크롬)에서 앱처럼 쓰려면:</p>
+       <ol class="install-steps">
+         <li>이 페이지를 <b>크롬</b>으로 여세요. (카카오톡 안이면 먼저 '다른 브라우저로 열기')</li>
+         <li>우측 상단 <b>⋮ 메뉴</b> 를 누르세요.</li>
+         <li><b>'홈 화면에 추가'</b> 또는 <b>'앱 설치'</b> 를 누르세요.</li>
+         <li>홈에 생긴 <b>자산관리 아이콘</b>으로 실행하면 앱처럼 열려요.</li>
+       </ol>`;
+  show("installGuideOverlay");
+}
+document.getElementById("installAppBtn").addEventListener("click", async () => {
+  if (_deferredInstallPrompt) {                 // 안드로이드 등: 원탭 설치 프롬프트
+    try { _deferredInstallPrompt.prompt(); await _deferredInstallPrompt.userChoice; } catch {}
+    _deferredInstallPrompt = null; updateInstallButton();
+  } else {                                        // 아이폰 등: 수동 설치 안내 팝업
+    openInstallGuide();
+  }
+});
+updateInstallButton();
 window.__nativeAlert = window.alert.bind(window);
 window.alert = (m) => toast(m);
 
@@ -4686,7 +4730,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay", "manualCodeOverlay", "inspDetailOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay", "manualCodeOverlay", "inspDetailOverlay", "installGuideOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
 // 배경(어두운 부분) 클릭 시 닫기 — 단, 여러 장 검수 창은 실수로 닫히면 인식한 사진이 날아가므로 제외(‘닫기’ 버튼으로만)
 // 모바일: 카메라·사진 선택창을 다녀올 때 배경에 '유령 클릭'이 들어가 창이 꺼지는 문제 방지

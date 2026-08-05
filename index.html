@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://pmjwwvgcmaywbatryibc.supabase.co" crossorigin />
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="style.css?v=20260805a" />
+  <link rel="stylesheet" href="style.css?v=20260805b" />
 </head>
 <body>
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -34,6 +34,7 @@
         <button class="btn btn-primary btn-lg" id="landingLoginBtn">로그인</button>
         <button class="btn btn-outline btn-lg" id="landingSignupBtn">회원가입</button>
       </div>
+      <button type="button" class="install-app-link" id="installAppBtn" hidden>📱 앱으로 설치하기 (홈 화면에 추가)</button>
       <p class="landing-foot">© 글로컬대학사업본부 · 관리자 비상연락처 ☎ 3123</p>
     </div>
   </div>
@@ -834,12 +835,24 @@
     </div>
   </div>
 
+  <!-- 앱 설치 안내 -->
+  <div class="modal-overlay" id="installGuideOverlay" hidden>
+    <div class="modal modal-narrow" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>📱 앱으로 설치하기</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body" id="installGuideBody"></div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
+    </div>
+  </div>
+
   <footer class="footer">
     <p>© 글로컬대학사업본부 자산관리 시스템 · 관리자 비상연락처 ☎ 3123</p>
   </footer>
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20260805a"></script>
+  <script src="script.js?v=20260805b"></script>
 </body>
 </html>
