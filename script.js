@@ -850,8 +850,8 @@ function updateUI() {
   g("reviewBtn").hidden = !isAdmin;
   g("histBtn").hidden = !isAdmin;
   g("membersBtn").hidden = !isAdmin; // 가입 승인은 관리자도 가능 (권한변경·삭제는 최고관리자만)
-  const expInsp = g("exportInspBtn"); // 재물조사 결과 내보내기 = 관리자 + 검수 대상 메뉴(2025/2024)만
-  if (expInsp) expInsp.hidden = !isAdmin || currentGroup === GROUP_ELEC;
+  const expInsp = g("exportInspBtn"); // 재물조사 결과 내보내기 = 관리자 전용(업로드 목록표 기준, 메뉴 무관)
+  if (expInsp) expInsp.hidden = !isAdmin;
   const accessTab = document.querySelector('.admin-tab[data-atab="access"]');
   if (accessTab) accessTab.hidden = !isSuperAdmin; // 접속 로그 탭은 최고관리자만
   const navAdmin = g("navAdmin");
@@ -4342,32 +4342,38 @@ async function exportExcel() {
   XLSX.utils.book_append_sheet(wb, ws, "자산목록");
   XLSX.writeFile(wb, `${groupLabel(currentGroup)}_자산목록_${todayStr()}.xlsx`);
 }
-// 재물조사 결과 내보내기(관리자 전용): 현재 메뉴 + 선택 회차 기준, 검수완료 자산에 '정상 O' 표시.
-// 매뉴얼의 목록표 열(정상/요정비/폐품/불용)에 맞춰 내보내 그대로 활용/붙여넣기 가능.
+// 재물조사 결과 내보내기(관리자 전용): '업로드된 재물조사 목록표(inventory_list.json)' 기준.
+//  · 목록표에 있는 자산만 내보낸다(시스템 전체 X). 검수완료 자산에 '정상 O' + 검수일·검수자 채움.
+//  · 목록표 원본 열(자산관리번호…정상/요정비/폐품/불용)을 그대로 유지 → 그대로 제출/붙여넣기 가능.
 async function exportInspectionResult() {
   if (!isAdmin) { alert("재물조사 결과 내보내기는 관리자만 할 수 있습니다."); return; }
   try { await ensureXlsx(); } catch { alert("엑셀 모듈을 불러오지 못했습니다. 인터넷 연결을 확인해주세요."); return; }
-  const g = currentGroup;
-  const list = assets.filter((a) => groupOf(a) === g);
-  if (!list.length) { alert("내보낼 자산이 없습니다."); return; }
+  let listRows;
+  try { listRows = await fetch("inventory_list.json").then((r) => (r.ok ? r.json() : null)); } catch { listRows = null; }
+  if (!Array.isArray(listRows) || !listRows.length) { alert("재물조사 목록표 데이터를 불러오지 못했습니다."); return; }
   const round = inspRound;
+  const norm = (s) => String(s || "").replace(/[\s-]/g, "");
+  // 시스템 자산의 검수기록을 자산번호로 조회할 수 있게 맵 구성
+  const byNum = new Map();
+  for (const a of assets) { const n = norm(a.assetNumber); if (n && !byNum.has(n)) byNum.set(n, a); }
   let doneN = 0;
-  const rows = list.map((a) => {
-    const insps = Array.isArray(a.inspections) ? a.inspections : [];
-    const ins = insps.filter((i) => i && i.period === round).slice(-1)[0]; // 해당 회차 검수 기록
+  const out = listRows.map((r) => {
+    const a = byNum.get(norm(r["자산관리번호"]));
+    const ins = a && Array.isArray(a.inspections) ? a.inspections.filter((i) => i && i.period === round).slice(-1)[0] : null;
     const done = !!ins; if (done) doneN++;
     return {
-      "자산관리번호": a.assetNumber || "", "물품명": a.assetName || "", "모델명": a.model || "", "규격": a.spec || "",
-      "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "", "보관(설치)장소": a.location || "", "운영부서": a.dept || "", "사용자": a.manager || "",
-      "정상": done ? "O" : "", "요정비": "", "폐품": "", "불용": "",
-      "검수일": done ? fmtDate(ins.checkedAt) : "", "검수자": done ? (ins.inspector || "") : "", "회차": round,
+      ...r,                                       // 목록표 원본 열 유지(표에 없는 자산은 애초에 목록에 없음)
+      "정상": done ? "O" : (r["정상"] || ""),      // 검수완료면 정상 O
+      "검수일": done ? fmtDate(ins.checkedAt) : "",
+      "검수자": done ? (ins.inspector || "") : "",
+      "검수회차": round,
     };
   });
-  const ws = XLSX.utils.json_to_sheet(rows);
+  const ws = XLSX.utils.json_to_sheet(out);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "재물조사결과");
-  XLSX.writeFile(wb, `재물조사결과_${groupLabel(g)}_${round}_${todayStr()}.xlsx`);
-  toast(`재물조사 결과 ${list.length.toLocaleString()}건 내보냈어요 (정상 표시 ${doneN.toLocaleString()}건, ${round}).`, "success");
+  XLSX.writeFile(wb, `재물조사결과_${round}_${todayStr()}.xlsx`);
+  toast(`재물조사 목록표 ${out.length.toLocaleString()}건 내보냈어요 (정상 O ${doneN.toLocaleString()}건, ${round}).`, "success");
 }
 
 // ===== 이벤트 =====
