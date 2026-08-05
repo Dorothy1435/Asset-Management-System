@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://pmjwwvgcmaywbatryibc.supabase.co" crossorigin />
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="style.css?v=20260804a" />
+  <link rel="stylesheet" href="style.css?v=20260805a" />
 </head>
 <body>
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -97,6 +97,7 @@
       </div>
       <button class="btn btn-secondary" id="advToggle">상세 필터</button>
       <button class="btn btn-secondary" id="exportBtn">📥 엑셀 다운로드</button>
+      <button class="btn btn-secondary" id="exportInspBtn" hidden>📋 재물조사 결과</button>
       <button class="btn btn-inspect" id="scanInspectBtn">📷 검수</button>
       <button class="btn btn-inspect" id="batchInspectBtn">🏷️ 라벨 사진 등록</button>
       <button class="btn btn-inspect" id="pdfInspectBtn">📄 자산 등록 PDF 검수</button>
@@ -814,12 +815,24 @@
     </div>
   </div>
 
+  <!-- 검수 진척 상세(부서·위치별) -->
+  <div class="modal-overlay" id="inspDetailOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="inspDetailTitle">검수 진척 상세</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body" id="inspDetailBody"></div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-close>닫기</button></div>
+    </div>
+  </div>
+
   <footer class="footer">
     <p>© 글로컬대학사업본부 자산관리 시스템 · 관리자 비상연락처 ☎ 3123</p>
   </footer>
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20260804a"></script>
+  <script src="script.js?v=20260805a"></script>
 </body>
 </html>

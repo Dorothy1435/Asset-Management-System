@@ -806,6 +806,8 @@ function updateUI() {
   g("reviewBtn").hidden = !isAdmin;
   g("histBtn").hidden = !isAdmin;
   g("membersBtn").hidden = !isAdmin; // 가입 승인은 관리자도 가능 (권한변경·삭제는 최고관리자만)
+  const expInsp = g("exportInspBtn"); // 재물조사 결과 내보내기 = 관리자 + 검수 대상 메뉴(2025/2024)만
+  if (expInsp) expInsp.hidden = !isAdmin || currentGroup === GROUP_ELEC;
   const accessTab = document.querySelector('.admin-tab[data-atab="access"]');
   if (accessTab) accessTab.hidden = !isSuperAdmin; // 접속 로그 탭은 최고관리자만
   const navAdmin = g("navAdmin");
@@ -858,7 +860,7 @@ function renderStats() {
     ? `<div class="stat-card stat-insp">
          <div class="num">${inspectedCnt.toLocaleString()}/${total.toLocaleString()} <span class="rate">(${inspRate}%)</span></div>
          <div class="insp-bar" title="${inspRate}% 검수 완료"><div class="insp-bar-fill" style="width:${inspRate}%"></div></div>
-         <div class="label">${roundSel} 검수 진행${remaining ? ` · <button type="button" class="insp-jump" data-insp-jump="uninsp">미검수 ${remaining.toLocaleString()}건 →</button>` : ` · <span class="insp-done-all">✅ 전체 완료</span>`}</div>
+         <div class="label">${roundSel} 검수 진행${remaining ? ` · <button type="button" class="insp-jump" data-insp-jump="uninsp">미검수 ${remaining.toLocaleString()}건 →</button>` : ` · <span class="insp-done-all">✅ 전체 완료</span>`} · <button type="button" class="insp-detail-btn" data-insp-detail>📊 자세히</button></div>
        </div>`
     : "";
   document.getElementById("stats").innerHTML = `
@@ -867,6 +869,37 @@ function renderStats() {
     <div class="stat-card"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
     <div class="stat-card"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>
     ${inspCard}`;
+}
+// 부서·위치별 검수 진척 상세(모달) — 평소엔 숨기고 '자세히'로만 연다. 어디가 덜 됐는지 한눈에.
+function openInspProgressDetail() {
+  const g = currentGroup;
+  const list = assets.filter((a) => groupOf(a) === g);
+  const round = inspRound;
+  const agg = (keyFn) => {
+    const m = new Map();
+    for (const a of list) {
+      const k = (String(keyFn(a) || "").trim()) || "(미지정)";
+      const o = m.get(k) || { total: 0, done: 0 };
+      o.total++; if (inspectedRound(a, round)) o.done++;
+      m.set(k, o);
+    }
+    return [...m.entries()].map(([k, v]) => ({ k, done: v.done, total: v.total, rate: v.total ? Math.round(v.done / v.total * 100) : 0 }))
+      .sort((a, b) => a.rate - b.rate || b.total - a.total); // 진척 낮은 순(남은 것 먼저)
+  };
+  const rowsHtml = (arr) => arr.map((x) => `
+    <div class="ipd-row">
+      <div class="ipd-name" title="${esc(x.k)}">${esc(x.k)}</div>
+      <div class="ipd-bar"><div class="ipd-bar-fill" style="width:${x.rate}%"></div></div>
+      <div class="ipd-num">${x.done}/${x.total} <b>${x.rate}%</b></div>
+    </div>`).join("");
+  const byDept = agg((a) => a.dept);
+  const byLoc = agg((a) => a.location);
+  document.getElementById("inspDetailTitle").textContent = `${groupLabel(g)} · ${round} 검수 진척`;
+  document.getElementById("inspDetailBody").innerHTML =
+    `<p class="ipd-hint">진척이 낮은 순(아직 남은 곳이 위로). 어디가 덜 됐는지 한눈에 확인하세요.</p>` +
+    `<h3 class="ipd-h">🏢 부서별</h3>${byDept.length ? rowsHtml(byDept) : '<div class="empty-msg">데이터 없음</div>'}` +
+    `<h3 class="ipd-h">📍 위치별</h3>${byLoc.length ? rowsHtml(byLoc) : '<div class="empty-msg">데이터 없음</div>'}`;
+  show("inspDetailOverlay");
 }
 
 // ===== 필터 =====
@@ -4245,6 +4278,33 @@ async function exportExcel() {
   XLSX.utils.book_append_sheet(wb, ws, "자산목록");
   XLSX.writeFile(wb, `${groupLabel(currentGroup)}_자산목록_${todayStr()}.xlsx`);
 }
+// 재물조사 결과 내보내기(관리자 전용): 현재 메뉴 + 선택 회차 기준, 검수완료 자산에 '정상 O' 표시.
+// 매뉴얼의 목록표 열(정상/요정비/폐품/불용)에 맞춰 내보내 그대로 활용/붙여넣기 가능.
+async function exportInspectionResult() {
+  if (!isAdmin) { alert("재물조사 결과 내보내기는 관리자만 할 수 있습니다."); return; }
+  try { await ensureXlsx(); } catch { alert("엑셀 모듈을 불러오지 못했습니다. 인터넷 연결을 확인해주세요."); return; }
+  const g = currentGroup;
+  const list = assets.filter((a) => groupOf(a) === g);
+  if (!list.length) { alert("내보낼 자산이 없습니다."); return; }
+  const round = inspRound;
+  let doneN = 0;
+  const rows = list.map((a) => {
+    const insps = Array.isArray(a.inspections) ? a.inspections : [];
+    const ins = insps.filter((i) => i && i.period === round).slice(-1)[0]; // 해당 회차 검수 기록
+    const done = !!ins; if (done) doneN++;
+    return {
+      "자산관리번호": a.assetNumber || "", "물품명": a.assetName || "", "모델명": a.model || "", "규격": a.spec || "",
+      "취득금액": a.acquireCost || 0, "취득일자": a.acquireDate || "", "보관(설치)장소": a.location || "", "운영부서": a.dept || "", "사용자": a.manager || "",
+      "정상": done ? "O" : "", "요정비": "", "폐품": "", "불용": "",
+      "검수일": done ? fmtDate(ins.checkedAt) : "", "검수자": done ? (ins.inspector || "") : "", "회차": round,
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "재물조사결과");
+  XLSX.writeFile(wb, `재물조사결과_${groupLabel(g)}_${round}_${todayStr()}.xlsx`);
+  toast(`재물조사 결과 ${list.length.toLocaleString()}건 내보냈어요 (정상 표시 ${doneN.toLocaleString()}건, ${round}).`, "success");
+}
 
 // ===== 이벤트 =====
 document.getElementById("searchInput").addEventListener("input", applyFilter);
@@ -4258,6 +4318,7 @@ document.getElementById("advReset").addEventListener("click", () => {
 });
 document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEventListener("click", () => setSort(th.dataset.key)));
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
+document.getElementById("exportInspBtn").addEventListener("click", exportInspectionResult);
 document.getElementById("uninspBtn").addEventListener("click", () => { inspView = inspView === "uninsp" ? "all" : "uninsp"; applyFilter(); });
 document.getElementById("inspDoneBtn").addEventListener("click", () => { inspView = inspView === "done" ? "all" : "done"; applyFilter(); });
 document.getElementById("inspRoundFilter").addEventListener("change", (e) => { inspRound = e.target.value; renderStats(); applyFilter(); });
@@ -4266,6 +4327,7 @@ document.getElementById("stats").addEventListener("change", (e) => {
 });
 // 검수 대시보드의 '미검수 N건 →' 클릭 → 미검수 필터로 이동 + 목록으로 스크롤
 document.getElementById("stats").addEventListener("click", (e) => {
+  if (e.target.closest("[data-insp-detail]")) { openInspProgressDetail(); return; }
   const jump = e.target.closest("[data-insp-jump]");
   if (!jump) return;
   inspView = "uninsp";
@@ -4624,7 +4686,7 @@ document.getElementById("postViewBody").addEventListener("click", (e) => {
 });
 
 // 모달 닫기
-const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay", "manualCodeOverlay"];
+const ALL_MODALS = ["detailOverlay", "formOverlay", "delReqOverlay", "authOverlay", "myProfileOverlay", "bulkEditOverlay", "myReqOverlay", "inspectOverlay", "batchInspectOverlay", "postFormOverlay", "postViewOverlay", "scanGuideOverlay", "manualCodeOverlay", "inspDetailOverlay"];
 document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => { inspectPhoto = ""; ALL_MODALS.forEach(hide); }));
 // 배경(어두운 부분) 클릭 시 닫기 — 단, 여러 장 검수 창은 실수로 닫히면 인식한 사진이 날아가므로 제외(‘닫기’ 버튼으로만)
 // 모바일: 카메라·사진 선택창을 다녀올 때 배경에 '유령 클릭'이 들어가 창이 꺼지는 문제 방지
