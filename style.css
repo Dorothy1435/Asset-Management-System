@@ -178,8 +178,59 @@ body {
   background: #dc2626;
   border-radius: 9px;
 }
+/* display를 지정한 배지는 hidden 속성이 무시되므로(브라우저 기본 display:none보다 우선) 명시적으로 숨긴다.
+   — 이게 없으면 '승인 대기 0'처럼 0건일 때도 빨간 배지가 계속 떠 있게 된다. */
+.tab-badge[hidden], .count-badge[hidden] { display: none; }
 .admin-panel { animation: fadeIn 0.15s ease; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* 저장공간(Storage) 사용량 패널 */
+.stor-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+.stor-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.stor-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.stor-sub { font-size: 13px; color: var(--text-light); margin-top: 4px; line-height: 1.6; }
+.stor-bar {
+  height: 16px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.stor-fill { height: 100%; border-radius: 8px 0 0 8px; transition: width 0.4s ease; }
+.stor-fill.ok { background: #16a34a; }
+.stor-fill.warn { background: #f59e0b; }
+.stor-fill.danger { background: #dc2626; }
+.stor-legend { margin-top: 8px; font-size: 14px; color: var(--text); }
+.stor-legend b.ok { color: #16a34a; }
+.stor-legend b.warn { color: #b45309; }
+.stor-legend b.danger { color: #dc2626; }
+.stor-pct { color: var(--text-light); }
+.stor-msg { margin-top: 10px; font-size: 13px; line-height: 1.6; padding: 10px 12px; border-radius: 8px; }
+.stor-msg.ok { background: #f0fdf4; color: #15803d; }
+.stor-msg.warn { background: #fffbeb; color: #b45309; }
+.stor-msg.danger { background: #fef2f2; color: #b91c1c; }
+.stor-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 18px;
+  font-size: 14px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.stor-table th, .stor-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); text-align: left; }
+.stor-table thead th { background: var(--bg); font-weight: 700; font-size: 13px; color: var(--text-light); }
+.stor-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.stor-table tfoot th { background: var(--bg); font-weight: 700; border-bottom: none; }
+.stor-orphan { margin: 12px 0; font-size: 14px; color: var(--text); }
+.stor-orphan.clean { color: #15803d; }
 
 /* 통계 */
 .stats {
@@ -1474,6 +1525,11 @@ body { max-width: 100%; overflow-x: hidden; }
   .admin-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .admin-tabs::-webkit-scrollbar { display: none; }
   .admin-tab { white-space: nowrap; }
+  /* 저장공간 패널: 좁은 화면에서 제목과 버튼을 세로로 */
+  .stor-card { padding: 14px 15px; }
+  .stor-head { flex-direction: column; align-items: stretch; }
+  .stor-table { font-size: 13px; }
+  .stor-table th, .stor-table td { padding: 9px 10px; }
 }
 
 /* 모바일 */

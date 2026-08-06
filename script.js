@@ -421,7 +421,7 @@ function parseHash() {
   if (h === "board") return { page: "board" };
   if (h === "admin" || h.startsWith("admin/")) {
     const tab = h.split("/")[1] || "review";
-    return { page: "admin", tab: ["review", "hist", "members", "access"].includes(tab) ? tab : "review" };
+    return { page: "admin", tab: ["review", "hist", "members", "access", "storage"].includes(tab) ? tab : "review" };
   }
   if (ROUTES[h]) return { page: "assets", group: ROUTES[h] };
   return { page: "assets", group: GROUP_2024 };
@@ -2514,7 +2514,7 @@ async function uploadTemplateFile(file) {
   const safe = (file.name || "template").replace(/[^\w.\-가-힣]/g, "_");
   const path = `templates/${Date.now()}-${safe}`;
   const type = file.type || "application/octet-stream";
-  const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, new Blob([buf], { type }), { contentType: type, upsert: true });
+  const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, new Blob([buf], { type }), { contentType: type, upsert: true, cacheControl: MEDIA_CACHE_CONTROL });
   if (error) throw error;
   return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
 }
@@ -3418,6 +3418,9 @@ async function logHistory(entry) {
 }
 // ===== 이미지 저장소(Storage) : base64를 파일로 올리고 URL만 DB에 저장 (속도 개선) =====
 const MEDIA_BUCKET = "asset-media";
+// 업로드 파일명은 매번 새로 생성되는 '불변' 이름이라(같은 URL의 내용이 바뀌지 않음) 캐시를 길게 잡아도 안전하다.
+// 기본값(1시간) 대신 1년으로 두면 재방문 시 사진을 다시 내려받지 않아 월 전송량(무료 5GB)을 크게 아낀다.
+const MEDIA_CACHE_CONTROL = "31536000"; // 1년(초)
 // data:URL(base64)이면 Storage에 업로드하고 공개 URL 반환. 이미 URL이거나 비어있으면 그대로.
 async function uploadMedia(dataUrl, folder) {
   if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return dataUrl || "";
@@ -3435,7 +3438,7 @@ async function uploadMedia(dataUrl, folder) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
     try {
-      const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+      const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, blob, { contentType: mime, upsert: false, cacheControl: MEDIA_CACHE_CONTROL });
       if (!error) return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
       lastErr = error;
     } catch (e) { lastErr = e; } // 네트워크 예외도 재시도 대상
@@ -3531,6 +3534,225 @@ async function migrateOverlayMediaOnce() {
   }
   if (ok) { await sbLoadOverlay(); buildAssets(); rerender(); console.log(`[속도개선] ${ok}건 이동 완료.`); }
   else _mediaMigrated = false; // 하나도 못 옮겼으면(설정 전) 다음 기회에 재시도
+}
+
+// ===== 저장공간(Storage) 사용량 확인 · 고아 파일 정리 =====
+// 무료 플랜(1GB)을 넘기지 않도록, 관리자 페이지에서 실제 사용량을 눈으로 확인하고
+// 어디에서도 참조하지 않는 '고아 파일'(사진 교체·삭제·저장 실패로 남은 찌꺼기)을 정리한다.
+const STORAGE_FREE_LIMIT = 1024 * 1024 * 1024;    // 무료 플랜 Storage 한도 = 1GB
+const STORAGE_WARN_RATIO = 0.8;                   // 80% 넘으면 경고 표시
+const MEDIA_FOLDERS = ["photos", "thumbs", "labels", "inspections", "templates"];
+const ORPHAN_MIN_AGE_MS = 24 * 60 * 60 * 1000;    // 24시간 유예: 방금 올라간(아직 저장 안 끝난) 파일 보호
+const FOLDER_LABEL = { photos: "물품 사진", thumbs: "목록 썸네일", labels: "라벨 파일", inspections: "검수 사진", templates: "등록 양식" };
+let storageStat = null;   // 마지막 스캔 결과 (세션 내 캐시)
+let storageBusy = false;
+
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
+  if (n < 1024 * 1024 * 1024) return (n / 1048576).toFixed(1) + " MB";
+  return (n / 1073741824).toFixed(2) + " GB";
+}
+
+// 버킷에 실제로 들어있는 파일 전체 목록(폴더별로 1000개씩 페이지네이션)
+async function listMediaFiles() {
+  const out = [];
+  for (const folder of MEDIA_FOLDERS) {
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await sb.storage.from(MEDIA_BUCKET).list(folder, { limit: 1000, offset });
+      if (error) throw error;
+      if (!data || !data.length) break;
+      for (const o of data) {
+        const size = o.metadata && o.metadata.size;
+        if (typeof size === "number") out.push({ path: folder + "/" + o.name, folder, size, createdAt: o.created_at || o.updated_at || null });
+      }
+      offset += data.length;
+      if (data.length < 1000) break;
+    }
+  }
+  return out;
+}
+
+// DB 어딘가에서 참조 중인 파일 경로 집합.
+// 자산(assets: 사진·라벨·검수·양식) + 이력 스냅샷(history) + 요청(requests)을 모두 훑는다.
+// ※ 이력 스냅샷을 빼먹으면 '되돌리기' 후 사진이 깨지므로 반드시 포함해야 한다.
+const MEDIA_PATH_RE = new RegExp(MEDIA_BUCKET + "\\/((?:" + MEDIA_FOLDERS.join("|") + ")\\/[^\"'\\\\\\s)?]+)", "g");
+function collectMediaPaths(text, into) {
+  for (const m of String(text).matchAll(MEDIA_PATH_RE)) {
+    let p = m[1];
+    try { p = decodeURIComponent(p); } catch {}  // 한글 파일명(양식)은 URL 인코딩되어 저장됨
+    into.add(p);
+  }
+}
+async function scanTableForMedia(table, columns, into) {
+  let from = 0;
+  for (;;) {
+    const { data, error } = await sb.from(table).select(columns).range(from, from + 499);
+    if (error) throw new Error(`${table} 조회 실패: ${error.message}`);
+    if (!data || !data.length) break;
+    collectMediaPaths(JSON.stringify(data), into);
+    from += data.length;
+    if (data.length < 500) break;
+  }
+}
+// 한 곳이라도 조회에 실패하면 예외를 던진다 — 참조 목록이 불완전한 상태로 삭제하면 안 되기 때문.
+async function collectReferencedPaths() {
+  const used = new Set();
+  await scanTableForMedia("assets", "data", used);
+  await scanTableForMedia("history", "before_snap, after_snap", used);
+  await scanTableForMedia("requests", "payload", used);
+  return used;
+}
+
+// 사용량 + 고아 파일 스캔
+async function scanStorageUsage() {
+  const files = await listMediaFiles();
+  const used = await collectReferencedPaths();
+  const byFolder = {};
+  const orphans = [];
+  const now = Date.now();
+  let total = 0;
+  for (const f of files) {
+    total += f.size;
+    const b = byFolder[f.folder] || (byFolder[f.folder] = { count: 0, size: 0 });
+    b.count++; b.size += f.size;
+    const age = f.createdAt ? now - new Date(f.createdAt).getTime() : Infinity;
+    if (!used.has(f.path) && age > ORPHAN_MIN_AGE_MS) orphans.push(f);
+  }
+  // [안전장치] 파일은 있는데 '사용 중'으로 잡힌 게 하나도 없다면, DB를 제대로 못 읽은 것(권한·네트워크)이다.
+  // 이 상태로 정리를 돌리면 멀쩡한 사진을 전부 지우게 되므로 아예 결과를 만들지 않는다.
+  if (files.length && used.size === 0) throw new Error("사용 중인 사진 목록을 읽지 못했습니다. (권한 또는 네트워크 문제) 안전을 위해 정리를 중단합니다.");
+  storageStat = { at: Date.now(), fileCount: files.length, used: total, byFolder, orphans, refCount: used.size };
+  updateStorageWarnBadge();
+  return storageStat;
+}
+
+// 고아 파일 삭제 (100개씩 나눠서)
+async function deleteOrphanFiles(orphans) {
+  let count = 0, freed = 0;
+  for (let i = 0; i < orphans.length; i += 100) {
+    const chunk = orphans.slice(i, i + 100);
+    const { error } = await sb.storage.from(MEDIA_BUCKET).remove(chunk.map((f) => f.path));
+    if (error) throw error;
+    count += chunk.length;
+    freed += chunk.reduce((s, f) => s + f.size, 0);
+  }
+  return { count, freed };
+}
+
+function updateStorageWarnBadge() {
+  const el = document.getElementById("adminStorageWarn");
+  if (!el) return;
+  const over = !!storageStat && storageStat.used / STORAGE_FREE_LIMIT >= STORAGE_WARN_RATIO;
+  el.hidden = !over;
+}
+
+function renderStorage() {
+  const body = document.getElementById("adminStorageBody");
+  if (!body) return;
+  if (!isAdmin) { body.innerHTML = `<div class="empty-msg">관리자만 볼 수 있습니다.</div>`; return; }
+  if (storageBusy) {
+    body.innerHTML = `<div class="empty-msg"><div class="empty-ic">⏳</div><div class="empty-title">저장공간을 확인하는 중…</div><div class="empty-sub">파일 목록과 사용 중인 사진을 대조하고 있습니다.</div></div>`;
+    return;
+  }
+  if (!storageStat) { refreshStorage(); return; }  // 탭을 처음 열면 자동으로 1회 스캔
+
+  const s = storageStat;
+  const pct = Math.min(100, (s.used / STORAGE_FREE_LIMIT) * 100);
+  const level = pct >= 80 ? "danger" : pct >= 60 ? "warn" : "ok";
+  const orphanSize = s.orphans.reduce((n, f) => n + f.size, 0);
+  const rows = MEDIA_FOLDERS.map((f) => {
+    const b = s.byFolder[f] || { count: 0, size: 0 };
+    return `<tr><td>${FOLDER_LABEL[f] || f}</td><td class="num">${b.count.toLocaleString()}개</td><td class="num">${fmtBytes(b.size)}</td></tr>`;
+  }).join("");
+  const msg = level === "danger"
+    ? "⚠️ 무료 한도의 80%를 넘었습니다. 아래 ‘고아 파일 정리’를 실행하고, 그래도 부족하면 사진 압축률을 높여야 합니다."
+    : level === "warn"
+      ? "여유는 있지만 60%를 넘었습니다. 가끔 ‘고아 파일 정리’를 실행해 주세요."
+      : "여유롭습니다. 특별히 조치할 것은 없습니다.";
+
+  body.innerHTML = `
+    <div class="stor-card">
+      <div class="stor-head">
+        <div>
+          <div class="stor-title">Supabase 저장공간 (무료 1GB)</div>
+          <div class="stor-sub">파일 ${s.fileCount.toLocaleString()}개 · 마지막 확인 ${_fmtLogDT(new Date(s.at).toISOString())}</div>
+        </div>
+        <button class="btn btn-secondary" id="storRefreshBtn">다시 확인</button>
+      </div>
+      <div class="stor-bar"><div class="stor-fill ${level}" style="width:${pct.toFixed(1)}%"></div></div>
+      <div class="stor-legend"><b class="${level}">${fmtBytes(s.used)}</b> / 1 GB 사용 <span class="stor-pct">(${pct.toFixed(1)}%)</span></div>
+      <div class="stor-msg ${level}">${msg}</div>
+    </div>
+
+    <table class="stor-table">
+      <thead><tr><th>종류</th><th class="num">파일 수</th><th class="num">용량</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><th>합계</th><th class="num">${s.fileCount.toLocaleString()}개</th><th class="num">${fmtBytes(s.used)}</th></tr></tfoot>
+    </table>
+
+    <div class="stor-card">
+      <div class="stor-title">🧹 고아 파일 정리</div>
+      <div class="stor-sub">사진을 교체·삭제하거나 저장이 중간에 실패하면, 아무 자산도 쓰지 않는 파일이 저장소에 남습니다.
+        자산·결재 이력·신청 내역 어디에서도 참조하지 않고 올라온 지 24시간이 지난 파일만 정리 대상입니다.
+        (확인 자체에도 통신량이 들어가니 한 달에 한두 번이면 충분합니다.)</div>
+      ${s.orphans.length
+        ? `<div class="stor-orphan">정리 가능: <b>${s.orphans.length.toLocaleString()}개 · ${fmtBytes(orphanSize)}</b></div>
+           ${isSuperAdmin
+             ? `<button class="btn btn-danger" id="storCleanBtn">고아 파일 ${s.orphans.length.toLocaleString()}개 정리</button>`
+             : `<div class="stor-sub">삭제는 최고관리자만 실행할 수 있습니다.</div>`}`
+        : `<div class="stor-orphan clean">정리할 파일이 없습니다. 깨끗합니다. ✅</div>`}
+    </div>`;
+
+  const rb = document.getElementById("storRefreshBtn");
+  if (rb) rb.addEventListener("click", () => refreshStorage());
+  const cb = document.getElementById("storCleanBtn");
+  if (cb) cb.addEventListener("click", () => cleanupStorage());
+}
+
+async function refreshStorage() {
+  if (storageBusy || !sb) return;
+  storageBusy = true;
+  renderStorage();
+  try {
+    await scanStorageUsage();
+  } catch (e) {
+    console.error(e);
+    storageStat = null;
+    const body = document.getElementById("adminStorageBody");
+    if (body) body.innerHTML = `<div class="empty-msg"><div class="empty-ic">⚠️</div><div class="empty-title">저장공간을 확인하지 못했습니다</div><div class="empty-sub">${esc(e?.message || String(e))}</div></div>
+      <div style="text-align:center"><button class="btn btn-secondary" id="storRefreshBtn">다시 시도</button></div>`;
+    const rb = document.getElementById("storRefreshBtn");
+    if (rb) rb.addEventListener("click", () => refreshStorage());
+    storageBusy = false;
+    return;
+  }
+  storageBusy = false;
+  renderStorage();
+}
+
+async function cleanupStorage() {
+  if (!isSuperAdmin) { alert("고아 파일 정리는 최고관리자만 실행할 수 있습니다."); return; }
+  if (!storageStat || !storageStat.orphans.length || storageBusy) return;
+  const n = storageStat.orphans.length;
+  const size = fmtBytes(storageStat.orphans.reduce((s, f) => s + f.size, 0));
+  if (!confirm(`아무 자산에서도 쓰지 않는 파일 ${n.toLocaleString()}개(${size})를 삭제합니다.\n\n· 자산 사진, 라벨, 검수 사진, 결재 이력에 남은 사진은 삭제되지 않습니다.\n· 삭제한 파일은 되돌릴 수 없습니다.\n\n계속할까요?`)) return;
+  storageBusy = true;
+  renderStorage();
+  try {
+    const { count, freed } = await deleteOrphanFiles(storageStat.orphans);
+    storageBusy = false;
+    await scanStorageUsage();   // 삭제 후 실제 사용량 다시 확인
+    renderStorage();
+    toast(`🧹 고아 파일 ${count.toLocaleString()}개를 정리했습니다. (${fmtBytes(freed)} 확보)`, "success");
+  } catch (e) {
+    console.error(e);
+    storageBusy = false;
+    renderStorage();
+    alert("정리에 실패했습니다.\n원인: " + (e?.message || e));
+  }
 }
 
 async function applyCreate(fields, meta = {}) {
@@ -3734,11 +3956,12 @@ async function openAdminPage(tab) {
 function setAdminTab(tab) {
   currentAdminTab = tab;
   document.querySelectorAll(".admin-tab").forEach((b) => b.classList.toggle("active", b.dataset.atab === tab));
-  ["review", "hist", "members", "access"].forEach((t) => { const el = document.getElementById("admin-" + t); if (el) el.hidden = t !== tab; });
+  ["review", "hist", "members", "access", "storage"].forEach((t) => { const el = document.getElementById("admin-" + t); if (el) el.hidden = t !== tab; });
   if (tab === "review") renderReview();
   else if (tab === "hist") renderHistory();
   else if (tab === "members") renderMembers();
   else if (tab === "access") { _accessLogUser = null; renderAccessLog(); } // 탭 열면 사용자 목록부터
+  else if (tab === "storage") renderStorage();
 }
 // 접속 로그 렌더 (최고관리자 전용): 누가 언제 접속했는지
 let _accessLogUser = null; // 상세를 보고 있는 사용자(이메일). null이면 사용자 목록.
