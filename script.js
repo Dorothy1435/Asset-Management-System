@@ -258,9 +258,22 @@ function lastInspection(a) {
   return l.length ? l[l.length - 1] : null;
 }
 // 특정 회차 검수 여부
+// ※ '목록표'는 1회차와 연동한다 — 목록표 자산이 1회차에 이미 검수됐다면 목록표도 검수된 것으로 본다.
+//   (같은 물건을 두 번 찾아다니지 않도록. 반대 방향은 연동하지 않는다: 목록표만 한 건 1회차로 안 잡힘)
 function inspectedRound(a, round) {
   const l = Array.isArray(a.inspections) ? a.inspections : [];
+  if (round === SURVEY_ROUND) {
+    return l.some((ins) => ins.period === SURVEY_ROUND) ||
+      (isSurveyTarget(a) && l.some((ins) => ins.period === SURVEY_LINKED_ROUND));
+  }
   return l.some((ins) => ins.period === round);
+}
+// 해당 구분의 검수 기록(가장 최근). 목록표는 기록이 없으면 연동된 1회차 기록을 쓴다.
+function inspectionFor(a, round) {
+  const l = Array.isArray(a.inspections) ? a.inspections : [];
+  const pick = (p) => l.filter((i) => i && i.period === p).slice(-1)[0] || null;
+  if (round === SURVEY_ROUND) return pick(SURVEY_ROUND) || (isSurveyTarget(a) ? pick(SURVEY_LINKED_ROUND) : null);
+  return pick(round);
 }
 function show(id) { document.getElementById(id).hidden = false; }
 function hide(id) { document.getElementById(id).hidden = true; }
@@ -950,7 +963,9 @@ function openInspProgressDetail() {
     ? `📋 재물조사 목록표 ${list.length.toLocaleString()}건 · 검수 진척`
     : `${groupLabel(g)} · ${round} 검수 진척`;
   document.getElementById("inspDetailBody").innerHTML =
-    `<p class="ipd-hint">진척이 낮은 순(아직 남은 곳이 위로). 어디가 덜 됐는지 한눈에 확인하세요.</p>` +
+    `<p class="ipd-hint">진척이 낮은 순(아직 남은 곳이 위로). 어디가 덜 됐는지 한눈에 확인하세요.${
+      surveyMode() ? `<br><b>1회차에 검수된 목록표 자산은 목록표 검수로도 인정됩니다</b> — 같은 물건을 두 번 찾아다니지 않아도 됩니다.` : ""
+    }</p>` +
     // 재물조사는 '어디로 가야 하나'가 먼저라 목록표 모드에서는 위치별을 위로 올린다.
     (surveyMode() ? locBlock + deptBlock : deptBlock + locBlock);
   show("inspDetailOverlay");
@@ -972,6 +987,7 @@ const isSurveyTarget = (a) => !!surveyTargets && surveyTargets.has(normNum(a.ass
 // '목록표'는 1·2회차 같은 정기 회차와 별개로 굴리는 독립 검수다(회차 개념 없음).
 // 회차 드롭다운에서 '목록표'를 고르면 목록표 661건만 다루는 모드가 된다.
 const SURVEY_ROUND = "목록표";
+const SURVEY_LINKED_ROUND = "1회차";  // 이 회차 검수분은 목록표 검수로도 인정한다(inspectedRound 참고)
 const ROUNDS = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`);
 const surveyMode = () => inspRound === SURVEY_ROUND;
 // 회차 드롭다운 옵션 HTML. 목록표는 2025년도 자산에서만(목록표 자산이 전부 거기 있음).
@@ -4695,7 +4711,8 @@ async function exportInspectionResult() {
   let doneN = 0;
   const out = listRows.map((r) => {
     const a = byNum.get(norm(r["자산관리번호"]));
-    const ins = a && Array.isArray(a.inspections) ? a.inspections.filter((i) => i && i.period === round).slice(-1)[0] : null;
+    // 목록표로 내보낼 때는 연동된 1회차 검수 기록도 함께 인정된다(inspectionFor)
+    const ins = a ? inspectionFor(a, round) : null;
     const done = !!ins; if (done) doneN++;
     return {
       ...r,                                       // 목록표 원본 열 유지(표에 없는 자산은 애초에 목록에 없음)
