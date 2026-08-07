@@ -642,6 +642,12 @@ body {
 .asset-table.hide-insp .col-insp { display: none; }
 #uninspBtn.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 #inspDoneBtn.active { background: #16a34a; border-color: #16a34a; color: #fff; }
+/* 재물조사 목록표 미검수: 우선 처리해야 할 대상이라 평소에도 눈에 띄게 주황 계열 */
+#surveyUninspBtn { border-color: #fdba74; color: #c2410c; font-weight: 700; }
+#surveyUninspBtn:hover { background: #fff7ed; }
+#surveyUninspBtn.active { background: #ea580c; border-color: #ea580c; color: #fff; }
+#surveyUninspBtn.survey-done { border-color: #86efac; color: #15803d; }
+#surveyUninspBtn.survey-done.active { background: #16a34a; border-color: #16a34a; color: #fff; }
 .stat-insp .rate { font-size: 0.7em; color: #1d4ed8; }
 .stat-sel { font-size: 12px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; cursor: pointer; }
 /* 검수 진행 대시보드 */

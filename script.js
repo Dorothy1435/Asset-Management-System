@@ -504,6 +504,8 @@ async function loadData() {
   applyHashRoute();      // 목록을 최대한 빨리 렌더
   sbSubscribe();
   window.addEventListener("hashchange", applyHashRoute);
+  // 재물조사 목록표 대상(15KB)도 백그라운드로 — 다 받으면 '📋 목록표 미검수' 버튼이 나타난다.
+  loadSurveyTargets().then(() => { if (currentPageName === "assets") syncInspButtons(); });
   // 2024년도 자산은 백그라운드로 이어 로드 → 기본 화면 표시를 막지 않는다.
   fetchJson("assets2024.json").then((past) => {
     if (Array.isArray(past) && past.length) {
@@ -946,6 +948,25 @@ function openInspProgressDetail() {
   show("inspDetailOverlay");
 }
 
+// ===== 재물조사 목록표(산학협력단 제출본) 대상만 보기 =====
+// 목록표에 실린 661건은 전부 '2025년도 자산' 안에 있다. 이 자산들을 우선 검수해야 하므로,
+// '미검수' 옆에 목록표 대상만 추려 보는 버튼을 둔다. 평소 운영(전체 자산 관리)은 그대로다.
+// survey_targets.json = 목록표(inventory_list.json)에서 자산관리번호만 뽑은 목록. 목록표가 바뀌면 다시 뽑으면 된다.
+let surveyTargets = null;   // Set(정규화 자산번호). 로드 전에는 null → 버튼도 숨김
+const normNum = (s) => String(s || "").replace(/[\s.\-]/g, "");
+function loadSurveyTargets() {
+  return fetch("survey_targets.json")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((rows) => { surveyTargets = new Set((rows || []).map(normNum).filter(Boolean)); })
+    .catch(() => { surveyTargets = null; });  // 실패하면 버튼을 아예 안 띄운다(잘못된 목록으로 헷갈리지 않게)
+}
+const isSurveyTarget = (a) => !!surveyTargets && surveyTargets.has(normNum(a.assetNumber));
+// 목록표 대상 중 선택 회차 미검수 건수
+function surveyRemaining() {
+  if (!surveyTargets) return 0;
+  return assets.filter((a) => groupOf(a) === GROUP_2024 && isSurveyTarget(a) && !inspectedRound(a, inspRound)).length;
+}
+
 // ===== 필터 =====
 function fillSelect(id, values, allLabel) {
   const sel = document.getElementById(id);
@@ -977,6 +998,7 @@ function applyFilter(resetPage = true) {
       const done = inspectedRound(a, inspRound);
       if (inspView === "uninsp" && done) return false;   // 미검수만
       if (inspView === "done" && !done) return false;     // 검수 완료만
+      if (inspView === "survey" && (done || !isSurveyTarget(a))) return false; // 재물조사 목록표 미검수만
     }
     if (dept && a.dept !== dept) return false;
     if (status && a.status !== status) return false;
@@ -1029,23 +1051,9 @@ function setSort(key) {
   applyFilter();
 }
 
-// ===== 목록 렌더 =====
-function render() {
-  const tbody = document.getElementById("assetTbody");
-  const emptyMsg = document.getElementById("emptyMsg");
-  document.getElementById("resultCount").textContent = `총 ${filtered.length.toLocaleString()}건`;
-  if (filtered.length === 0) {
-    tbody.innerHTML = "";
-    emptyMsg.hidden = false;
-    document.getElementById("pagination").innerHTML = "";
-    syncBulkUI();
-    return;
-  }
-  emptyMsg.hidden = true;
-  const pending = pendingTargetSet();
-  const showInsp = currentGroup !== GROUP_ELEC; // 검수는 2025년도 자산 전용 (전자 제외)
-  const tableEl = document.querySelector(".asset-table");
-  if (tableEl) { tableEl.classList.toggle("hide-insp", !showInsp); tableEl.classList.toggle("hide-check", !isAdmin); }
+// 검수 필터 버튼(회차·미검수·검수완료·목록표) 표시 상태를 현재 화면에 맞춘다.
+function syncInspButtons() {
+  const showInsp = currentGroup !== GROUP_ELEC; // 검수는 2025/2024년도 자산 전용 (전자 제외)
   const roundFilter = document.getElementById("inspRoundFilter");
   if (roundFilter) { roundFilter.hidden = !showInsp; roundFilter.value = inspRound; }
   const uninspBtn = document.getElementById("uninspBtn");
@@ -1060,6 +1068,45 @@ function render() {
     inspDoneBtn.textContent = `✅ 검수 완료`;
     inspDoneBtn.classList.toggle("active", showInsp && inspView === "done");
   }
+  // 재물조사 목록표 버튼: 목록표 자산이 모두 '2025년도 자산'에 있으므로 그 메뉴에서만 노출.
+  const surveyBtn = document.getElementById("surveyUninspBtn");
+  if (surveyBtn) {
+    const show = currentGroup === GROUP_2024 && !!surveyTargets;
+    surveyBtn.hidden = !show;
+    if (show) {
+      const left = surveyRemaining();
+      surveyBtn.textContent = left ? `📋 목록표 미검수 ${left.toLocaleString()}` : `📋 목록표 검수 완료`;
+      surveyBtn.classList.toggle("active", inspView === "survey");
+      surveyBtn.classList.toggle("survey-done", left === 0);
+      surveyBtn.title = `산학협력단 재물조사 목록표(${surveyTargets.size.toLocaleString()}건) 중 ${inspRound} 미검수만 보기`;
+    }
+  }
+}
+
+// ===== 목록 렌더 =====
+function render() {
+  const tbody = document.getElementById("assetTbody");
+  const emptyMsg = document.getElementById("emptyMsg");
+  document.getElementById("resultCount").textContent = `총 ${filtered.length.toLocaleString()}건`;
+  syncInspButtons();   // 결과가 0건이어도 버튼 상태(눌림 표시·남은 건수)는 항상 최신으로
+  if (filtered.length === 0) {
+    tbody.innerHTML = "";
+    // 목록표 미검수 보기에서 0건 = 재물조사 대상을 다 끝냈다는 뜻 → '결과 없음'이 아니라 완료로 알린다.
+    emptyMsg.innerHTML = (inspView === "survey" && surveyTargets && !surveyRemaining())
+      ? `<div class="empty-ic">🎉</div><div class="empty-title">재물조사 목록표 ${inspRound} 검수 완료</div>
+         <div class="empty-sub">목록표 ${surveyTargets.size.toLocaleString()}건을 모두 검수했습니다. ‘📋 재물조사 결과’로 내보내세요.</div>`
+      : `<div class="empty-ic">🔍</div><div class="empty-title">검색 결과가 없습니다</div>
+         <div class="empty-sub">검색어나 필터를 바꿔 다시 시도해 보세요.</div>`;
+    emptyMsg.hidden = false;
+    document.getElementById("pagination").innerHTML = "";
+    syncBulkUI();
+    return;
+  }
+  emptyMsg.hidden = true;
+  const pending = pendingTargetSet();
+  const showInsp = currentGroup !== GROUP_ELEC; // 검수는 2025년도 자산 전용 (전자 제외)
+  const tableEl = document.querySelector(".asset-table");
+  if (tableEl) { tableEl.classList.toggle("hide-insp", !showInsp); tableEl.classList.toggle("hide-check", !isAdmin); }
   const start = (currentPage - 1) * PER_PAGE;
   const pageItems = filtered.slice(start, start + PER_PAGE);
   tbody.innerHTML = pageItems.map((a) => {
@@ -4665,6 +4712,7 @@ document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEven
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
 document.getElementById("exportInspBtn").addEventListener("click", exportInspectionResult);
 document.getElementById("uninspBtn").addEventListener("click", () => { inspView = inspView === "uninsp" ? "all" : "uninsp"; applyFilter(); });
+document.getElementById("surveyUninspBtn").addEventListener("click", () => { inspView = inspView === "survey" ? "all" : "survey"; applyFilter(); });
 document.getElementById("inspDoneBtn").addEventListener("click", () => { inspView = inspView === "done" ? "all" : "done"; applyFilter(); });
 document.getElementById("inspRoundFilter").addEventListener("change", (e) => { inspRound = e.target.value; renderStats(); applyFilter(); });
 document.getElementById("stats").addEventListener("change", (e) => {
