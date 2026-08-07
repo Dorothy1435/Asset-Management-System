@@ -244,6 +244,23 @@ function fmtTime(iso) {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   } catch { return iso; }
 }
+// 시:분만 (검수일 셀에서 날짜 옆에 덧붙임). 초는 title 툴팁으로 제공.
+function fmtHM(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch { return ""; }
+}
+function fmtSec(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${fmtDate(iso)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  } catch { return iso; }
+}
 function fmtDate(iso) {
   if (!iso) return "-";
   try {
@@ -252,10 +269,24 @@ function fmtDate(iso) {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   } catch { return iso; }
 }
-// 가장 최근 검수 기록 (없으면 null)
+// 가장 최근 검수 기록 (없으면 null) — 배열 순서가 아니라 checkedAt 이 가장 늦은 것.
 function lastInspection(a) {
   const l = Array.isArray(a.inspections) ? a.inspections : [];
-  return l.length ? l[l.length - 1] : null;
+  if (!l.length) return null;
+  let best = null, bestT = -Infinity;
+  for (const ins of l) {
+    if (!ins) continue;
+    const t = ins.checkedAt ? Date.parse(ins.checkedAt) : NaN;
+    const v = isNaN(t) ? -1 : t;   // 시각 없는 옛 기록은 가장 뒤로
+    if (v >= bestT) { bestT = v; best = ins; }
+  }
+  return best || l[l.length - 1];
+}
+// 가장 최근 검수 시각(ms). 미검수면 0 — 정렬에서 맨 뒤로 보내기 위함.
+function latestInspectedAt(a) {
+  const li = lastInspection(a);
+  const t = li && li.checkedAt ? Date.parse(li.checkedAt) : NaN;
+  return isNaN(t) ? 0 : t;
 }
 // 특정 회차 검수 여부
 // ※ '목록표'는 1회차와 연동한다 — 목록표 자산이 1회차에 이미 검수됐다면 목록표도 검수된 것으로 본다.
@@ -1063,10 +1094,12 @@ function applyFilter(resetPage = true) {
 function sortFiltered() {
   const { key, dir } = sortState;
   if (!key) return;
-  // 검수일은 자산의 직접 속성이 아니라 '가장 최근 검수 기록'의 시각으로 정렬한다.
-  // (미검수 자산은 날짜가 없어 0으로 취급 → 오름차순이면 위, 내림차순이면 아래)
+  // 검수일은 자산의 직접 속성이 아니라 검수 기록의 시각으로 정렬한다.
+  // 기록 '순서'가 아니라 checkedAt 이 가장 늦은 것을 기준으로 삼는다(초·밀리초까지 비교).
+  // 배열 마지막 = 최신이 아닐 수 있기 때문(예: 1회차 뒤에 옛 회차 기록을 나중에 추가한 경우).
+  // 미검수 자산은 0으로 취급 → 최신순(내림차순)이면 맨 아래로 밀린다.
   if (key === "inspDate") {
-    const t = (x) => { const li = lastInspection(x); const v = li && li.checkedAt ? Date.parse(li.checkedAt) : NaN; return isNaN(v) ? 0 : v; };
+    const t = (x) => latestInspectedAt(x);
     filtered.sort((a, b) => (t(a) - t(b)) * dir);
     return;
   }
@@ -1078,9 +1111,11 @@ function sortFiltered() {
     return cmp * dir;
   });
 }
+// 처음 누를 때의 정렬 방향. 검수일은 '방금 검수한 것'을 확인하려고 누르므로 최신순(내림차순)부터.
+const FIRST_SORT_DESC = new Set(["inspDate"]);
 function setSort(key) {
   if (sortState.key === key) sortState.dir *= -1;
-  else sortState = { key, dir: 1 };
+  else sortState = { key, dir: FIRST_SORT_DESC.has(key) ? -1 : 1 };
   document.querySelectorAll(".asset-table th.sortable").forEach((th) => {
     const arrow = th.querySelector(".sort-arrow");
     if (th.dataset.key === key) { arrow.textContent = sortState.dir === 1 ? "▲" : "▼"; th.classList.add("sorted"); }
@@ -1146,7 +1181,8 @@ function render() {
     const li = showInsp ? lastInspection(a) : null;
     if (li) tag += ` <span class="tag tag-inspected">검수 ${esc(li.period || "완료")}</span>`;
     if (pending.has(String(a.id))) tag += ` <span class="tag tag-pending">요청중</span>`;
-    const inspDate = li ? fmtDate(li.checkedAt) : "—";
+    // 같은 날 검수가 몰리므로 날짜만으로는 순서를 못 본다 → 시각(시:분)도 함께 보여준다.
+    const inspDate = li ? `${fmtDate(li.checkedAt)}<span class="insp-hm">${fmtHM(li.checkedAt)}</span>` : "—";
     const inspBy = li && li.inspector ? `<span class="insp-by">${esc(li.inspector)}</span>` : ""; // 검수자 이름
     const thumbSrc = a.thumbUrl || a.imageUrl; // 목록은 가벼운 썸네일 우선(없으면 원본)
     const thumb = thumbSrc ? `<img class="thumb" src="${thumbSrc}" alt="" loading="lazy" decoding="async" />` : "";
@@ -1164,7 +1200,7 @@ function render() {
       <td data-label="부서" class="${mE(a.dept).trim()}">${esc(val(a.dept))}</td>
       <td data-label="상태">${statusBadge(a.status)}</td>
       <td data-label="등재일">${esc(val(a.regDate))}</td>
-      <td class="col-insp cell-insp${li ? "" : " m-empty"}" data-label="검수일">${inspDate}${inspBy ? `<br>${inspBy}` : ""}</td>
+      <td class="col-insp cell-insp${li ? "" : " m-empty"}" data-label="검수일"${li ? ` title="${esc(fmtSec(li.checkedAt))}${li.inspector ? ` · ${li.inspector}` : ""}${li.affiliation ? ` (${li.affiliation})` : ""}${li.period ? ` · ${li.period}` : ""}"` : ""}>${inspDate}${inspBy ? `<br>${inspBy}` : ""}</td>
       <td class="cell-actions">
         <button class="btn-mini btn-view" data-id="${esc(a.id)}">상세</button>
         <button class="btn-mini btn-edit" data-id="${esc(a.id)}">${isAdmin ? "수정" : "수정요청"}</button>
@@ -1425,6 +1461,15 @@ function openDetail(id) {
   document.getElementById("detailInspectBtn").textContent = isAdmin ? "검수 확인" : "검수 요청";
   document.getElementById("detailEditBtn").textContent = isAdmin ? "수정" : "수정 요청";
   document.getElementById("detailDeleteBtn").textContent = isAdmin ? "삭제" : "삭제 요청";
+  // 사진 추가: 로그인해야 가능. 관리자는 즉시 반영, 일반 사용자는 수정 요청으로 접수.
+  const photoBtn = document.getElementById("detailPhotoBtn");
+  const full = pics.length >= MAX_PHOTOS;
+  photoBtn.hidden = !currentUser;
+  photoBtn.disabled = full;
+  photoBtn.textContent = full ? `📷 사진 ${MAX_PHOTOS}장 가득참` : (isAdmin ? "📷 사진 추가" : "📷 사진 추가 요청");
+  photoBtn.title = full
+    ? `사진은 자산당 최대 ${MAX_PHOTOS}장입니다. 더 넣으려면 '수정'에서 기존 사진을 지워주세요.`
+    : `현재 ${pics.length}/${MAX_PHOTOS}장 · 촬영하거나 앨범에서 골라 추가합니다`;
   show("detailOverlay");
 }
 // 검수 기록(로그) 렌더
@@ -3832,6 +3877,52 @@ async function cleanupStorage() {
   }
 }
 
+// ===== 상세 화면에서 물품 사진 추가 (검수·등록 뒤에 사진만 덧붙일 때) =====
+// 관리자는 바로 반영, 일반 사용자는 '수정 요청'으로 접수된다.
+async function addDetailPhotos(fileList) {
+  const id = detailCurrentId;
+  const a = findAsset(id);
+  if (!a || !fileList || !fileList.length) return;
+  if (!currentUser) { alert("사진 추가는 로그인 후 이용할 수 있습니다."); return; }
+  const existing = photosOf(a);
+  const room = MAX_PHOTOS - existing.length;
+  if (room <= 0) { alert(`사진은 자산당 최대 ${MAX_PHOTOS}장입니다.\n'수정'에서 기존 사진을 지운 뒤 다시 시도해주세요.`); return; }
+
+  const files = [...fileList];
+  const imgs = files.filter((f) => f && f.type && f.type.startsWith("image/"));
+  if (!imgs.length) { alert("이미지 파일만 업로드할 수 있습니다."); return; }
+  const use = imgs.slice(0, room);
+
+  const btn = document.getElementById("detailPhotoBtn");
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "사진 올리는 중…";
+  try {
+    const shots = [];
+    for (const f of use) shots.push(await compressImage(f, 780, 0.55)); // 등록 폼과 같은 압축(저장공간 절약)
+    const imageUrls = [...existing, ...shots].slice(-MAX_PHOTOS);
+    const fields = { imageUrls };
+    if (isAdmin) {
+      await applyUpdate(id, fields, { note: `사진 ${shots.length}장 추가` });
+      await reloadAll(); rerender();
+      toast(`사진 ${shots.length}장을 추가했습니다.`, "success");
+    } else {
+      // 일반 사용자: 승인 대기 요청으로 접수 (base64는 관리자가 승인할 때 Storage로 올라간다)
+      await submitRequest({ action: "update", target_id: String(id),
+        payload: { ...fields, assetName: a.assetName, assetNumber: a.assetNumber },
+        note: `사진 ${shots.length}장 추가 요청` });
+      await sbLoadMyRequests(); updateUI();
+      toast(`사진 ${shots.length}장 추가를 요청했습니다. 관리자 승인 후 반영됩니다.`, "success");
+    }
+    const skipped = imgs.length - use.length + (files.length - imgs.length);
+    if (skipped > 0) toast(`${skipped}장은 제외했습니다 (최대 ${MAX_PHOTOS}장 / 이미지 파일만).`, "warn");
+    openDetail(id);   // 방금 추가한 사진이 보이도록 상세를 다시 그린다
+  } catch (e) {
+    console.error(e);
+    alert("사진 추가에 실패했습니다.\n원인: " + (e?.message || e));
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
 async function applyCreate(fields, meta = {}) {
   fields = await withUploadedMedia(fields);
   const id = "u" + Date.now() + Math.floor(Math.random() * 1000);
@@ -4335,9 +4426,11 @@ function renderHistory() {
     const actions = mine
       ? `<span class="hist-actions">${canRevert ? `<button class="btn-mini btn-edit" data-revert="${h.id}">되돌리기</button>` : ""}<button class="btn-mini btn-del" data-delhist="${h.id}">삭제</button></span>`
       : "";
-    const tip = stripTags(`${h.asset_name || h.asset_id} · ${summary}${who ? " · " + who : ""}`);
+    // 기록을 누르면 그 물품의 상세를 바로 볼 수 있게 한다(삭제된 자산은 열 게 없으므로 제외).
+    const openable = !!findAsset(h.asset_id);
+    const tip = stripTags(`${h.asset_name || h.asset_id} · ${summary}${who ? " · " + who : ""}`) + (openable ? " — 눌러서 물품 상세 보기" : "");
     return `
-      <div class="hist-row" title="${esc(tip)}">
+      <div class="hist-row${openable ? " hist-openable" : ""}"${openable ? ` data-hist-asset="${esc(h.asset_id)}"` : ""} title="${esc(tip)}">
         <span class="hist-time">${fmtTime(h.created_at)}</span>
         <span class="req-badge ${actCls[h.action] || "badge-gray"}">${actLabel[h.action] || h.action}</span>
         <span class="hist-asset">${esc(h.asset_name || h.asset_id)}</span>
@@ -4839,6 +4932,12 @@ document.getElementById("detailDownloadBtn").addEventListener("click", downloadP
 document.getElementById("detailLabelBtn").addEventListener("click", () => downloadLabelFile(detailCurrentId));
 document.getElementById("detailLabelDelBtn").addEventListener("click", () => deleteLabelFile(detailCurrentId));
 document.getElementById("detailInspectBtn").addEventListener("click", () => openInspect(detailCurrentId));
+document.getElementById("detailPhotoBtn").addEventListener("click", () => document.getElementById("detailPhotoInput").click());
+document.getElementById("detailPhotoInput").addEventListener("change", async (e) => {
+  const files = e.target.files;
+  e.target.value = "";                 // 같은 파일을 연속으로 골라도 change 가 다시 뜨도록
+  await addDetailPhotos(files);
+});
 document.getElementById("detailBody").addEventListener("click", (e) => {
   const thumb = e.target.closest(".insp-thumb");
   if (thumb) { openLightbox(thumb.src); return; }
@@ -5087,8 +5186,11 @@ document.getElementById("adminAccessBody").addEventListener("click", (e) => {
 document.getElementById("adminHistBody").addEventListener("click", (e) => {
   const rv = e.target.closest("button[data-revert]");
   const dl = e.target.closest("button[data-delhist]");
-  if (rv) revertHistory(rv.dataset.revert);
-  else if (dl) deleteHistory(dl.dataset.delhist);
+  if (rv) { revertHistory(rv.dataset.revert); return; }
+  if (dl) { deleteHistory(dl.dataset.delhist); return; }
+  // 되돌리기·삭제 버튼이 아닌 곳을 누르면 그 기록의 물품 상세를 연다
+  const row = e.target.closest("[data-hist-asset]");
+  if (row) openDetail(row.dataset.histAsset);
 });
 // 회원 관리
 document.getElementById("adminMembersBody").addEventListener("click", (e) => {

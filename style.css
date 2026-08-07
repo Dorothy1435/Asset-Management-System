@@ -1015,6 +1015,10 @@ body {
 }
 .hist-row:last-child { border-bottom: none; }
 .hist-row:hover { background: #f9fafb; }
+/* 물품 상세를 열 수 있는 기록 — 누를 수 있다는 걸 보이게 */
+.hist-row.hist-openable { cursor: pointer; }
+.hist-row.hist-openable:hover { background: #eff6ff; }
+.hist-row.hist-openable:hover .hist-asset { color: var(--primary); text-decoration: underline; }
 .hist-time { color: var(--text-light); font-size: 12px; white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .hist-row .req-badge { flex-shrink: 0; }
 .hist-asset { font-weight: 700; color: var(--text); white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
@@ -1897,6 +1901,8 @@ body { max-width: 100%; overflow-x: hidden; }
 
 /* 목록 검수일 셀의 검수자 이름 */
 .cell-insp .insp-by { display: inline-block; font-size: 11px; color: var(--text-light); margin-top: 1px; }
+/* 검수 시각(시:분) — 같은 날 검수가 몰릴 때 순서를 보기 위함 */
+.cell-insp .insp-hm { margin-left: 5px; font-size: 11px; color: var(--text-light); font-variant-numeric: tabular-nums; }
 
 /* 접속 로그: 사용자 목록 → 상세 */
 .al-userlist { display: flex; flex-direction: column; gap: 8px; }

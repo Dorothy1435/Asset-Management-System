@@ -120,6 +120,8 @@
       <span class="result-count" id="resultCount"></span>
       <!-- 모바일에서 바로 후면 카메라가 켜지도록 capture="environment" -->
       <input type="file" id="scanCameraInput" accept="image/*" capture="environment" hidden />
+      <!-- 상세 화면에서 물품 사진 추가 (여러 장 선택 가능, 모바일은 카메라/앨범 선택) -->
+      <input type="file" id="detailPhotoInput" accept="image/*" multiple hidden />
     </section>
 
     <section class="adv-panel" id="advPanel" hidden>
@@ -242,6 +244,7 @@
         <button class="btn btn-secondary" id="detailLabelBtn" hidden>라벨 파일 다운로드</button>
         <button class="btn btn-danger" id="detailLabelDelBtn" hidden>라벨 삭제</button>
         <button class="btn btn-secondary" id="detailDownloadBtn" hidden>사진 다운로드</button>
+        <button class="btn btn-inspect" id="detailPhotoBtn">📷 사진 추가</button>
         <button class="btn btn-inspect" id="detailInspectBtn">검수</button>
         <button class="btn btn-primary" id="detailEditBtn">수정</button>
         <button class="btn btn-danger" id="detailDeleteBtn">삭제</button>
