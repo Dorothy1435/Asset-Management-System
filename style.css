@@ -642,12 +642,10 @@ body {
 .asset-table.hide-insp .col-insp { display: none; }
 #uninspBtn.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 #inspDoneBtn.active { background: #16a34a; border-color: #16a34a; color: #fff; }
-/* 재물조사 목록표 미검수: 우선 처리해야 할 대상이라 평소에도 눈에 띄게 주황 계열 */
-#surveyUninspBtn { border-color: #fdba74; color: #c2410c; font-weight: 700; }
-#surveyUninspBtn:hover { background: #fff7ed; }
-#surveyUninspBtn.active { background: #ea580c; border-color: #ea580c; color: #fff; }
-#surveyUninspBtn.survey-done { border-color: #86efac; color: #15803d; }
-#surveyUninspBtn.survey-done.active { background: #16a34a; border-color: #16a34a; color: #fff; }
+/* '목록표'를 고르면 재물조사 모드임이 바로 보이도록 강조 */
+#inspRoundFilter.survey-on { border-color: #ea580c; color: #c2410c; font-weight: 700; background: #fff7ed; }
+.stat-card.stat-survey { border-color: #fdba74; background: #fff7ed; }
+.stat-card.stat-survey .num { color: #c2410c; }
 .stat-insp .rate { font-size: 0.7em; color: #1d4ed8; }
 .stat-sel { font-size: 12px; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; cursor: pointer; }
 /* 검수 진행 대시보드 */
@@ -1872,7 +1870,12 @@ body { max-width: 100%; overflow-x: hidden; }
 .insp-detail-btn:hover { text-decoration: underline; }
 #inspDetailBody .ipd-hint { font-size: 12px; color: var(--text-light); margin: 0 0 10px; }
 #inspDetailBody .ipd-h { font-size: 14px; margin: 16px 0 8px; color: var(--text); }
-.ipd-row { display: grid; grid-template-columns: minmax(80px, 34%) 1fr auto; align-items: center; gap: 10px; padding: 5px 0; }
+#inspDetailBody .ipd-h-sub { font-size: 12px; font-weight: 400; color: var(--text-light); }
+.ipd-row { display: grid; grid-template-columns: minmax(110px, 46%) 1fr auto; align-items: center; gap: 10px; padding: 5px 0; }
+/* 장소 줄은 눌러서 그 장소의 미검수만 볼 수 있다 */
+.ipd-row.ipd-clickable { cursor: pointer; border-radius: 6px; padding: 5px 6px; margin: 0 -6px; }
+.ipd-row.ipd-clickable:hover { background: #eff6ff; }
+.ipd-row.ipd-clickable:hover .ipd-name { color: var(--primary); font-weight: 700; text-decoration: underline; }
 .ipd-name { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ipd-bar { height: 8px; border-radius: 999px; background: #e5e7eb; overflow: hidden; }
 .ipd-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #3b82f6, #2563eb); }

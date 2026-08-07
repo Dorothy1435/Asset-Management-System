@@ -406,6 +406,7 @@ async function reloadAll() {
 function rerender() {
   renderNav();
   if (currentPageName === "assets") {
+    normalizeRound();   // 메뉴가 바뀌어 '목록표'를 못 쓰게 되면 회차로 되돌린 뒤 그린다
     initFilters();
     renderStats();
     updateUI();
@@ -891,16 +892,17 @@ function updateUI() {
 
 // ===== 통계 =====
 function renderStats() {
-  const inGroup = assets.filter((a) => groupOf(a) === currentGroup);
+  // 목록표 모드에서는 모든 수치를 목록표 661건 기준으로 낸다(회차 검수와 섞이지 않게).
+  const inGroup = inspScope();
   const total = inGroup.length;
   const totalCost = inGroup.reduce((s, a) => s + (a.acquireCost || 0), 0);
   const inUse = inGroup.filter((a) => a.status === "사용중" || a.status === "대여중").length;
   const labelCount = inGroup.filter((a) => a.labelFile).length;
-  const showInsp = currentGroup !== GROUP_ELEC; // 검수율은 2025년도 자산 전용
+  const showInsp = currentGroup !== GROUP_ELEC; // 검수율은 2025/2024년도 자산 전용
   const inspectedCnt = showInsp ? inGroup.filter((a) => inspectedRound(a, inspRound)).length : 0;
   const inspRate = total ? Math.round((inspectedCnt / total) * 100) : 0;
   const remaining = Math.max(0, total - inspectedCnt);
-  const roundSel = `<select id="inspRoundSel" class="stat-sel">${Array.from({ length: 8 }, (_, i) => `${i + 1}회차`).map((r) => `<option value="${r}"${r === inspRound ? " selected" : ""}>${r}</option>`).join("")}</select>`;
+  const roundSel = `<select id="inspRoundSel" class="stat-sel">${roundOptions(inspRound)}</select>`;
   // 검수 진행 대시보드: 진행률 바 + 미검수 바로가기(재물조사 진척을 한눈에)
   const inspCard = showInsp
     ? `<div class="stat-card stat-insp">
@@ -910,7 +912,7 @@ function renderStats() {
        </div>`
     : "";
   document.getElementById("stats").innerHTML = `
-    <div class="stat-card"><div class="num">${total.toLocaleString()}</div><div class="label">${esc(groupLabel(currentGroup))}</div></div>
+    <div class="stat-card${surveyMode() ? " stat-survey" : ""}"><div class="num">${total.toLocaleString()}</div><div class="label">${surveyMode() ? "📋 재물조사 목록표" : esc(groupLabel(currentGroup))}</div></div>
     <div class="stat-card"><div class="num">${(totalCost / 100000000).toFixed(1)}억</div><div class="label">총 취득금액</div></div>
     <div class="stat-card"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
     <div class="stat-card"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>
@@ -919,7 +921,7 @@ function renderStats() {
 // 부서·위치별 검수 진척 상세(모달) — 평소엔 숨기고 '자세히'로만 연다. 어디가 덜 됐는지 한눈에.
 function openInspProgressDetail() {
   const g = currentGroup;
-  const list = assets.filter((a) => groupOf(a) === g);
+  const list = inspScope();   // 목록표 모드면 목록표 661건만
   const round = inspRound;
   const agg = (keyFn) => {
     const m = new Map();
@@ -932,19 +934,25 @@ function openInspProgressDetail() {
     return [...m.entries()].map(([k, v]) => ({ k, done: v.done, total: v.total, rate: v.total ? Math.round(v.done / v.total * 100) : 0 }))
       .sort((a, b) => a.rate - b.rate || b.total - a.total); // 진척 낮은 순(남은 것 먼저)
   };
-  const rowsHtml = (arr) => arr.map((x) => `
-    <div class="ipd-row">
-      <div class="ipd-name" title="${esc(x.k)}">${esc(x.k)}</div>
+  // 장소 줄을 누르면 그 장소의 미검수만 걸러 보여준다 → 한 곳씩 찾아가 몰아서 끝내기 좋다.
+  const rowsHtml = (arr, kind) => arr.map((x) => `
+    <div class="ipd-row${kind === "loc" ? " ipd-clickable" : ""}"${kind === "loc" ? ` data-ipd-loc="${esc(x.k)}" title="${esc(x.k)}&#10;— 눌러서 이 장소의 미검수만 보기"` : ` title="${esc(x.k)}"`}>
+      <div class="ipd-name">${esc(x.k)}</div>
       <div class="ipd-bar"><div class="ipd-bar-fill" style="width:${x.rate}%"></div></div>
       <div class="ipd-num">${x.done}/${x.total} <b>${x.rate}%</b></div>
     </div>`).join("");
   const byDept = agg((a) => a.dept);
   const byLoc = agg((a) => a.location);
-  document.getElementById("inspDetailTitle").textContent = `${groupLabel(g)} · ${round} 검수 진척`;
+  const empty = '<div class="empty-msg">데이터 없음</div>';
+  const locBlock = `<h3 class="ipd-h">📍 위치별 <span class="ipd-h-sub">— 줄을 누르면 그 장소의 미검수만 보입니다</span></h3>${byLoc.length ? rowsHtml(byLoc, "loc") : empty}`;
+  const deptBlock = `<h3 class="ipd-h">🏢 부서별</h3>${byDept.length ? rowsHtml(byDept, "dept") : empty}`;
+  document.getElementById("inspDetailTitle").textContent = surveyMode()
+    ? `📋 재물조사 목록표 ${list.length.toLocaleString()}건 · 검수 진척`
+    : `${groupLabel(g)} · ${round} 검수 진척`;
   document.getElementById("inspDetailBody").innerHTML =
     `<p class="ipd-hint">진척이 낮은 순(아직 남은 곳이 위로). 어디가 덜 됐는지 한눈에 확인하세요.</p>` +
-    `<h3 class="ipd-h">🏢 부서별</h3>${byDept.length ? rowsHtml(byDept) : '<div class="empty-msg">데이터 없음</div>'}` +
-    `<h3 class="ipd-h">📍 위치별</h3>${byLoc.length ? rowsHtml(byLoc) : '<div class="empty-msg">데이터 없음</div>'}`;
+    // 재물조사는 '어디로 가야 하나'가 먼저라 목록표 모드에서는 위치별을 위로 올린다.
+    (surveyMode() ? locBlock + deptBlock : deptBlock + locBlock);
   show("inspDetailOverlay");
 }
 
@@ -961,10 +969,24 @@ function loadSurveyTargets() {
     .catch(() => { surveyTargets = null; });  // 실패하면 버튼을 아예 안 띄운다(잘못된 목록으로 헷갈리지 않게)
 }
 const isSurveyTarget = (a) => !!surveyTargets && surveyTargets.has(normNum(a.assetNumber));
-// 목록표 대상 중 선택 회차 미검수 건수
-function surveyRemaining() {
-  if (!surveyTargets) return 0;
-  return assets.filter((a) => groupOf(a) === GROUP_2024 && isSurveyTarget(a) && !inspectedRound(a, inspRound)).length;
+// '목록표'는 1·2회차 같은 정기 회차와 별개로 굴리는 독립 검수다(회차 개념 없음).
+// 회차 드롭다운에서 '목록표'를 고르면 목록표 661건만 다루는 모드가 된다.
+const SURVEY_ROUND = "목록표";
+const ROUNDS = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`);
+const surveyMode = () => inspRound === SURVEY_ROUND;
+// 회차 드롭다운 옵션 HTML. 목록표는 2025년도 자산에서만(목록표 자산이 전부 거기 있음).
+function roundOptions(selected, withSurvey = true) {
+  const list = (withSurvey && surveyTargets && currentGroup === GROUP_2024) ? [SURVEY_ROUND, ...ROUNDS] : [...ROUNDS];
+  return list.map((r) => `<option value="${r}"${r === selected ? " selected" : ""}>${r === SURVEY_ROUND ? "📋 목록표" : r}</option>`).join("");
+}
+// 목록표를 볼 수 없는 화면(2024·전자 메뉴)으로 옮기면 회차로 되돌린다.
+function normalizeRound() {
+  if (surveyMode() && currentGroup !== GROUP_2024) inspRound = "1회차";
+}
+// 현재 모드에서 '검수 대상'이 되는 자산들 (목록표 모드면 목록표 661건, 아니면 메뉴 전체)
+function inspScope() {
+  const inGroup = assets.filter((a) => groupOf(a) === currentGroup);
+  return surveyMode() ? inGroup.filter(isSurveyTarget) : inGroup;
 }
 
 // ===== 필터 =====
@@ -994,11 +1016,11 @@ function applyFilter(resetPage = true) {
   const inspActive = inspView !== "all" && currentGroup !== GROUP_ELEC;
   filtered = assets.filter((a) => {
     if (groupOf(a) !== currentGroup) return false;
+    if (surveyMode() && !isSurveyTarget(a)) return false;  // 목록표 모드: 목록표 661건만
     if (inspActive) {
       const done = inspectedRound(a, inspRound);
       if (inspView === "uninsp" && done) return false;   // 미검수만
       if (inspView === "done" && !done) return false;     // 검수 완료만
-      if (inspView === "survey" && (done || !isSurveyTarget(a))) return false; // 재물조사 목록표 미검수만
     }
     if (dept && a.dept !== dept) return false;
     if (status && a.status !== status) return false;
@@ -1054,8 +1076,14 @@ function setSort(key) {
 // 검수 필터 버튼(회차·미검수·검수완료·목록표) 표시 상태를 현재 화면에 맞춘다.
 function syncInspButtons() {
   const showInsp = currentGroup !== GROUP_ELEC; // 검수는 2025/2024년도 자산 전용 (전자 제외)
+  normalizeRound();
   const roundFilter = document.getElementById("inspRoundFilter");
-  if (roundFilter) { roundFilter.hidden = !showInsp; roundFilter.value = inspRound; }
+  if (roundFilter) {
+    roundFilter.hidden = !showInsp;
+    roundFilter.innerHTML = roundOptions(inspRound);   // '목록표'는 2025년도 자산에서만 나온다
+    roundFilter.value = inspRound;
+    roundFilter.classList.toggle("survey-on", surveyMode());
+  }
   const uninspBtn = document.getElementById("uninspBtn");
   if (uninspBtn) {
     uninspBtn.hidden = !showInsp;
@@ -1068,19 +1096,6 @@ function syncInspButtons() {
     inspDoneBtn.textContent = `✅ 검수 완료`;
     inspDoneBtn.classList.toggle("active", showInsp && inspView === "done");
   }
-  // 재물조사 목록표 버튼: 목록표 자산이 모두 '2025년도 자산'에 있으므로 그 메뉴에서만 노출.
-  const surveyBtn = document.getElementById("surveyUninspBtn");
-  if (surveyBtn) {
-    const show = currentGroup === GROUP_2024 && !!surveyTargets;
-    surveyBtn.hidden = !show;
-    if (show) {
-      const left = surveyRemaining();
-      surveyBtn.textContent = left ? `📋 목록표 미검수 ${left.toLocaleString()}` : `📋 목록표 검수 완료`;
-      surveyBtn.classList.toggle("active", inspView === "survey");
-      surveyBtn.classList.toggle("survey-done", left === 0);
-      surveyBtn.title = `산학협력단 재물조사 목록표(${surveyTargets.size.toLocaleString()}건) 중 ${inspRound} 미검수만 보기`;
-    }
-  }
 }
 
 // ===== 목록 렌더 =====
@@ -1091,9 +1106,9 @@ function render() {
   syncInspButtons();   // 결과가 0건이어도 버튼 상태(눌림 표시·남은 건수)는 항상 최신으로
   if (filtered.length === 0) {
     tbody.innerHTML = "";
-    // 목록표 미검수 보기에서 0건 = 재물조사 대상을 다 끝냈다는 뜻 → '결과 없음'이 아니라 완료로 알린다.
-    emptyMsg.innerHTML = (inspView === "survey" && surveyTargets && !surveyRemaining())
-      ? `<div class="empty-ic">🎉</div><div class="empty-title">재물조사 목록표 ${inspRound} 검수 완료</div>
+    // 목록표 모드 + 미검수 보기에서 0건 = 재물조사를 다 끝냈다는 뜻 → '결과 없음'이 아니라 완료로 알린다.
+    emptyMsg.innerHTML = (surveyMode() && inspView === "uninsp" && surveyTargets)
+      ? `<div class="empty-ic">🎉</div><div class="empty-title">재물조사 목록표 검수 완료</div>
          <div class="empty-sub">목록표 ${surveyTargets.size.toLocaleString()}건을 모두 검수했습니다. ‘📋 재물조사 결과’로 내보내세요.</div>`
       : `<div class="empty-ic">🔍</div><div class="empty-title">검색 결과가 없습니다</div>
          <div class="empty-sub">검색어나 필터를 바꿔 다시 시도해 보세요.</div>`;
@@ -1192,7 +1207,7 @@ function openBulkEdit() {
   document.getElementById("bulk-photo-input").value = "";
   document.getElementById("bulk-photo-preview").innerHTML = "";
   // 검수 처리 섹션 초기화
-  const roundOpts = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`).map((o) => `<option value="${o}">${o}</option>`).join("");
+  const roundOpts = roundOptions(inspRound);
   document.getElementById("bulk-insp-on").checked = false;
   document.getElementById("bulk-insp-fields").hidden = true;
   const bperiod = document.getElementById("bulk-insp-period");
@@ -2487,7 +2502,7 @@ function openBatchInspect() {
   document.getElementById("batch-name").value = "";
   // 검수 회차: 지금 목록에서 보고 있는 회차를 기본값으로
   const bp = document.getElementById("batch-period");
-  bp.innerHTML = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`).map((o) => `<option value="${o}">${o}</option>`).join("");
+  bp.innerHTML = roundOptions(inspRound);
   bp.value = inspRound || "1회차";
   document.getElementById("batch-inspector").value = myProfile?.name || "";
   const affil = myProfile?.affiliation || "";
@@ -3280,11 +3295,10 @@ function openInspect(id, photo, fromScan) {
   document.getElementById("inspectNote").hidden = isAdmin;
   show("inspectOverlay");
 }
-// 검수 회차 드롭다운을 채운다. (1~8회차)
+// 검수 회차 드롭다운을 채운다. (📋 목록표 + 1~8회차)
 function fillInspPeriod() {
   const sel = document.getElementById("insp-period");
-  const opts = Array.from({ length: 8 }, (_, i) => `${i + 1}회차`);
-  sel.innerHTML = opts.map((o) => `<option value="${o}">${o}</option>`).join("");
+  sel.innerHTML = roundOptions(inspRound);
 }
 // 검수 화면에서 이어 찍은 '물품 사진' 미리보기/버튼 상태 갱신
 function renderInspExtra() {
@@ -4712,11 +4726,23 @@ document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEven
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
 document.getElementById("exportInspBtn").addEventListener("click", exportInspectionResult);
 document.getElementById("uninspBtn").addEventListener("click", () => { inspView = inspView === "uninsp" ? "all" : "uninsp"; applyFilter(); });
-document.getElementById("surveyUninspBtn").addEventListener("click", () => { inspView = inspView === "survey" ? "all" : "survey"; applyFilter(); });
 document.getElementById("inspDoneBtn").addEventListener("click", () => { inspView = inspView === "done" ? "all" : "done"; applyFilter(); });
 document.getElementById("inspRoundFilter").addEventListener("change", (e) => { inspRound = e.target.value; renderStats(); applyFilter(); });
 document.getElementById("stats").addEventListener("change", (e) => {
   if (e.target && e.target.id === "inspRoundSel") { inspRound = e.target.value; renderStats(); applyFilter(); }
+});
+// 진척 상세의 장소 줄 클릭 → 그 장소의 미검수만 보기 (한 곳씩 찾아가 몰아서 끝내는 동선)
+document.getElementById("inspDetailBody").addEventListener("click", (e) => {
+  const row = e.target.closest("[data-ipd-loc]");
+  if (!row) return;
+  const loc = row.dataset.ipdLoc;
+  const locInput = document.getElementById("locFilter");
+  if (locInput) locInput.value = loc === "(미지정)" ? "" : loc;
+  inspView = "uninsp";
+  hide("inspDetailOverlay");
+  applyFilter();
+  const tbl = document.querySelector(".table-wrap");
+  if (tbl) tbl.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 // 검수 대시보드의 '미검수 N건 →' 클릭 → 미검수 필터로 이동 + 목록으로 스크롤
 document.getElementById("stats").addEventListener("click", (e) => {
