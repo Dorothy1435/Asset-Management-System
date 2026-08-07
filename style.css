@@ -1016,9 +1016,33 @@ body {
 .hist-row:last-child { border-bottom: none; }
 .hist-row:hover { background: #f9fafb; }
 /* 물품 상세를 열 수 있는 기록 — 누를 수 있다는 걸 보이게 */
-.hist-row.hist-openable { cursor: pointer; }
+.hist-row.hist-openable { cursor: pointer; -webkit-tap-highlight-color: rgba(29,78,216,0.12); }
 .hist-row.hist-openable:hover { background: #eff6ff; }
+.hist-row.hist-openable:active { background: #dbeafe; }   /* 모바일: 눌린 게 보이도록 */
 .hist-row.hist-openable:hover .hist-asset { color: var(--primary); text-decoration: underline; }
+
+/* 내 정보 모달: 정보수정 / 내 이력 탭 */
+.mp-tabs { margin: 0 24px; border-bottom-width: 1px; }
+.mp-tabs .admin-tab { padding: 9px 14px; font-size: 14px; }
+.mp-panel { max-height: 60vh; overflow-y: auto; }
+
+/* 페이지 내장 카메라 */
+.modal-cam { max-width: 560px; }
+.cam-body { padding-bottom: 8px; }
+.cam-stage { position: relative; background: #111827; border-radius: 10px; overflow: hidden; aspect-ratio: 4 / 3; }
+.cam-stage video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-msg {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 20px; color: #e5e7eb; font-size: 13px; line-height: 1.7; white-space: pre-line;
+}
+.cam-shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.cam-thumb { position: relative; width: 68px; height: 68px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+.cam-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-thumb-del {
+  position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; line-height: 1;
+  border: none; border-radius: 50%; background: rgba(17,24,39,0.75); color: #fff; font-size: 11px; cursor: pointer;
+}
+.cam-footer { flex-wrap: wrap; }
 .hist-time { color: var(--text-light); font-size: 12px; white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .hist-row .req-badge { flex-shrink: 0; }
 .hist-asset { font-weight: 700; color: var(--text); white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }

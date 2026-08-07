@@ -814,7 +814,68 @@ function openMyProfile() {
   const sel = document.getElementById("mp-affil");
   sel.innerHTML = deptOptionsHtml(affil);
   sel.value = affil;
+  setMyProfileTab("info");
   show("myProfileOverlay");
+}
+
+// ===== 내 정보 > 내 이력 =====
+// '내가 처리하거나 신청한' 기록만 모아 보여준다. history 는 로그인 사용자면 읽을 수 있고,
+// 관리자가 아니면 평소 불러오지 않으므로 이 탭을 열 때 한 번 가져온다.
+let myHistCache = null;
+function setMyProfileTab(tab) {
+  document.querySelectorAll(".mp-tabs .admin-tab").forEach((b) => b.classList.toggle("active", b.dataset.mptab === tab));
+  document.getElementById("myProfileForm").hidden = tab !== "info";
+  document.getElementById("mp-log").hidden = tab !== "log";
+  document.getElementById("mpSaveBtn").hidden = tab !== "info";   // 이력 탭에서는 '저장' 숨김
+  if (tab === "log") renderMyHistory();
+}
+// 이 기록이 '나'와 관련된 것인지 — 결재자(approved_by)나 신청자(requester)가 나인 경우
+function isMyRecord(h) {
+  const me = [myProfile?.username, myProfile?.name, currentUser?.email, (currentUser?.email || "").split("@")[0]]
+    .filter(Boolean).map((s) => String(s).toLowerCase());
+  if (!me.length) return false;
+  const hay = `${h.approved_by || ""} ${h.requester || ""}`.toLowerCase();
+  return me.some((m) => hay.includes(m));
+}
+async function renderMyHistory() {
+  const body = document.getElementById("myHistBody");
+  if (!body) return;
+  if (!currentUser) { body.innerHTML = `<div class="empty-msg">로그인이 필요합니다.</div>`; return; }
+  if (myHistCache === null) {
+    body.innerHTML = `<div class="empty-msg">불러오는 중…</div>`;
+    try {
+      const { data, error } = await sb.from("history").select("*").order("created_at", { ascending: false }).limit(500);
+      if (error) throw error;
+      myHistCache = (data || []).filter(isMyRecord);
+    } catch (e) {
+      console.error(e);
+      body.innerHTML = `<div class="empty-msg">이력을 불러오지 못했습니다.</div>`;
+      myHistCache = null; return;
+    }
+  }
+  if (!myHistCache.length) {
+    body.innerHTML = `<div class="empty-msg"><div class="empty-ic">🧾</div><div class="empty-title">아직 기록이 없습니다</div>
+      <div class="empty-sub">자산을 등록·수정·검수하면 여기에 쌓입니다.</div></div>`;
+    return;
+  }
+  const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림", inspect: "검수" };
+  const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert", inspect: "req-inspect" };
+  body.innerHTML = `<div class="hist-list">` + myHistCache.map((h) => `
+      <div class="hist-row hist-openable" data-hist-asset="${esc(h.asset_id)}" title="${esc(stripTags(`${h.asset_name || h.asset_id} · ${histSummary(h)}`))} — 눌러서 물품 상세 보기">
+        <span class="hist-time">${fmtTime(h.created_at)}</span>
+        <span class="req-badge ${actCls[h.action] || "badge-gray"}">${actLabel[h.action] || h.action}</span>
+        <span class="hist-asset">${esc(h.asset_name || h.asset_id)}</span>
+        <span class="hist-sum">${histSummary(h)}</span>
+      </div>`).join("") + `</div>`;
+}
+// 이력 기록에서 물품 상세로 이동 (결재 내역 / 내 이력 공통)
+function openAssetFromRecord(assetId) {
+  if (!findAsset(assetId)) {
+    toast(baseAssets.length ? "삭제되었거나 찾을 수 없는 자산입니다." : "자산을 아직 불러오는 중입니다. 잠시 후 다시 눌러주세요.", "warn");
+    return;
+  }
+  hide("myProfileOverlay");
+  openDetail(assetId);
 }
 async function saveMyProfile() {
   if (!currentUser) return;
@@ -3877,28 +3938,122 @@ async function cleanupStorage() {
   }
 }
 
+// ===== 페이지 내장 카메라 (후면 고정) =====
+// <input capture="environment"> 는 '요청'일 뿐이라 기기·인앱브라우저에 따라 셀카(전면)가 열린다.
+// getUserMedia 로 직접 열면 facingMode 를 우리가 지정할 수 있어 후면이 확실히 잡힌다.
+// 카메라를 못 쓰는 환경(권한 거부·구형 브라우저)에서는 파일 선택으로 자동 전환한다.
+let camStream = null, camFacing = "environment", camShots = [], camResolve = null, camMax = 1;
+function camSupported() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+
+async function camStart() {
+  const video = document.getElementById("camVideo");
+  const msg = document.getElementById("camMsg");
+  camStop();
+  msg.hidden = false; msg.textContent = "카메라를 준비하는 중…";
+  try {
+    // ideal 로 주면 후면이 없는 기기(노트북 등)에서도 실패하지 않고 있는 카메라를 쓴다.
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: camFacing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false,
+    });
+    video.srcObject = camStream;
+    await video.play().catch(() => {});
+    msg.hidden = true;
+    return true;
+  } catch (e) {
+    console.warn("카메라 열기 실패:", e?.name || e);
+    const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+    msg.hidden = false;
+    msg.textContent = denied
+      ? "카메라 권한이 거부되었습니다.\n브라우저 설정에서 카메라를 허용하거나, 아래 ‘앨범에서 선택’을 사용하세요."
+      : "이 브라우저에서 카메라를 열 수 없습니다.\n아래 ‘앨범에서 선택’을 사용하세요.";
+    return false;
+  }
+}
+function camStop() {
+  if (camStream) { camStream.getTracks().forEach((t) => t.stop()); camStream = null; }
+  const v = document.getElementById("camVideo");
+  if (v) v.srcObject = null;
+}
+function camRenderShots() {
+  const wrap = document.getElementById("camShots");
+  wrap.innerHTML = camShots.map((src, i) =>
+    `<div class="cam-thumb"><img src="${src}" alt="촬영 ${i + 1}" /><button type="button" class="cam-thumb-del" data-cam-del="${i}" title="삭제">✕</button></div>`).join("");
+  document.getElementById("camDoneBtn").disabled = camShots.length === 0;
+  document.getElementById("camDoneBtn").textContent = camShots.length ? `사진 추가 (${camShots.length})` : "사진 추가";
+  const shotBtn = document.getElementById("camShotBtn");
+  shotBtn.disabled = camShots.length >= camMax;
+  shotBtn.textContent = camShots.length >= camMax ? `최대 ${camMax}장` : "📷 촬영";
+}
+function camCapture() {
+  const video = document.getElementById("camVideo");
+  if (!video.videoWidth || camShots.length >= camMax) return;
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  // 등록 폼과 같은 규격으로 축소·압축(저장공간 절약)
+  const max = 780, scale = Math.min(1, max / Math.max(canvas.width, canvas.height));
+  const out = document.createElement("canvas");
+  out.width = Math.round(canvas.width * scale); out.height = Math.round(canvas.height * scale);
+  out.getContext("2d").drawImage(canvas, 0, 0, out.width, out.height);
+  camShots.push(encodeCanvas(out, 0.55));
+  camRenderShots();
+}
+// 카메라 모달을 열고, 사용자가 담은 사진(dataURL 배열)을 돌려준다. 취소하면 빈 배열.
+function openCamera({ title = "사진 촬영", max = 1 } = {}) {
+  camShots = []; camMax = Math.max(1, max); camFacing = "environment";
+  document.getElementById("camTitle").textContent = title;
+  camRenderShots();
+  show("camOverlay");
+  camStart();
+  return new Promise((resolve) => { camResolve = resolve; });
+}
+function closeCamera(result) {
+  camStop();
+  hide("camOverlay");
+  const r = camResolve; camResolve = null;
+  if (r) r(result || []);
+}
+
 // ===== 상세 화면에서 물품 사진 추가 (검수·등록 뒤에 사진만 덧붙일 때) =====
 // 관리자는 바로 반영, 일반 사용자는 '수정 요청'으로 접수된다.
+// 상세의 '사진 추가' 버튼 → 후면 카메라를 켠다(못 켜면 모달 안에서 앨범 선택으로 전환).
+async function startDetailPhoto() {
+  const a = findAsset(detailCurrentId);
+  if (!a) return;
+  if (!currentUser) { alert("사진 추가는 로그인 후 이용할 수 있습니다."); return; }
+  const room = MAX_PHOTOS - photosOf(a).length;
+  if (room <= 0) { alert(`사진은 자산당 최대 ${MAX_PHOTOS}장입니다.\n'수정'에서 기존 사진을 지운 뒤 다시 시도해주세요.`); return; }
+  if (!camSupported()) { document.getElementById("detailPhotoInput").click(); return; }
+  const shots = await openCamera({ title: `${a.assetName || "물품"} · 사진 촬영`, max: room });
+  if (shots.length) await saveDetailPhotos(shots);
+}
+
+// 파일 선택으로 들어온 경우 → 압축 후 동일 저장 경로로
 async function addDetailPhotos(fileList) {
-  const id = detailCurrentId;
-  const a = findAsset(id);
+  const a = findAsset(detailCurrentId);
   if (!a || !fileList || !fileList.length) return;
   if (!currentUser) { alert("사진 추가는 로그인 후 이용할 수 있습니다."); return; }
-  const existing = photosOf(a);
-  const room = MAX_PHOTOS - existing.length;
-  if (room <= 0) { alert(`사진은 자산당 최대 ${MAX_PHOTOS}장입니다.\n'수정'에서 기존 사진을 지운 뒤 다시 시도해주세요.`); return; }
-
+  const room = MAX_PHOTOS - photosOf(a).length;
+  if (room <= 0) { alert(`사진은 자산당 최대 ${MAX_PHOTOS}장입니다.`); return; }
   const files = [...fileList];
   const imgs = files.filter((f) => f && f.type && f.type.startsWith("image/"));
   if (!imgs.length) { alert("이미지 파일만 업로드할 수 있습니다."); return; }
   const use = imgs.slice(0, room);
+  const shots = [];
+  for (const f of use) shots.push(await compressImage(f, 780, 0.55)); // 등록 폼과 같은 압축
+  await saveDetailPhotos(shots, imgs.length - use.length + (files.length - imgs.length));
+}
 
+async function saveDetailPhotos(shots, skipped = 0) {
+  const id = detailCurrentId;
+  const a = findAsset(id);
+  if (!a || !shots.length) return;
+  const existing = photosOf(a);
   const btn = document.getElementById("detailPhotoBtn");
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = "사진 올리는 중…";
   try {
-    const shots = [];
-    for (const f of use) shots.push(await compressImage(f, 780, 0.55)); // 등록 폼과 같은 압축(저장공간 절약)
     const imageUrls = [...existing, ...shots].slice(-MAX_PHOTOS);
     const fields = { imageUrls };
     if (isAdmin) {
@@ -3913,7 +4068,6 @@ async function addDetailPhotos(fileList) {
       await sbLoadMyRequests(); updateUI();
       toast(`사진 ${shots.length}장 추가를 요청했습니다. 관리자 승인 후 반영됩니다.`, "success");
     }
-    const skipped = imgs.length - use.length + (files.length - imgs.length);
     if (skipped > 0) toast(`${skipped}장은 제외했습니다 (최대 ${MAX_PHOTOS}장 / 이미지 파일만).`, "warn");
     openDetail(id);   // 방금 추가한 사진이 보이도록 상세를 다시 그린다
   } catch (e) {
@@ -4426,11 +4580,12 @@ function renderHistory() {
     const actions = mine
       ? `<span class="hist-actions">${canRevert ? `<button class="btn-mini btn-edit" data-revert="${h.id}">되돌리기</button>` : ""}<button class="btn-mini btn-del" data-delhist="${h.id}">삭제</button></span>`
       : "";
-    // 기록을 누르면 그 물품의 상세를 바로 볼 수 있게 한다(삭제된 자산은 열 게 없으므로 제외).
-    const openable = !!findAsset(h.asset_id);
-    const tip = stripTags(`${h.asset_name || h.asset_id} · ${summary}${who ? " · " + who : ""}`) + (openable ? " — 눌러서 물품 상세 보기" : "");
+    // 기록을 누르면 그 물품의 상세를 연다.
+    // 자산 데이터(특히 2024년분)는 뒤늦게 로드되므로, 여기서 미리 걸러내지 않고 항상 누를 수 있게 둔다.
+    // 실제로 못 찾는 경우(삭제됨·로딩중)는 누른 시점에 안내한다.
+    const tip = stripTags(`${h.asset_name || h.asset_id} · ${summary}${who ? " · " + who : ""}`) + " — 눌러서 물품 상세 보기";
     return `
-      <div class="hist-row${openable ? " hist-openable" : ""}"${openable ? ` data-hist-asset="${esc(h.asset_id)}"` : ""} title="${esc(tip)}">
+      <div class="hist-row hist-openable" data-hist-asset="${esc(h.asset_id)}" title="${esc(tip)}">
         <span class="hist-time">${fmtTime(h.created_at)}</span>
         <span class="req-badge ${actCls[h.action] || "badge-gray"}">${actLabel[h.action] || h.action}</span>
         <span class="hist-asset">${esc(h.asset_name || h.asset_id)}</span>
@@ -4932,7 +5087,28 @@ document.getElementById("detailDownloadBtn").addEventListener("click", downloadP
 document.getElementById("detailLabelBtn").addEventListener("click", () => downloadLabelFile(detailCurrentId));
 document.getElementById("detailLabelDelBtn").addEventListener("click", () => deleteLabelFile(detailCurrentId));
 document.getElementById("detailInspectBtn").addEventListener("click", () => openInspect(detailCurrentId));
-document.getElementById("detailPhotoBtn").addEventListener("click", () => document.getElementById("detailPhotoInput").click());
+document.getElementById("detailPhotoBtn").addEventListener("click", startDetailPhoto);
+// 카메라 모달
+document.getElementById("camShotBtn").addEventListener("click", camCapture);
+document.getElementById("camDoneBtn").addEventListener("click", () => closeCamera(camShots.slice()));
+document.getElementById("camFlipBtn").addEventListener("click", async () => {
+  camFacing = camFacing === "environment" ? "user" : "environment";
+  await camStart();
+});
+document.getElementById("camPickBtn").addEventListener("click", () => {
+  closeCamera([]);                                    // 카메라를 닫고 파일 선택으로 전환
+  document.getElementById("detailPhotoInput").click();
+});
+document.getElementById("camShots").addEventListener("click", (e) => {
+  const d = e.target.closest("[data-cam-del]");
+  if (!d) return;
+  camShots.splice(Number(d.dataset.camDel), 1);
+  camRenderShots();
+});
+// 카메라 모달을 어떤 방법으로 닫든 스트림을 반드시 끈다(카메라 표시등이 계속 켜져 있지 않도록)
+document.getElementById("camOverlay").addEventListener("click", (e) => {
+  if (e.target.closest("[data-close]") || e.target.id === "camOverlay") closeCamera([]);
+});
 document.getElementById("detailPhotoInput").addEventListener("change", async (e) => {
   const files = e.target.files;
   e.target.value = "";                 // 같은 파일을 연속으로 골라도 change 가 다시 뜨도록
@@ -5111,7 +5287,12 @@ document.getElementById("consentBox").addEventListener("click", (e) => {
 document.getElementById("loginBtn").addEventListener("click", () => openAuth("login"));
 document.getElementById("signupBtn").addEventListener("click", () => openAuth("signup"));
 document.getElementById("logoutBtn").addEventListener("click", logout);
-document.getElementById("myProfileBtn").addEventListener("click", openMyProfile);
+document.getElementById("myProfileBtn").addEventListener("click", () => { myHistCache = null; openMyProfile(); });
+document.querySelectorAll(".mp-tabs .admin-tab").forEach((b) => b.addEventListener("click", () => setMyProfileTab(b.dataset.mptab)));
+document.getElementById("myHistBody").addEventListener("click", (e) => {
+  const row = e.target.closest("[data-hist-asset]");
+  if (row) openAssetFromRecord(row.dataset.histAsset);
+});
 document.getElementById("mpSaveBtn").addEventListener("click", saveMyProfile);
 document.getElementById("myProfileForm").addEventListener("submit", (e) => { e.preventDefault(); saveMyProfile(); });
 document.getElementById("authSubmit").addEventListener("click", authSubmit);
@@ -5190,7 +5371,7 @@ document.getElementById("adminHistBody").addEventListener("click", (e) => {
   if (dl) { deleteHistory(dl.dataset.delhist); return; }
   // 되돌리기·삭제 버튼이 아닌 곳을 누르면 그 기록의 물품 상세를 연다
   const row = e.target.closest("[data-hist-asset]");
-  if (row) openDetail(row.dataset.histAsset);
+  if (row) openAssetFromRecord(row.dataset.histAsset);
 });
 // 회원 관리
 document.getElementById("adminMembersBody").addEventListener("click", (e) => {

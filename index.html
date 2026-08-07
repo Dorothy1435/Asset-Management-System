@@ -552,13 +552,46 @@
   </div>
 
   <!-- 내 정보 수정 모달 (본인) -->
+  <!-- 카메라 촬영 (후면 카메라 고정) — 기기/브라우저가 capture 속성을 무시하고 셀카를 켜는 문제를 피하려고
+       페이지 안에서 직접 카메라를 연다. 카메라를 못 열면 자동으로 파일 선택으로 넘어간다. -->
+  <div class="modal-overlay" id="camOverlay" hidden>
+    <div class="modal modal-cam" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="camTitle">사진 촬영</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body cam-body">
+        <div class="cam-stage">
+          <video id="camVideo" playsinline autoplay muted></video>
+          <div class="cam-msg" id="camMsg">카메라를 준비하는 중…</div>
+        </div>
+        <div class="cam-shots" id="camShots"></div>
+      </div>
+      <div class="modal-footer cam-footer">
+        <button class="btn btn-secondary" id="camFlipBtn" title="앞/뒤 카메라 전환">🔄 카메라 전환</button>
+        <button class="btn btn-secondary" id="camPickBtn">🖼 앨범에서 선택</button>
+        <button class="btn btn-inspect" id="camShotBtn">📷 촬영</button>
+        <button class="btn btn-primary" id="camDoneBtn" disabled>사진 추가</button>
+        <button class="btn btn-secondary" data-close>취소</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="myProfileOverlay" hidden>
     <div class="modal modal-narrow" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <h2>내 정보 수정</h2>
+        <h2>내 정보</h2>
         <button class="modal-close" data-close>✕</button>
       </div>
-      <form id="myProfileForm" class="modal-body">
+      <div class="admin-tabs mp-tabs">
+        <button class="admin-tab active" data-mptab="info">내 정보 수정</button>
+        <button class="admin-tab" data-mptab="log">🧾 내 이력</button>
+      </div>
+      <div class="modal-body mp-panel" id="mp-log" hidden>
+        <p class="ipd-hint">내가 처리하거나 신청한 기록입니다. 줄을 누르면 그 물품의 상세가 열립니다.</p>
+        <div id="myHistBody"></div>
+      </div>
+      <form id="myProfileForm" class="modal-body mp-panel">
         <div class="form-row" style="margin-bottom:12px;">
           <label>아이디</label>
           <input type="text" id="mp-username" disabled />
@@ -577,7 +610,7 @@
       </form>
       <div class="modal-footer">
         <button class="btn btn-primary" id="mpSaveBtn">저장</button>
-        <button class="btn btn-secondary" data-close>취소</button>
+        <button class="btn btn-secondary" data-close>닫기</button>
       </div>
     </div>
   </div>
