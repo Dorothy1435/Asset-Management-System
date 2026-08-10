@@ -3607,6 +3607,22 @@ const MEDIA_BUCKET = "asset-media";
 // 업로드 파일명은 매번 새로 생성되는 '불변' 이름이라(같은 URL의 내용이 바뀌지 않음) 캐시를 길게 잡아도 안전하다.
 // 기본값(1시간) 대신 1년으로 두면 재방문 시 사진을 다시 내려받지 않아 월 전송량(무료 5GB)을 크게 아낀다.
 const MEDIA_CACHE_CONTROL = "31536000"; // 1년(초)
+// [안전장치] 저장공간이 거의 찼으면 새 사진 업로드만 막는다.
+// 자산 등록·수정·검수 자체는 계속 되므로 '시스템이 멈추는' 일은 없다. 사진만 나중에 올리면 된다.
+const STORAGE_BLOCK_RATIO = 0.95;
+const STORAGE_FULL_MSG =
+  "⚠️ 사진 저장공간이 거의 찼습니다.\n\n" +
+  "자산 등록·수정·검수는 그대로 됩니다. 사진만 잠시 올릴 수 없습니다.\n" +
+  "관리자에게 ‘관리자 > 저장공간’에서 정리를 요청해 주세요.";
+let _storageFullUntil = 0;          // 이 시각까지는 '가득참'으로 간주(반복 조회 방지)
+function markStorageFull() { _storageFullUntil = Date.now() + 10 * 60 * 1000; }
+function storageBlocked() {
+  if (Date.now() < _storageFullUntil) return true;
+  // 관리자가 저장공간 탭에서 스캔한 최신 수치가 있으면 그걸로 판단
+  if (storageStat && storageStat.used / STORAGE_FREE_LIMIT >= STORAGE_BLOCK_RATIO) return true;
+  return false;
+}
+
 // data:URL(base64)이면 Storage에 업로드하고 공개 URL 반환. 이미 URL이거나 비어있으면 그대로.
 async function uploadMedia(dataUrl, folder) {
   if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return dataUrl || "";
@@ -3618,19 +3634,45 @@ async function uploadMedia(dataUrl, folder) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const ext = mime.includes("pdf") ? "pdf" : (mime.split("/")[1] || "jpg").split("+")[0];
   const blob = new Blob([bytes], { type: mime });
+  // [중복 방지] 파일명을 '내용의 해시'로 짓는다.
+  // 같은 사진·같은 라벨을 여러 자산에 붙여도 저장소에는 딱 한 벌만 남는다.
+  // (실제로 같은 라벨 PDF가 8벌씩 쌓여 있었다) 내용이 곧 이름이라 캐시 1년도 그대로 안전하다.
+  const contentPath = await hashPath(bytes, folder, ext);
   // 일시적 실패(약한 네트워크·순간 오류)는 3회까지 재시도(짧은 백오프). 정상 브라우저는 1회에 성공.
   // (인앱 브라우저는 아무리 재시도해도 실패하므로 과도한 재시도로 버튼이 오래 잠기지 않게 3회로 제한)
   let lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+    const path = contentPath || `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
     try {
       const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, blob, { contentType: mime, upsert: false, cacheControl: MEDIA_CACHE_CONTROL });
-      if (!error) return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+      // 같은 내용이 이미 올라가 있으면(중복) 그 파일을 그대로 재사용한다 — 성공으로 취급.
+      if (!error || isDuplicateError(error)) return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+      // 용량 초과는 재시도해도 소용없다 → 즉시 중단하고 한동안 업로드를 막는다
+      if (isQuotaError(error)) { markStorageFull(); throw error; }
       lastErr = error;
     } catch (e) { lastErr = e; } // 네트워크 예외도 재시도 대상
     await new Promise((r) => setTimeout(r, 350 * (attempt + 1))); // 0.35 → 0.7s
   }
   throw lastErr;
+}
+// 내용 해시로 경로 만들기. crypto.subtle 을 못 쓰면(구형·비보안 컨텍스트) null → 기존 방식으로 되돌아간다.
+async function hashPath(bytes, folder, ext) {
+  try {
+    if (!(crypto && crypto.subtle)) return null;
+    const buf = await crypto.subtle.digest("SHA-256", bytes);
+    const hex = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `${folder}/${hex.slice(0, 40)}.${ext}`;
+  } catch { return null; }
+}
+function isDuplicateError(err) {
+  const s = `${err?.statusCode || ""} ${err?.error || ""} ${err?.message || ""}`.toLowerCase();
+  return s.includes("409") || s.includes("duplicate") || s.includes("already exists");
+}
+// 용량·한도 초과 계열 오류(재시도 무의미)
+function isQuotaError(err) {
+  const s = `${err?.statusCode || ""} ${err?.error || ""} ${err?.message || ""}`.toLowerCase();
+  return s.includes("413") || s.includes("507") || s.includes("quota") || s.includes("exceeded")
+    || s.includes("storage limit") || s.includes("payload too large");
 }
 // 자산 필드의 이미지들을 모두 Storage URL로 치환. 업로드 실패 시 원본(base64) 유지.
 async function withUploadedMedia(fields) {
@@ -3657,12 +3699,32 @@ async function withUploadedMedia(fields) {
           ? { ...ins, photo: await uploadMedia(ins.photo, "inspections") } : ins));
     }
     _storageIssueNotified = false; // 정상 업로드되면 경고 상태 해제(다음 장애 시 다시 알림)
-    return out;
+    return stripInlineMedia(out);  // 혹시라도 남은 base64는 DB에 넣지 않는다
   } catch (e) {
-    console.warn("이미지 업로드 실패 — 임시로 사진을 보존합니다:", e?.message || e);
+    console.warn("이미지 업로드 실패 — 사진은 저장하지 않습니다:", e?.message || e);
     notifyStorageIssue(e); // 저장공간 가득참 등 → 관리자에게 명확히 안내(조용히 넘어가지 않음)
-    return fields;
+    // [중요] 업로드에 실패해도 base64를 DB에 넣지 않는다.
+    //  넣으면 사진 한 장이 DB에 통째로 들어가고, 목록을 여는 모든 사람이 그걸 매번 내려받게 된다.
+    //  DB 한도(500MB)와 전송량이 동시에 무너져 '앱 전체가 느려지다 멈추는' 진짜 사고가 된다.
+    //  사진만 버리고 나머지 정보는 정상 저장한다 — 사진은 나중에 다시 올리면 된다.
+    return stripInlineMedia(fields);
   }
+}
+// 필드에서 base64(data:) 이미지를 걷어낸다. Storage URL 과 일반 값은 그대로 둔다.
+function stripInlineMedia(f) {
+  const is64 = (v) => typeof v === "string" && v.startsWith("data:");
+  const out = { ...f };
+  if (is64(out.imageUrl)) out.imageUrl = "";
+  if (is64(out.labelFile)) { out.labelFile = ""; out.labelFileName = ""; }
+  if (is64(out.labelPreview)) out.labelPreview = "";
+  if (is64(out.thumbUrl)) out.thumbUrl = "";
+  if (Array.isArray(out.imageUrls)) {
+    out.imageUrls = out.imageUrls.filter((u) => u && !is64(u));
+    if (!out.imageUrl && out.imageUrls.length) out.imageUrl = out.imageUrls[0];
+  }
+  if (Array.isArray(out.inspections)) out.inspections = out.inspections.map((ins) =>
+    ins && is64(ins.photo) ? { ...ins, photo: "" } : ins);
+  return out;
 }
 // 저장소 업로드 실패(용량 초과 등) 시 1회 안내. 사진은 임시 보존되지만 조치가 필요함을 알린다.
 let _storageIssueNotified = false;
@@ -3685,10 +3747,10 @@ function notifyStorageIssue(err) {
   _storageIssueNotified = true;
   console.warn("사진 업로드 실패:", err?.message || err);
   setTimeout(() => {
-    // 저장 공간은 넉넉하므로(용량 문제 아님) 겁주지 않고, 대부분 일시적임을 안내한다.
     alert(
       "⚠️ 사진을 저장소에 올리지 못했어요. (일시적 오류일 수 있어요)\n\n" +
-      "방금 사진은 임시로 보존됐어요. 잠시 후 다시 저장하면 대부분 정상 처리됩니다.\n" +
+      "사진을 뺀 나머지 정보는 정상 저장됐습니다.\n" +
+      "잠시 후 상세 화면의 ‘📷 사진 추가’로 다시 올려 주세요.\n" +
       "계속 반복되면 관리자 비상연락처(☎ 3123)로 알려 주세요."
     );
   }, 200);
@@ -3752,7 +3814,9 @@ async function listMediaFiles() {
       if (!data || !data.length) break;
       for (const o of data) {
         const size = o.metadata && o.metadata.size;
-        if (typeof size === "number") out.push({ path: folder + "/" + o.name, folder, size, createdAt: o.created_at || o.updated_at || null });
+        if (typeof size === "number") out.push({ path: folder + "/" + o.name, folder, size,
+          createdAt: o.created_at || o.updated_at || null,
+          etag: String((o.metadata && o.metadata.eTag) || "").replace(/"/g, "") });  // eTag = 내용 MD5 → 중복 판별용
       }
       offset += data.length;
       if (data.length < 1000) break;
@@ -3810,7 +3874,14 @@ async function scanStorageUsage() {
   // [안전장치] 파일은 있는데 '사용 중'으로 잡힌 게 하나도 없다면, DB를 제대로 못 읽은 것(권한·네트워크)이다.
   // 이 상태로 정리를 돌리면 멀쩡한 사진을 전부 지우게 되므로 아예 결과를 만들지 않는다.
   if (files.length && used.size === 0) throw new Error("사용 중인 사진 목록을 읽지 못했습니다. (권한 또는 네트워크 문제) 안전을 위해 정리를 중단합니다.");
-  storageStat = { at: Date.now(), fileCount: files.length, used: total, byFolder, orphans, refCount: used.size };
+  // 내용이 완전히 같은 파일 묶기(eTag=MD5). 한 벌만 남기고 나머지는 참조를 옮긴 뒤 지울 수 있다.
+  const byTag = new Map();
+  for (const f of files) { if (!f.etag) continue; const g = byTag.get(f.etag) || []; g.push(f); byTag.set(f.etag, g); }
+  const dupGroups = [...byTag.values()].filter((g) => g.length > 1)
+    .map((g) => { const s = g.slice().sort((a, b) => (used.has(b.path) ? 1 : 0) - (used.has(a.path) ? 1 : 0));
+      return { keep: s[0], drop: s.slice(1) }; });
+  const dupWaste = dupGroups.reduce((n, g) => n + g.drop.reduce((m, f) => m + f.size, 0), 0);
+  storageStat = { at: Date.now(), fileCount: files.length, used: total, byFolder, orphans, refCount: used.size, dupGroups, dupWaste };
   updateStorageWarnBadge();
   return storageStat;
 }
@@ -3890,12 +3961,86 @@ function renderStorage() {
              ? `<button class="btn btn-danger" id="storCleanBtn">고아 파일 ${s.orphans.length.toLocaleString()}개 정리</button>`
              : `<div class="stor-sub">삭제는 최고관리자만 실행할 수 있습니다.</div>`}`
         : `<div class="stor-orphan clean">정리할 파일이 없습니다. 깨끗합니다. ✅</div>`}
+    </div>
+
+    <div class="stor-card">
+      <div class="stor-title">🧩 중복 사진 합치기</div>
+      <div class="stor-sub">같은 사진·같은 라벨을 여러 자산에 붙이면 예전에는 그만큼 따로 저장됐습니다.
+        내용이 완전히 같은 파일을 한 벌로 합치고 나머지를 지웁니다. 자산에 보이는 사진은 그대로입니다.
+        (지금은 올릴 때 자동으로 합쳐지므로 새로 생기지는 않습니다.)</div>
+      ${(s.dupGroups || []).length
+        ? `<div class="stor-orphan">합치면 <b>${s.dupGroups.reduce((n, g) => n + g.drop.length, 0).toLocaleString()}개 · ${fmtBytes(s.dupWaste)}</b> 확보</div>
+           ${isSuperAdmin
+             ? `<button class="btn btn-danger" id="storDedupBtn">중복 ${s.dupGroups.length.toLocaleString()}묶음 합치기</button>`
+             : `<div class="stor-sub">실행은 최고관리자만 가능합니다.</div>`}`
+        : `<div class="stor-orphan clean">중복이 없습니다. ✅</div>`}
     </div>`;
 
   const rb = document.getElementById("storRefreshBtn");
   if (rb) rb.addEventListener("click", () => refreshStorage());
   const cb = document.getElementById("storCleanBtn");
   if (cb) cb.addEventListener("click", () => cleanupStorage());
+  const db = document.getElementById("storDedupBtn");
+  if (db) db.addEventListener("click", () => dedupeStorage());
+}
+
+// 중복 파일 합치기: 참조를 대표 파일로 옮긴 뒤 나머지를 삭제한다.
+// URL 만 바뀌고 내용은 동일하므로 화면에 보이는 사진은 그대로다.
+async function dedupeStorage() {
+  if (!isSuperAdmin) { alert("중복 합치기는 최고관리자만 실행할 수 있습니다."); return; }
+  const groups = (storageStat && storageStat.dupGroups) || [];
+  if (!groups.length || storageBusy) return;
+  const dropN = groups.reduce((n, g) => n + g.drop.length, 0);
+  if (!confirm(`내용이 같은 파일 ${dropN.toLocaleString()}개(${fmtBytes(storageStat.dupWaste)})를 한 벌로 합칩니다.\n\n` +
+    `· 자산에 보이는 사진은 그대로입니다(같은 내용의 다른 파일을 가리키게만 바꿉니다).\n· 되돌릴 수 없습니다.\n\n계속할까요?`)) return;
+  storageBusy = true; renderStorage();
+  try {
+    // 1) 지울 경로 → 대표 경로 매핑
+    const remap = new Map();
+    for (const g of groups) for (const d of g.drop) remap.set(d.path, g.keep.path);
+    // 2) DB에서 참조를 대표 경로로 치환 (assets / requests). history 는 과거 스냅샷이라 손대지 않는다.
+    let rows = 0;
+    for (const [table, cols] of [["assets", "id,data"], ["requests", "id,payload"]]) {
+      for (let from = 0; ; ) {
+        const { data, error } = await sb.from(table).select(cols).range(from, from + 199);
+        if (error) throw new Error(`${table} 조회 실패: ${error.message}`);
+        if (!data || !data.length) break;
+        for (const r of data) {
+          const key = table === "assets" ? "data" : "payload";
+          let s = JSON.stringify(r[key] ?? null);
+          let hit = false;
+          for (const [from_, to] of remap) {
+            if (s.includes(from_)) { s = s.split(from_).join(to); hit = true; }
+          }
+          if (!hit) continue;
+          const { error: ue } = await sb.from(table).update({ [key]: JSON.parse(s) }).eq("id", r.id);
+          if (ue) throw new Error(`${table} 수정 실패: ${ue.message}`);
+          rows++;
+        }
+        from += data.length;
+        if (data.length < 200) break;
+      }
+    }
+    // 3) history 가 아직 가리키는 파일은 남겨둔다(되돌리기 시 사진이 깨지지 않게).
+    //    다음 스캔에서 '고아'로도 잡히지 않으므로 안전하다.
+    const used = await collectReferencedPaths();
+    const del = [...remap.keys()].filter((p) => !used.has(p));
+    let freed = 0;
+    for (let i = 0; i < del.length; i += 100) {
+      const chunk = del.slice(i, i + 100);
+      const { error } = await sb.storage.from(MEDIA_BUCKET).remove(chunk);
+      if (error) throw error;
+      for (const g of groups) for (const d of g.drop) if (chunk.includes(d.path)) freed += d.size;
+    }
+    storageBusy = false;
+    await sbLoadOverlay(); buildAssets(); rerender();
+    await scanStorageUsage(); renderStorage();
+    toast(`🧩 중복 ${del.length.toLocaleString()}개를 합쳤습니다. (${fmtBytes(freed)} 확보 · 자산 ${rows}건 갱신)`, "success");
+  } catch (e) {
+    console.error(e);
+    storageBusy = false; renderStorage();
+    alert("중복 합치기에 실패했습니다.\n원인: " + (e?.message || e));
+  }
 }
 
 async function refreshStorage() {
@@ -4025,6 +4170,7 @@ async function startDetailPhoto() {
   const a = findAsset(detailCurrentId);
   if (!a) return;
   if (!currentUser) { alert("사진 추가는 로그인 후 이용할 수 있습니다."); return; }
+  if (storageBlocked()) { alert(STORAGE_FULL_MSG); return; }
   const room = MAX_PHOTOS - photosOf(a).length;
   if (room <= 0) { alert(`사진은 자산당 최대 ${MAX_PHOTOS}장입니다.\n'수정'에서 기존 사진을 지운 뒤 다시 시도해주세요.`); return; }
   if (!camSupported()) { document.getElementById("detailPhotoInput").click(); return; }
