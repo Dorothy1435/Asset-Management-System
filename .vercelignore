@@ -2,3 +2,4 @@ node_modules
 convert.js
 *.xlsx
 package-lock.json
+!survey_template.xlsx

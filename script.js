@@ -4945,36 +4945,144 @@ async function exportExcel() {
 // 재물조사 결과 내보내기(관리자 전용): '업로드된 재물조사 목록표(inventory_list.json)' 기준.
 //  · 목록표에 있는 자산만 내보낸다(시스템 전체 X). 검수완료 자산에 '정상 O' + 검수일·검수자 채움.
 //  · 목록표 원본 열(자산관리번호…정상/요정비/폐품/불용)을 그대로 유지 → 그대로 제출/붙여넣기 가능.
+// ===== 재물조사 결과 내보내기 =====
+// 목록표 원본(survey_template.xlsx)을 그대로 받아 '정상(T열)'에 O 만 찍어 돌려준다.
+// 표를 새로 그리지 않으므로 서식·머리글·병합셀·열너비·메모가 원본 그대로 유지된다.
+// survey_template.xlsx = 원본 목록표에서 데이터 아래 빈 행 103만 개만 걷어낸 것(build-survey-template.js).
+
+// --- 브라우저용 zip 최소 구현 (라이브러리 없이) ---
+const ZIP_CRC = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function zipCrc32(u8) { let c = 0xffffffff; for (let i = 0; i < u8.length; i++) c = ZIP_CRC[(c ^ u8[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+async function streamBytes(u8, mode) {   // mode: "deflate-raw" 압축 / "deflate-raw" 해제
+  const S = mode === "inflate" ? DecompressionStream : CompressionStream;
+  const st = new S("deflate-raw");
+  const w = st.writable.getWriter(); w.write(u8); w.close();
+  const parts = []; const rd = st.readable.getReader();
+  for (;;) { const { value, done } = await rd.read(); if (done) break; parts.push(value); }
+  let len = 0; parts.forEach((p) => (len += p.length));
+  const out = new Uint8Array(len); let o = 0;
+  parts.forEach((p) => { out.set(p, o); o += p.length; });
+  return out;
+}
+function zipRead(buf) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= 0; i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error("zip 형식이 아닙니다.");
+  let p = dv.getUint32(eocd + 16, true);
+  const n = dv.getUint16(eocd + 10, true), out = [];
+  const dec = new TextDecoder();
+  for (let k = 0; k < n; k++) {
+    const method = dv.getUint16(p + 10, true), time = dv.getUint16(p + 12, true), date = dv.getUint16(p + 14, true);
+    const crc = dv.getUint32(p + 16, true), compSize = dv.getUint32(p + 20, true), uncompSize = dv.getUint32(p + 24, true);
+    const nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+    const lo = dv.getUint32(p + 42, true);
+    const name = dec.decode(u8.subarray(p + 46, p + 46 + nl));
+    const dataStart = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true);
+    out.push({ name, method, time, date, crc, compSize, uncompSize, data: u8.subarray(dataStart, dataStart + compSize) });
+    p += 46 + nl + el + cl;
+  }
+  return out;
+}
+function zipWrite(entries) {
+  const enc = new TextEncoder();
+  const chunks = []; let offset = 0; const central = [];
+  for (const e of entries) {
+    const nb = enc.encode(e.name);
+    const lh = new Uint8Array(30); const dv = new DataView(lh.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 0, true);
+    dv.setUint16(8, e.method, true); dv.setUint16(10, e.time, true); dv.setUint16(12, e.date, true);
+    dv.setUint32(14, e.crc, true); dv.setUint32(18, e.data.length, true); dv.setUint32(22, e.uncompSize, true);
+    dv.setUint16(26, nb.length, true); dv.setUint16(28, 0, true);
+    central.push({ ...e, nb, localOffset: offset });
+    chunks.push(lh, nb, e.data); offset += 30 + nb.length + e.data.length;
+  }
+  const cdStart = offset;
+  for (const c of central) {
+    const h = new Uint8Array(46); const dv = new DataView(h.buffer);
+    dv.setUint32(0, 0x02014b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 20, true);
+    dv.setUint16(10, c.method, true); dv.setUint16(12, c.time, true); dv.setUint16(14, c.date, true);
+    dv.setUint32(16, c.crc, true); dv.setUint32(20, c.data.length, true); dv.setUint32(24, c.uncompSize, true);
+    dv.setUint16(28, c.nb.length, true); dv.setUint32(42, c.localOffset, true);
+    chunks.push(h, c.nb); offset += 46 + c.nb.length;
+  }
+  const eo = new Uint8Array(22); const dv = new DataView(eo.buffer);
+  dv.setUint32(0, 0x06054b50, true);
+  dv.setUint16(8, central.length, true); dv.setUint16(10, central.length, true);
+  dv.setUint32(12, offset - cdStart, true); dv.setUint32(16, cdStart, true);
+  chunks.push(eo);
+  return new Blob(chunks, { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+
 async function exportInspectionResult() {
   if (!isAdmin) { alert("재물조사 결과 내보내기는 관리자만 할 수 있습니다."); return; }
-  try { await ensureXlsx(); } catch { alert("엑셀 모듈을 불러오지 못했습니다. 인터넷 연결을 확인해주세요."); return; }
-  let listRows;
-  try { listRows = await fetch("inventory_list.json").then((r) => (r.ok ? r.json() : null)); } catch { listRows = null; }
-  if (!Array.isArray(listRows) || !listRows.length) { alert("재물조사 목록표 데이터를 불러오지 못했습니다."); return; }
-  const round = inspRound;
-  const norm = (s) => String(s || "").replace(/[\s-]/g, "");
-  // 시스템 자산의 검수기록을 자산번호로 조회할 수 있게 맵 구성
-  const byNum = new Map();
-  for (const a of assets) { const n = norm(a.assetNumber); if (n && !byNum.has(n)) byNum.set(n, a); }
-  let doneN = 0;
-  const out = listRows.map((r) => {
-    const a = byNum.get(norm(r["자산관리번호"]));
-    // 목록표로 내보낼 때는 연동된 1회차 검수 기록도 함께 인정된다(inspectionFor)
-    const ins = a ? inspectionFor(a, round) : null;
-    const done = !!ins; if (done) doneN++;
-    return {
-      ...r,                                       // 목록표 원본 열 유지(표에 없는 자산은 애초에 목록에 없음)
-      "정상": done ? "O" : (r["정상"] || ""),      // 검수완료면 정상 O
-      "검수일": done ? fmtDate(ins.checkedAt) : "",
-      "검수자": done ? (ins.inspector || "") : "",
-      "검수회차": round,
-    };
-  });
-  const ws = XLSX.utils.json_to_sheet(out);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "재물조사결과");
-  XLSX.writeFile(wb, `재물조사결과_${round}_${todayStr()}.xlsx`);
-  toast(`재물조사 목록표 ${out.length.toLocaleString()}건 내보냈어요 (정상 O ${doneN.toLocaleString()}건, ${round}).`, "success");
+  if (typeof DecompressionStream === "undefined" || typeof CompressionStream === "undefined") {
+    alert("이 브라우저에서는 지원되지 않습니다.\n크롬·엣지·사파리 최신 버전에서 이용해주세요."); return;
+  }
+  const btn = document.getElementById("exportInspBtn");
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "만드는 중…"; }
+  try {
+    const res = await fetch("survey_template.xlsx");
+    if (!res.ok) throw new Error("목록표 원본을 불러오지 못했습니다.");
+    const entries = zipRead(await res.arrayBuffer());
+    const sheet = entries.find((e) => e.name === "xl/worksheets/sheet1.xml");
+    const ssEnt = entries.find((e) => e.name === "xl/sharedStrings.xml");
+    if (!sheet || !ssEnt) throw new Error("목록표 원본 구조가 예상과 다릅니다.");
+
+    const inflate = async (e) => new TextDecoder().decode(e.method === 0 ? e.data : await streamBytes(e.data, "inflate"));
+    const shared = [];
+    for (const si of (await inflate(ssEnt)).match(/<si>[\s\S]*?<\/si>/g) || [])
+      shared.push((si.match(/<t[^>]*>([\s\S]*?)<\/t>/g) || []).map((t) => t.replace(/<t[^>]*>/, "").replace(/<\/t>$/, "")).join(""));
+
+    // 검수 완료 자산번호 집합 — '목록표' 기준(연동된 1회차 검수도 포함)
+    const nrm = (s) => String(s || "").replace(/[\s.\-_]/g, "").toUpperCase();
+    const doneNums = new Set();
+    for (const a of assets) if (inspectedRound(a, SURVEY_ROUND)) doneNums.add(nrm(a.assetNumber));
+
+    // 시트 XML에서 각 행의 B(자산관리번호)를 보고, 검수됐으면 T셀에 O 를 넣는다
+    let xml = await inflate(sheet);
+    let marked = 0, total = 0;
+    xml = xml.replace(/<row [^>]*r="(\d+)"[^>]*>[\s\S]*?<\/row>/g, (row, rn) => {
+      const bm = new RegExp(`<c r="B${rn}"([^>]*)>\\s*<v>([^<]*)</v>`).exec(row);
+      if (!bm) return row;
+      const num = / t="s"/.test(bm[1]) ? (shared[Number(bm[2])] ?? "") : bm[2];
+      if (!/^[0-9A-Za-z]{6,}$/.test(num)) return row;   // 머리글·부속표 행 제외
+      total++;
+      if (!doneNums.has(nrm(num))) return row;
+      marked++;
+      const ref = `T${rn}`;
+      const cell = `<c r="${ref}"$1 t="inlineStr"><is><t>O</t></is></c>`;
+      if (new RegExp(`<c r="${ref}"[^>]*/>`).test(row))                       // 빈 셀 → 서식 유지하고 값만
+        return row.replace(new RegExp(`<c r="${ref}"([^>]*?)\\s*/>`), cell);
+      if (new RegExp(`<c r="${ref}"[^>]*>`).test(row))                        // 값 있는 셀 → 통째로 교체
+        return row.replace(new RegExp(`<c r="${ref}"([^>]*)>[\\s\\S]*?</c>`), (m, at) =>
+          `<c r="${ref}"${at.replace(/\s*t="[^"]*"/, "")} t="inlineStr"><is><t>O</t></is></c>`);
+      return row.replace("</row>", `<c r="${ref}" t="inlineStr"><is><t>O</t></is></c></row>`);
+    });
+
+    const raw = new TextEncoder().encode(xml);
+    sheet.data = await streamBytes(raw, "deflate");
+    sheet.method = 8; sheet.crc = zipCrc32(raw); sheet.uncompSize = raw.length;
+
+    const blob = zipWrite(entries);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `2026년 재물조사 목록표_검수표시_${todayStr()}.xlsx`;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast(`재물조사 결과를 내려받았어요. 목록표 ${total.toLocaleString()}건 중 정상 O ${marked.toLocaleString()}건.`, "success");
+  } catch (e) {
+    console.error(e);
+    alert("재물조사 결과를 만들지 못했습니다.\n원인: " + (e?.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
 }
 
 // ===== 이벤트 =====
