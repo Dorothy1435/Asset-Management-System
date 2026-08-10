@@ -153,7 +153,10 @@ const groupOf = (a) => {
 };
 let currentGroup = GROUP_2024;
 let currentPageName = "assets"; // "assets" | "board" | "admin"
-let currentAdminTab = "review"; // "review" | "hist" | "members"
+// 관리자 페이지 탭 목록 — 한 곳에서만 관리한다.
+// (여기 빠뜨리면 탭을 눌러도 '승인 대기'로 튕겨나간다. 실제로 저장공간 탭이 그랬다.)
+const ADMIN_TABS = ["review", "hist", "members", "access", "storage"];
+let currentAdminTab = "review";
 // 라우트별 자산 그룹 매핑
 const ROUTES = { "2025": GROUP_2024, "past": GROUP_PAST, "elec": GROUP_ELEC };
 const GROUP_TO_ROUTE = { [GROUP_2024]: "2025", [GROUP_PAST]: "past", [GROUP_ELEC]: "elec" };
@@ -466,7 +469,7 @@ function parseHash() {
   if (h === "board") return { page: "board" };
   if (h === "admin" || h.startsWith("admin/")) {
     const tab = h.split("/")[1] || "review";
-    return { page: "admin", tab: ["review", "hist", "members", "access", "storage"].includes(tab) ? tab : "review" };
+    return { page: "admin", tab: ADMIN_TABS.includes(tab) ? tab : "review" };
   }
   if (ROUTES[h]) return { page: "assets", group: ROUTES[h] };
   return { page: "assets", group: GROUP_2024 };
@@ -4264,7 +4267,7 @@ function renderMyRequests() {
 // 관리자 페이지를 열고 데이터를 최신화한 뒤 선택 탭을 렌더링한다.
 async function openAdminPage(tab) {
   if (!isAdmin) { navTo("2025"); return; }
-  let t = ["review", "hist", "members", "access"].includes(tab) ? tab : "review";
+  let t = ADMIN_TABS.includes(tab) ? tab : "review";
   if (t === "access" && !isSuperAdmin) t = "review"; // 접속 로그는 최고관리자 전용
   currentAdminTab = t;
   renderNav();
@@ -4277,8 +4280,9 @@ async function openAdminPage(tab) {
 // 탭 전환: 활성 표시 + 패널 노출 + 해당 목록 렌더
 function setAdminTab(tab) {
   currentAdminTab = tab;
-  document.querySelectorAll(".admin-tab").forEach((b) => b.classList.toggle("active", b.dataset.atab === tab));
-  ["review", "hist", "members", "access", "storage"].forEach((t) => { const el = document.getElementById("admin-" + t); if (el) el.hidden = t !== tab; });
+  // [data-atab] 로 좁힌다 — '내 정보' 모달 탭도 같은 .admin-tab 클래스를 쓰기 때문
+  document.querySelectorAll(".admin-tab[data-atab]").forEach((b) => b.classList.toggle("active", b.dataset.atab === tab));
+  ADMIN_TABS.forEach((t) => { const el = document.getElementById("admin-" + t); if (el) el.hidden = t !== tab; });
   if (tab === "review") renderReview();
   else if (tab === "hist") renderHistory();
   else if (tab === "members") renderMembers();
@@ -5433,7 +5437,8 @@ document.getElementById("reviewBtn").addEventListener("click", () => navTo("admi
 document.getElementById("histBtn").addEventListener("click", () => navTo("admin/hist"));
 document.getElementById("membersBtn").addEventListener("click", () => navTo("admin/members"));
 document.getElementById("adminBackBtn").addEventListener("click", () => navTo("2025"));
-document.querySelectorAll(".admin-tab").forEach((b) => b.addEventListener("click", () => navTo("admin/" + b.dataset.atab)));
+// [data-atab] 만 — '내 정보' 모달 탭(.mp-tabs)은 여기 걸리면 관리자 페이지로 튕겨나간다
+document.querySelectorAll(".admin-tab[data-atab]").forEach((b) => b.addEventListener("click", () => navTo("admin/" + b.dataset.atab)));
 
 // 승인 대기 목록
 document.getElementById("adminReviewBody").addEventListener("click", (e) => {
