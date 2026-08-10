@@ -1141,7 +1141,11 @@ function applyFilter(resetPage = true) {
     const cost = a.acquireCost || 0;
     if (cost < minCost || cost > maxCost) return false;
     if (!kw) return true;
-    const hay = [a.assetName, a.assetNumber, a.labelSticker, a.location, a.manager, a.dept, a.org, a.maker, a.model, a.spec].join(" ").toLowerCase();
+    // 검수자·소속·회차도 검색 대상 — '유현진' 으로 그 사람이 검수한 자산을 찾을 수 있다.
+    // ('✅ 검수 완료' 필터와 같이 쓰면 "누가 무엇을 검수했는지" 를 바로 추릴 수 있다)
+    const insps = Array.isArray(a.inspections) ? a.inspections : [];
+    const hay = [a.assetName, a.assetNumber, a.labelSticker, a.location, a.manager, a.dept, a.org, a.maker, a.model, a.spec,
+      ...insps.map((i) => `${i?.inspector || ""} ${i?.affiliation || ""} ${i?.period || ""}`)].join(" ").toLowerCase();
     if (hay.includes(kw)) return true;
     // 자산코드는 공백·하이픈·점을 무시하고도 검색되게 (예: "2026-0404 ..." 로 쳐도 매칭)
     const kwNorm = kw.replace(/[\s.\-]/g, "");
