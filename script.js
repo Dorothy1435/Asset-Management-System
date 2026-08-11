@@ -1523,7 +1523,10 @@ function openDetail(id) {
     `<dl class="detail-grid">` + rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") + `</dl>` +
     renderUserEditor(a) +
     renderInspectionLog(a);
-  document.getElementById("detailDownloadBtn").hidden = !a.imageUrl;
+  // imageUrl 이 비어도 imageUrls 에만 사진이 있는 경우가 있어 photosOf 기준으로 판단한다
+  const dlBtn = document.getElementById("detailDownloadBtn");
+  dlBtn.hidden = pics.length === 0;
+  dlBtn.textContent = pics.length > 1 ? `사진 ${pics.length}장 다운로드` : "사진 다운로드";
   document.getElementById("detailLabelBtn").hidden = !a.labelFile;
   document.getElementById("detailLabelDelBtn").hidden = !(isAdmin && a.labelFile);
   document.getElementById("detailInspectBtn").textContent = isAdmin ? "검수 확인" : "검수 요청";
@@ -1561,33 +1564,85 @@ function renderInspectionLog(a) {
   }
   return html + `</div>`;
 }
-function downloadPhoto() {
-  const a = findAsset(detailCurrentId);
-  if (!a || !a.imageUrl) return;
-  const safe = (s) => String(s || "").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
-  const link = document.createElement("a");
-  link.href = a.imageUrl;
-  link.download = `${safe(a.assetName) || "asset"}_${safe(a.assetNumber)}.jpg`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+// 파일 저장 공통 helper.
+// ※ 사진·라벨이 Storage URL(다른 도메인)로 바뀐 뒤로는 <a download> 가 통하지 않는다.
+//   브라우저는 교차 출처 주소에 download 속성을 무시하고 그냥 이미지를 열어버린다.
+//   그래서 내용을 blob 으로 받아서 저장한다. (base64 data:URL 이면 그대로도 동작)
+const safeName = (s, n = 60) => String(s || "").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, n);
+async function saveUrlAsFile(url, filename) {
+  if (!url) return false;
+  if (url.startsWith("data:")) {                      // 옛 base64 자료는 그대로 저장 가능
+    const l = document.createElement("a");
+    l.href = url; l.download = filename;
+    document.body.appendChild(l); l.click(); l.remove();
+    return true;
+  }
+  const res = await fetch(url, { mode: "cors" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const blob = await res.blob();
+  // 확장자가 없거나 실제 형식과 다르면 내려받은 내용 기준으로 맞춘다(webp를 .jpg로 저장하지 않도록)
+  const type = blob.type || "";
+  let name = filename;
+  const ext = type.includes("pdf") ? "pdf" : (type.split("/")[1] || "").split("+")[0];
+  if (ext && !new RegExp(`\\.${ext}$`, "i").test(name)) name = name.replace(/\.[a-z0-9]+$/i, "") + "." + ext;
+  const obj = URL.createObjectURL(blob);
+  const l = document.createElement("a");
+  l.href = obj; l.download = name;
+  document.body.appendChild(l); l.click(); l.remove();
+  setTimeout(() => URL.revokeObjectURL(obj), 5000);
+  return true;
 }
-function downloadLabelFile(id) {
+
+async function downloadPhoto() {
+  const a = findAsset(detailCurrentId);
+  if (!a) return;
+  const pics = photosOf(a);
+  if (!pics.length) { toast("등록된 사진이 없습니다.", "warn"); return; }
+  const btn = document.getElementById("detailDownloadBtn");
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "내려받는 중…"; }
+  const base = `${safeName(a.assetName, 40) || "asset"}_${safeName(a.assetNumber, 30)}`;
+  let ok = 0;
+  try {
+    for (let i = 0; i < pics.length; i++) {
+      const nm = pics.length > 1 ? `${base}_${i + 1}.jpg` : `${base}.jpg`;
+      try { await saveUrlAsFile(pics[i], nm); ok++; } catch (e) { console.warn("사진 저장 실패:", e); }
+      if (i < pics.length - 1) await new Promise((r) => setTimeout(r, 400)); // 연속 저장 차단 방지
+    }
+    if (!ok) throw new Error("모두 실패");
+    toast(ok > 1 ? `사진 ${ok}장을 저장했습니다.` : "사진을 저장했습니다.", "success");
+  } catch (e) {
+    console.error(e);
+    // 최후 수단: 새 탭으로 열어 길게 눌러 저장할 수 있게 안내
+    window.open(pics[0], "_blank", "noopener");
+    alert("사진을 바로 저장하지 못했습니다.\n새 탭에서 사진을 열었어요. 이미지를 길게 누르거나 우클릭해 저장해주세요.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+}
+
+async function downloadLabelFile(id) {
   const a = findAsset(id != null ? id : detailCurrentId);
   if (!a || !a.labelFile) return;
-  const safe = (s) => String(s || "").replace(/[\\/:*?"<>|]/g, "_").slice(0, 60);
-  let name = a.labelFileName || `${safe(a.assetName) || "asset"}_라벨`;
+  let name = a.labelFileName || `${safeName(a.assetName, 40) || "asset"}_라벨`;
   if (!/\.[a-z0-9]+$/i.test(name)) {
     const m = /^data:([^;]+)/.exec(a.labelFile);
     const ext = m && m[1] === "application/pdf" ? ".pdf" : m && m[1].startsWith("image/") ? "." + m[1].split("/")[1] : "";
     name += ext;
   }
-  const link = document.createElement("a");
-  link.href = a.labelFile;
-  link.download = safe(name);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  const btn = document.getElementById("detailLabelBtn");
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "내려받는 중…"; }
+  try {
+    await saveUrlAsFile(a.labelFile, safeName(name, 80));
+    toast("라벨 파일을 저장했습니다.", "success");
+  } catch (e) {
+    console.error(e);
+    window.open(a.labelFile, "_blank", "noopener");
+    alert("라벨 파일을 바로 저장하지 못했습니다.\n새 탭에서 열었어요. 거기서 저장해주세요.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
 }
 
 // 라벨 파일 삭제 (관리자) — 자산의 labelFile/labelFileName 을 비움
