@@ -722,6 +722,8 @@ body {
   color: #b91c1c;
   border-radius: 6px;
   font-size: 13px;
+  white-space: pre-line;   /* 여러 줄 안내를 줄바꿈 그대로 보여준다 */
+  line-height: 1.65;
 }
 .form-info {
   margin-top: 14px;
@@ -894,6 +896,16 @@ body {
   border: 1px solid var(--border);
 }
 .detail-photo img { max-width: 100%; max-height: 280px; object-fit: contain; cursor: zoom-in; }
+/* 사진 위 삭제 버튼 (관리자) */
+.detail-photo { position: relative; }
+.detail-photo-del {
+  position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; line-height: 1;
+  border: none; border-radius: 50%; background: rgba(17,24,39,0.62); color: #fff;
+  font-size: 13px; cursor: pointer; opacity: 0; transition: opacity 0.15s, background 0.15s;
+}
+.detail-photo:hover .detail-photo-del { opacity: 1; }
+.detail-photo-del:hover { background: #dc2626; }
+@media (hover: none) { .detail-photo-del { opacity: 1; } }   /* 터치 기기는 항상 보이게 */
 .detail-photo.no-photo {
   height: 120px;
   color: var(--text-light);
@@ -1423,6 +1435,10 @@ body.pending-approval .footer { display: none !important; }
 #pendingApproval { display: none; }
 .pending-icon { font-size: 56px; margin-bottom: 16px; }
 .pending-msg { color: var(--text-light); font-size: 14.5px; line-height: 1.6; margin-bottom: 28px; }
+.pending-hint { margin-top: 16px; font-size: 12.5px; color: var(--text-light); line-height: 1.6; }
+/* 가입 신청 취소는 되돌릴 수 없으므로 눈에 띄되 주 동작보다는 약하게 */
+.btn-cancel-signup { color: #b91c1c; border-color: #fecaca; }
+.btn-cancel-signup:hover { background: #fef2f2; border-color: #dc2626; }
 .landing-bg {
   position: absolute;
   inset: 0;

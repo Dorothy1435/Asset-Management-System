@@ -473,3 +473,45 @@ create or replace function public.is_admin() returns boolean
 language sql security definer stable set search_path = public as $$
   select exists(select 1 from public.profiles where id = auth.uid() and role in ('admin','superadmin'));
 $$;
+
+-- ============================================================================
+-- [회원 계정 정리] 2026-08-12
+-- 문제: 관리자가 회원을 삭제하면 profiles 행만 지워지고 '로그인 계정(auth.users)'은 남았다.
+--       그 사람은 ① 같은 아이디로 재가입 불가("이미 등록된 아이디") ② 회원 목록에도 안 보여
+--       관리자가 손쓸 수도 없는 상태가 된다.
+-- 아래 블록을 Supabase > SQL Editor 에 그대로 붙여넣고 한 번 실행하면 됩니다.
+-- ============================================================================
+
+-- 1) 지금 막혀 있는 사람 복구: 로그인 계정은 있는데 프로필이 없는 사용자를 되살린다.
+--    (가입 신청 상태로 들어오므로 '회원 관리'에서 승인/거절하면 된다)
+insert into public.profiles (id, email, username, name, affiliation)
+select u.id, u.email,
+       coalesce(nullif(u.raw_user_meta_data->>'username',''), split_part(u.email, '@', 1)),
+       coalesce(u.raw_user_meta_data->>'name', ''),
+       coalesce(u.raw_user_meta_data->>'affiliation', '')
+from auth.users u
+left join public.profiles p on p.id = u.id
+where p.id is null;
+
+-- 2) 앞으로 프로필이 없어져도 로그인하면 스스로 다시 만들어지도록 (본인 행만 추가 가능)
+drop policy if exists "profiles_insert_self" on public.profiles;
+create policy "profiles_insert_self" on public.profiles for insert to authenticated
+  with check (id = auth.uid());
+
+-- 3) 회원 삭제 · 가입 신청 취소 시 로그인 계정까지 지운다 → 같은 아이디로 재가입 가능.
+--    본인 계정이거나 최고관리자만 실행할 수 있고, 최고관리자 계정은 지울 수 없다.
+create or replace function public.delete_account(p_id uuid) returns void
+language plpgsql security definer set search_path = public, auth as $$
+begin
+  if p_id is null then raise exception '대상이 없습니다.'; end if;
+  if p_id <> auth.uid() and not public.is_superadmin() then
+    raise exception '본인 계정이거나 최고관리자만 삭제할 수 있습니다.';
+  end if;
+  if exists (select 1 from public.profiles where id = p_id and role = 'superadmin') then
+    raise exception '최고관리자 계정은 삭제할 수 없습니다.';
+  end if;
+  delete from public.profiles where id = p_id;
+  delete from auth.users where id = p_id;   -- profiles 는 on delete cascade 라 함께 정리된다
+end; $$;
+revoke all on function public.delete_account(uuid) from public, anon;
+grant execute on function public.delete_account(uuid) to authenticated;

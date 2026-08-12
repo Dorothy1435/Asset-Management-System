@@ -678,10 +678,31 @@ async function initAuth() {
     migrateOverlayMediaOnce();
   });
 }
+// 로그인 계정은 있는데 프로필이 없을 때 스스로 복구한다(가입 신청 상태로).
+// profiles 에 '본인 행 추가' 정책이 없으면 조용히 실패하고 기존과 동일하게 동작한다.
+async function ensureMyProfile() {
+  try {
+    const meta = currentUser.user_metadata || {};
+    const row = {
+      id: currentUser.id,
+      email: currentUser.email || "",
+      username: meta.username || (currentUser.email || "").split("@")[0],
+      name: meta.name || "",
+      affiliation: meta.affiliation || "",
+    };
+    const { data, error } = await sb.from("profiles").insert(row).select().maybeSingle();
+    if (error) { console.warn("프로필 복구 실패:", error.message); return null; }
+    return data;
+  } catch (e) { console.warn("프로필 복구 실패:", e?.message || e); return null; }
+}
+
 async function applySession(session) {
   currentUser = session?.user || null;
   if (currentUser) {
-    const { data } = await sb.from("profiles").select("*").eq("id", currentUser.id).maybeSingle();
+    let { data } = await sb.from("profiles").select("*").eq("id", currentUser.id).maybeSingle();
+    // 프로필이 없는 계정(관리자가 회원을 삭제했거나 가입 중간에 끊긴 경우) → 다시 만들어 준다.
+    // 이게 없으면 로그인 계정만 남아 재가입도 안 되고 회원 목록에도 안 보여 손쓸 수가 없다.
+    if (!data) data = await ensureMyProfile();
     myProfile = data || null;
     const email = (currentUser.email || "").toLowerCase();
     isSuperAdmin = myProfile?.role === "superadmin" || SUPER_ADMINS.map((e) => e.toLowerCase()).includes(email);
@@ -782,7 +803,10 @@ async function authSubmit() {
       if (!/^[a-zA-Z0-9._%+-]+$/.test(username)) {
         errEl.textContent = "아이디는 영문·숫자로 입력하세요. (예: hong123 → hong123@inje.ac.kr)"; errEl.hidden = false; return;
       }
-      const dupMsg = "이미 등록된 아이디입니다. 로그인하거나 ‘비밀번호를 잊으셨나요?’를 이용하세요.";
+      const dupMsg = "이미 등록된 아이디입니다.\n" +
+        "· 본인 아이디라면 로그인하세요. 비밀번호가 기억나지 않으면 ‘비밀번호를 잊으셨나요?’를 이용하세요.\n" +
+        "· 승인 대기 중이라면 로그인 후 ‘가입 신청 취소’로 지우고 다시 가입할 수 있습니다.\n" +
+        "· 그래도 안 되면 관리자에게 문의하세요. (☎ 3123 유현진)";
       const { data, error } = await sb.auth.signUp({
         email, password: pw,
         options: { data: { name, affiliation, username } },
@@ -1536,7 +1560,10 @@ function openDetail(id) {
   detailCurrentId = id;
   const pics = photosOf(a);
   const photo = pics.length
-    ? `<div class="detail-photos">${pics.map((src, i) => `<div class="detail-photo"><img src="${src}" alt="물품 사진 ${i + 1}" /></div>`).join("")}</div>`
+    ? `<div class="detail-photos">${pics.map((src, i) =>
+        `<div class="detail-photo"><img src="${src}" alt="물품 사진 ${i + 1}" />${
+          isAdmin ? `<button type="button" class="detail-photo-del" data-photo-del="${i}" title="이 사진 삭제">✕</button>` : ""
+        }</div>`).join("")}</div>`
     : `<div class="detail-photo no-photo">등록된 사진 없음</div>`;
   const labelImgSrc = isImageData(a.labelFile) ? a.labelFile : (a.labelPreview || "");
   const labelPhoto = labelImgSrc
@@ -4434,6 +4461,40 @@ async function addDetailPhotos(fileList) {
   await saveDetailPhotos(shots, imgs.length - use.length + (files.length - imgs.length));
 }
 
+// 상세에서 사진 한 장 삭제 (관리자)
+// 저장소 파일 자체는 지우지 않는다 — 같은 사진을 다른 자산이나 결재 이력이 함께 쓸 수 있기 때문.
+// 아무도 안 쓰게 되면 '관리자 > 저장공간 > 고아 파일 정리'가 안전하게 회수한다.
+async function deleteDetailPhoto(idx) {
+  if (!isAdmin) { alert("사진 삭제는 관리자만 할 수 있습니다."); return; }
+  const id = detailCurrentId;
+  const a = findAsset(id);
+  if (!a) return;
+  const pics = photosOf(a);
+  if (idx < 0 || idx >= pics.length) return;
+  if (!confirm(`이 사진을 삭제하시겠습니까? (${idx + 1}/${pics.length})\n\n${a.assetName}`)) return;
+  const rest = pics.filter((_, i) => i !== idx);
+  const fields = { imageUrls: rest, imageUrl: rest[0] || "" };
+  // 대표(첫) 사진이 바뀌면 목록 썸네일도 새 대표 사진으로 다시 만든다.
+  if (idx === 0) fields.thumbUrl = rest.length ? await makeThumbFrom(rest[0]) : "";
+  try {
+    await applyUpdate(id, fields, { note: `사진 삭제 (${idx + 1}/${pics.length})` });
+  } catch (e) { console.error(e); alert("사진 삭제에 실패했습니다.\n원인: " + (e?.message || e)); return; }
+  await reloadAll(); rerender(); openDetail(id);
+  toast("사진을 삭제했습니다.", "success");
+}
+// Storage URL 사진에서 목록용 썸네일을 새로 만든다. 실패하면 빈 값(목록은 원본으로 대체).
+async function makeThumbFrom(url) {
+  try {
+    if (!url) return "";
+    if (url.startsWith("data:")) return await uploadMedia(await resizeDataUrl(url, 240, 0.55), "thumbs");
+    const blob = await (await fetch(url, { mode: "cors" })).blob();
+    const dataUrl = await new Promise((res, rej) => {
+      const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob);
+    });
+    return await uploadMedia(await resizeDataUrl(dataUrl, 240, 0.55), "thumbs");
+  } catch (e) { console.warn("썸네일 재생성 실패:", e?.message || e); return ""; }
+}
+
 async function saveDetailPhotos(shots, skipped = 0) {
   const id = detailCurrentId;
   const a = findAsset(id);
@@ -5155,13 +5216,47 @@ async function deleteMember(id) {
   const m = members.find((x) => String(x.id) === String(id));
   if (!m) return;
   if (m.role === "superadmin") { alert("최고관리자 계정은 삭제할 수 없습니다."); return; }
-  if (!confirm(`${m.username || m.email} 님을 삭제하시겠습니까?\n\n해당 회원의 권한과 프로필이 제거됩니다.`)) return;
-  try {
-    const { error } = await sb.from("profiles").delete().eq("id", id);
-    if (error) throw error;
-  } catch (e) { console.error(e); alert("회원 삭제에 실패했습니다."); return; }
+  if (!confirm(`${m.username || m.email} 님을 삭제하시겠습니까?\n\n로그인 계정까지 함께 지워집니다. (같은 아이디로 다시 가입할 수 있습니다)`)) return;
+  const r = await deleteAccount(id);
+  if (!r.ok) { alert("회원 삭제에 실패했습니다.\n원인: " + r.msg); return; }
   await sbLoadMembers();
   renderMembers();
+  updateUI();
+  toast(r.full ? "회원을 삭제했습니다. 같은 아이디로 다시 가입할 수 있습니다."
+               : "프로필은 삭제했지만 로그인 계정은 남아 있습니다. (재가입 불가 — supabase_setup.sql 의 delete_account 함수를 실행해 주세요)", r.full ? "success" : "warn");
+}
+
+// 계정 삭제 공통. delete_account(SECURITY DEFINER) 로 로그인 계정까지 지운다.
+// 함수가 아직 없으면 프로필만 지우고 그 사실을 알린다(조용히 반쪽 삭제되지 않도록).
+async function deleteAccount(id) {
+  try {
+    const { error } = await sb.rpc("delete_account", { p_id: id });
+    if (!error) return { ok: true, full: true };
+    console.warn("delete_account 실패:", error.message);
+    const { error: e2 } = await sb.from("profiles").delete().eq("id", id);
+    if (e2) return { ok: false, msg: e2.message };
+    return { ok: true, full: false };
+  } catch (e) { return { ok: false, msg: e?.message || String(e) }; }
+}
+
+// 가입 신청 취소 (승인 대기 화면) — 본인 계정을 지우고 다시 가입할 수 있게 한다.
+async function cancelMySignup() {
+  if (!currentUser) return;
+  const who = myProfile?.username || (currentUser.email || "").split("@")[0];
+  if (!confirm(`가입 신청을 취소하고 계정을 삭제하시겠습니까?\n\n아이디: ${who}\n\n· 삭제 후 같은 아이디로 다시 가입할 수 있습니다.\n· 되돌릴 수 없습니다.`)) return;
+  const btn = document.getElementById("pendingCancelBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "취소하는 중…"; }
+  const r = await deleteAccount(currentUser.id);
+  if (!r.ok) {
+    if (btn) { btn.disabled = false; btn.textContent = "가입 신청 취소"; }
+    alert("신청 취소에 실패했습니다.\n원인: " + r.msg + "\n\n관리자에게 문의해 주세요. (☎ 3123 유현진)");
+    return;
+  }
+  try { await sb.auth.signOut(); } catch {}
+  alert(r.full
+    ? "가입 신청이 취소되었습니다.\n같은 아이디로 다시 가입하실 수 있습니다."
+    : "가입 신청이 취소되었습니다.\n다만 로그인 계정이 남아 있어 같은 아이디로는 다시 가입할 수 없습니다. 관리자에게 문의해 주세요. (☎ 3123 유현진)");
+  location.reload();
 }
 
 // ===== 건의 게시판 =====
@@ -5623,6 +5718,9 @@ document.getElementById("detailPhotoInput").addEventListener("change", async (e)
   await addDetailPhotos(files);
 });
 document.getElementById("detailBody").addEventListener("click", (e) => {
+  // 사진 삭제 버튼이 사진 위에 겹쳐 있으므로 확대(lightbox)보다 먼저 처리한다
+  const del = e.target.closest("button[data-photo-del]");
+  if (del) { e.stopPropagation(); deleteDetailPhoto(Number(del.dataset.photoDel)); return; }
   const thumb = e.target.closest(".insp-thumb");
   if (thumb) { openLightbox(thumb.src); return; }
   const img = e.target.closest(".detail-photo img");
@@ -5776,6 +5874,7 @@ document.getElementById("landingSignupBtn").addEventListener("click", () => open
 // 가입 승인 대기 화면
 document.getElementById("pendingRefreshBtn").addEventListener("click", () => location.reload());
 document.getElementById("pendingLogoutBtn").addEventListener("click", logout);
+document.getElementById("pendingCancelBtn").addEventListener("click", cancelMySignup);
 
 // 회원가입 동의 체크박스
 const CONSENT_TEXT = {
