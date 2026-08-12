@@ -828,6 +828,17 @@ body {
   background: #cffafe; color: #0e7490; font-size: 12px; font-weight: 700;
 }
 .insp-empty { color: var(--text-light); font-size: 13px; padding: 6px 0; }
+/* 자산 상세 > 변경 이력 */
+.dh-list { display: flex; flex-direction: column; }
+.dh-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.dh-row:last-child { border-bottom: none; }
+.dh-time { color: var(--text-light); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.dh-row .req-badge { flex-shrink: 0; }
+.dh-sum { flex: 1 1 200px; min-width: 0; color: var(--text); word-break: break-word; }
+.dh-who { color: var(--text-light); font-size: 12px; white-space: nowrap; }
 .insp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .insp-table th, .insp-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
 .insp-table th { background: #f8fafc; color: var(--text-light); font-weight: 600; }

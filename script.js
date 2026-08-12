@@ -369,12 +369,35 @@ function cleanFields(f) {
 }
 
 // ===== 데이터 로드 =====
+// [중요] 서버는 한 번에 최대 1000행만 준다. 그냥 조회하면 그 이상은 말없이 잘려서
+// 최근에 등록·수정·검수한 내용이 화면에서 통째로 사라진다(실제로 1004행에서 터졌다).
+// 그래서 끝까지 페이지를 넘겨가며 전부 읽는다.
+const PAGE = 1000;
 async function sbLoadOverlay() {
   if (!sb) return;
-  // kind='config'(양식 파일 포인터 등)는 자산이 아니므로 목록 로드에서 제외 → 모두의 로딩을 가볍게 유지
-  const { data, error } = await sb.from("assets").select("id, kind, data, updated_at").neq("kind", "config");
-  if (error) { console.error("오버레이 로드 오류:", error.message); return; }
-  overlay = data || [];
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    // kind='config'(양식 파일 포인터 등)는 자산이 아니므로 목록 로드에서 제외 → 모두의 로딩을 가볍게 유지
+    const { data, error } = await sb.from("assets").select("id, kind, data, updated_at")
+      .neq("kind", "config").order("id", { ascending: true }).range(from, from + PAGE - 1);
+    if (error) { console.error("오버레이 로드 오류:", error.message); if (!rows.length) return; break; }
+    if (!data || !data.length) break;
+    rows.push(...data);
+    if (data.length < PAGE) break;
+  }
+  overlay = rows;
+}
+// 1000행 상한에 걸리지 않게 끝까지 읽어오는 공통 helper (build: 조회식을 만들어 주는 함수)
+async function sbFetchAll(build, label) {
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build().range(from, from + PAGE - 1);
+    if (error) { console.error(label + " 로드 오류:", error.message); break; }
+    if (!data || !data.length) break;
+    rows.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return rows;
 }
 async function sbLoadRequests() {
   if (!sb || !isAdmin) { requests = []; return; }
@@ -396,9 +419,7 @@ async function sbLoadHistory() {
 }
 async function sbLoadMembers() {
   if (!sb || !isAdmin) { members = []; return; }
-  const { data, error } = await sb.from("profiles").select("*").order("created_at", { ascending: true });
-  if (error) { console.error("회원 로드 오류:", error.message); return; }
-  members = data || [];
+  members = await sbFetchAll(() => sb.from("profiles").select("*").order("created_at", { ascending: true }), "회원");
 }
 // ===== 접속 로그 (최고관리자 전용 조회) =====
 let accessLogs = [];
@@ -1522,7 +1543,9 @@ function openDetail(id) {
   document.getElementById("detailBody").innerHTML = photo + labelPhoto +
     `<dl class="detail-grid">` + rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(val(v))}</dd>`).join("") + `</dl>` +
     renderUserEditor(a) +
-    renderInspectionLog(a);
+    renderInspectionLog(a) +
+    `<div id="detailHistory"></div>`;
+  loadDetailHistory(a.id);   // 변경 이력은 열 때마다 그 자산 것만 따로 읽어온다
   // imageUrl 이 비어도 imageUrls 에만 사진이 있는 경우가 있어 photosOf 기준으로 판단한다
   const dlBtn = document.getElementById("detailDownloadBtn");
   dlBtn.hidden = pics.length === 0;
@@ -1543,6 +1566,47 @@ function openDetail(id) {
     : `현재 ${pics.length}/${MAX_PHOTOS}장 · 촬영하거나 앨범에서 골라 추가합니다`;
   show("detailOverlay");
 }
+// 자산별 변경 이력 — 언제 등록됐고 언제 무엇이 바뀌었는지.
+// (전자 자산의 '대여 → 반납' 처럼 값이 언제 바뀌었는지 확인하는 용도)
+// 검수는 위 '검수 기록'에 이미 나오므로 여기서는 뺀다.
+async function loadDetailHistory(assetId) {
+  const box = document.getElementById("detailHistory");
+  if (!box) return;
+  if (!currentUser) { box.innerHTML = ""; return; }   // 이력 조회는 로그인 사용자만
+  box.innerHTML = `<div class="insp-section"><h3 class="insp-title">변경 이력</h3><div class="insp-empty">불러오는 중…</div></div>`;
+  let rows = [];
+  try {
+    const { data, error } = await sb.from("history").select("*")
+      .eq("asset_id", String(assetId)).neq("action", "inspect")
+      .order("created_at", { ascending: false }).limit(100);
+    if (error) throw error;
+    rows = data || [];
+  } catch (e) {
+    console.warn("변경 이력 로드 실패:", e?.message || e);
+    box.innerHTML = "";
+    return;
+  }
+  if (String(detailCurrentId) !== String(assetId)) return;   // 그 사이 다른 자산을 열었으면 무시
+  if (!rows.length) {
+    box.innerHTML = `<div class="insp-section"><h3 class="insp-title">변경 이력</h3>
+      <div class="insp-empty">아직 변경 기록이 없습니다.</div></div>`;
+    return;
+  }
+  const actLabel = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림" };
+  const actCls = { create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert" };
+  box.innerHTML = `<div class="insp-section">
+      <h3 class="insp-title">변경 이력 <span class="insp-count">${rows.length}</span></h3>
+      <div class="dh-list">${rows.map((h) => {
+        const who = h.approved_by || h.requester || "";
+        return `<div class="dh-row">
+          <span class="dh-time" title="${esc(fmtSec(h.created_at))}">${fmtTime(h.created_at)}</span>
+          <span class="req-badge ${actCls[h.action] || "badge-gray"}">${actLabel[h.action] || h.action}</span>
+          <span class="dh-sum">${histSummary(h)}</span>
+          ${who ? `<span class="dh-who">${esc(who)}</span>` : ""}
+        </div>`;
+      }).join("")}</div></div>`;
+}
+
 // 검수 기록(로그) 렌더
 function renderInspectionLog(a) {
   const list = Array.isArray(a.inspections) ? a.inspections : [];
@@ -4753,7 +4817,9 @@ async function bulkRejectSelected() {
 
 // ===== 결재/변경 이력 (관리자) =====
 function shortVal(v) { v = v === "" || v === null || v === undefined ? "(없음)" : String(v); return v.length > 28 ? v.slice(0, 28) + "…" : v; }
-const HIST_LABELS = { assetName: "자산명", assetNumber: "자산코드", labelSticker: "라벨스티커", labelFile: "라벨 파일", status: "상태", location: "위치", manager: "사용자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", note: "비고", imageUrl: "사진" };
+// 이력에 표시할 필드. rentDate/returnDate 가 빠져 있어서 전자 자산을 '반납'으로 바꿔도
+// 이력에 '변경 없음'으로 나오던 문제가 있었다.
+const HIST_LABELS = { assetName: "자산명", assetNumber: "자산코드", labelSticker: "라벨스티커", labelFile: "라벨 파일", status: "상태", location: "위치", manager: "사용자", dept: "부서", model: "모델", spec: "규격", maker: "제작사", acquireCost: "취득금액", rentDate: "대여 일시", returnDate: "반납 일시", note: "비고", imageUrl: "사진" };
 function histSummary(h) {
   if (h.action === "inspect") return `🔍 ${esc(h.note || "검수 확인")}`;
   if (h.action === "delete") return `자산이 <b>삭제</b>되었습니다.`;
