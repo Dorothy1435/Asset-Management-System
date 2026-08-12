@@ -106,6 +106,7 @@
       <button class="btn btn-secondary" id="advToggle">상세 필터</button>
       <button class="btn btn-secondary" id="exportBtn">📥 엑셀 다운로드</button>
       <button class="btn btn-secondary" id="exportInspBtn" hidden>📋 재물조사 결과</button>
+      <button class="btn btn-secondary" id="changeLogBtn" hidden>📜 변경 이력</button>
       <button class="btn btn-inspect" id="scanInspectBtn">📷 검수</button>
       <button class="btn btn-inspect" id="batchInspectBtn">🏷️ 라벨 사진 등록</button>
       <button class="btn btn-inspect" id="pdfInspectBtn">📄 자산 등록 PDF 검수</button>
@@ -173,6 +174,7 @@
             <th class="sortable" data-key="status">상태 <span class="sort-arrow"></span></th>
             <th class="sortable" data-key="regDate">등재일 <span class="sort-arrow"></span></th>
             <th class="col-insp sortable" data-key="inspDate">검수일 <span class="sort-arrow"></span></th>
+            <th class="col-chg sortable" data-key="lastChange">최근 변경 <span class="sort-arrow"></span></th>
             <th>관리</th>
           </tr>
         </thead>
@@ -552,6 +554,23 @@
   </div>
 
   <!-- 내 정보 수정 모달 (본인) -->
+  <!-- 변경 이력 타임라인 (현재 메뉴의 자산들이 언제 무엇이 바뀌었는지 시간순으로) -->
+  <div class="modal-overlay" id="changeLogOverlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="changeLogTitle">변경 이력</h2>
+        <button class="modal-close" data-close>✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="changeLogSearch" class="hist-search" placeholder="자산명, 자산코드, 내용, 처리자로 검색..." autocomplete="off" />
+        <div id="changeLogBody"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close>닫기</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 카메라 촬영 (후면 카메라 고정) — 기기/브라우저가 capture 속성을 무시하고 셀카를 켜는 문제를 피하려고
        페이지 안에서 직접 카메라를 연다. 카메라를 못 열면 자동으로 파일 선택으로 넘어간다. -->
   <div class="modal-overlay" id="camOverlay" hidden>

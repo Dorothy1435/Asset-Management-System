@@ -640,6 +640,34 @@ body {
 .tag-inspected { background: #dbeafe; color: #1d4ed8; }
 .col-insp { white-space: nowrap; text-align: center; color: #64748b; }
 .asset-table.hide-insp .col-insp { display: none; }
+/* 최근 변경 열 (전자 메뉴에서 검수일 자리를 대신함) */
+.col-chg { white-space: nowrap; text-align: center; color: #64748b; }
+.asset-table.hide-chg .col-chg { display: none; }
+.cell-chg { font-size: 12px; line-height: 1.5; }
+.cell-chg .chg-sum { display: block; font-size: 11px; color: var(--text-light); max-width: 220px; margin: 1px auto 0; white-space: normal; }
+
+/* 변경 이력 타임라인 */
+.cl-day { margin-bottom: 14px; }
+.cl-date {
+  position: sticky; top: 0; background: #fff; z-index: 1;
+  font-size: 13px; font-weight: 700; color: var(--text);
+  padding: 6px 0; border-bottom: 2px solid var(--border);
+}
+.cl-cnt { font-weight: 400; font-size: 12px; color: var(--text-light); margin-left: 6px; }
+.cl-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; cursor: pointer;
+  padding: 8px 6px; margin: 0 -6px; border-bottom: 1px solid var(--border); font-size: 13px;
+  -webkit-tap-highlight-color: rgba(29,78,216,0.12);
+}
+.cl-row:last-child { border-bottom: none; }
+.cl-row:hover { background: #eff6ff; border-radius: 6px; }
+.cl-row:active { background: #dbeafe; }
+.cl-time { color: var(--text-light); font-size: 12px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.cl-row .req-badge { flex-shrink: 0; }
+.cl-name { font-weight: 700; color: var(--text); flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-row:hover .cl-name { color: var(--primary); text-decoration: underline; }
+.cl-sum { flex: 1 1 180px; min-width: 0; color: var(--text); word-break: break-word; }
+.cl-who { color: var(--text-light); font-size: 12px; white-space: nowrap; }
 #uninspBtn.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 #inspDoneBtn.active { background: #16a34a; border-color: #16a34a; color: #fff; }
 /* '목록표'를 고르면 재물조사 모드임이 바로 보이도록 강조 */
@@ -1937,7 +1965,7 @@ body { max-width: 100%; overflow-x: hidden; }
 /* 목록 검수일 셀의 검수자 이름 */
 .cell-insp .insp-by { display: inline-block; font-size: 11px; color: var(--text-light); margin-top: 1px; }
 /* 검수 시각(시:분) — 같은 날 검수가 몰릴 때 순서를 보기 위함 */
-.cell-insp .insp-hm { margin-left: 5px; font-size: 11px; color: var(--text-light); font-variant-numeric: tabular-nums; }
+.cell-insp .insp-hm, .cell-chg .insp-hm { margin-left: 5px; font-size: 11px; color: var(--text-light); font-variant-numeric: tabular-nums; }
 
 /* 접속 로그: 사용자 목록 → 상세 */
 .al-userlist { display: flex; flex-direction: column; gap: 8px; }

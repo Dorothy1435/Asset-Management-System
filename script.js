@@ -475,6 +475,10 @@ function rerender() {
   renderNav();
   if (currentPageName === "assets") {
     normalizeRound();   // 메뉴가 바뀌어 '목록표'를 못 쓰게 되면 회차로 되돌린 뒤 그린다
+    // '최근 변경' 열을 실제로 쓰는 메뉴(전자)에서만 미리 불러온다.
+    // 자산 수천 건짜리 메뉴까지 매번 훑으면 통신량만 낭비된다(📜 버튼을 누르면 그때 불러온다).
+    if (currentUser && currentGroup === GROUP_ELEC && changeLogGroup !== currentGroup)
+      loadChangeLog().then(() => { if (currentPageName === "assets" && currentGroup === GROUP_ELEC) render(); });
     initFilters();
     renderStats();
     updateUI();
@@ -563,7 +567,7 @@ async function loadData() {
     .catch(() => {
       baseAssets = [];
       document.getElementById("assetTbody").innerHTML =
-        `<tr><td colspan="10" style="padding:40px;text-align:center;color:#c2410c;">엑셀 데이터를 불러오지 못했습니다.</td></tr>`;
+        `<tr><td colspan="12" style="padding:40px;text-align:center;color:#c2410c;">엑셀 데이터를 불러오지 못했습니다.</td></tr>`;
     });
   await initAuth();
   await baseP;
@@ -1192,6 +1196,7 @@ function sortFiltered() {
     filtered.sort((a, b) => (t(a) - t(b)) * dir);
     return;
   }
+  if (key === "lastChange") { filtered.sort((a, b) => (changedAt(a) - changedAt(b)) * dir); return; }
   filtered.sort((a, b) => {
     let va = a[key] ?? "", vb = b[key] ?? "";
     const na = parseFloat(va), nb = parseFloat(vb);
@@ -1201,7 +1206,7 @@ function sortFiltered() {
   });
 }
 // 처음 누를 때의 정렬 방향. 검수일은 '방금 검수한 것'을 확인하려고 누르므로 최신순(내림차순)부터.
-const FIRST_SORT_DESC = new Set(["inspDate"]);
+const FIRST_SORT_DESC = new Set(["inspDate", "lastChange"]);
 function setSort(key) {
   if (sortState.key === key) sortState.dir *= -1;
   else sortState = { key, dir: FIRST_SORT_DESC.has(key) ? -1 : 1 };
@@ -1261,7 +1266,15 @@ function render() {
   const pending = pendingTargetSet();
   const showInsp = currentGroup !== GROUP_ELEC; // 검수는 2025년도 자산 전용 (전자 제외)
   const tableEl = document.querySelector(".asset-table");
-  if (tableEl) { tableEl.classList.toggle("hide-insp", !showInsp); tableEl.classList.toggle("hide-check", !isAdmin); }
+  // '최근 변경' 열은 검수를 안 쓰는 전자 메뉴에서 검수일 자리를 대신한다(로그인 사용자만).
+  const showChg = !showInsp && !!currentUser;
+  if (tableEl) {
+    tableEl.classList.toggle("hide-insp", !showInsp);
+    tableEl.classList.toggle("hide-chg", !showChg);
+    tableEl.classList.toggle("hide-check", !isAdmin);
+  }
+  const clBtn = document.getElementById("changeLogBtn");
+  if (clBtn) clBtn.hidden = !currentUser;
   const start = (currentPage - 1) * PER_PAGE;
   const pageItems = filtered.slice(start, start + PER_PAGE);
   tbody.innerHTML = pageItems.map((a) => {
@@ -1290,6 +1303,7 @@ function render() {
       <td data-label="상태">${statusBadge(a.status)}</td>
       <td data-label="등재일">${esc(val(a.regDate))}</td>
       <td class="col-insp cell-insp${li ? "" : " m-empty"}" data-label="검수일"${li ? ` title="${esc(fmtSec(li.checkedAt))}${li.inspector ? ` · ${li.inspector}` : ""}${li.affiliation ? ` (${li.affiliation})` : ""}${li.period ? ` · ${li.period}` : ""}"` : ""}>${inspDate}${inspBy ? `<br>${inspBy}` : ""}</td>
+      ${chgCell(a)}
       <td class="cell-actions">
         <button class="btn-mini btn-view" data-id="${esc(a.id)}">상세</button>
         <button class="btn-mini btn-edit" data-id="${esc(a.id)}">${isAdmin ? "수정" : "수정요청"}</button>
@@ -1566,6 +1580,99 @@ function openDetail(id) {
     : `현재 ${pics.length}/${MAX_PHOTOS}장 · 촬영하거나 앨범에서 골라 추가합니다`;
   show("detailOverlay");
 }
+// ===== 변경 이력: 목록의 '최근 변경' 열 + 📜 타임라인 =====
+// 전자 자산처럼 '언제 대여하고 언제 반납했는지'를 상세에 들어가지 않고 화면에서 바로 확인하기 위한 것.
+// 검수는 별도 열·기록이 있으므로 여기서는 제외한다.
+let changeLog = [];              // 현재 메뉴 자산들의 변경 이력(최신순)
+let lastChange = new Map();      // assetId → 가장 최근 변경 1건
+let changeLogGroup = null;       // 어느 메뉴 것을 담고 있는지
+
+// 현재 메뉴의 자산 이력을 읽어 온다. 로그인 사용자만 조회 가능(RLS).
+async function loadChangeLog(force) {
+  if (!sb || !currentUser) { changeLog = []; lastChange = new Map(); changeLogGroup = null; return; }
+  if (!force && changeLogGroup === currentGroup) return;
+  const g = currentGroup;                       // 조회를 시작한 시점의 메뉴
+  const ids = assets.filter((a) => groupOf(a) === g).map((a) => String(a.id));
+  if (!ids.length) { changeLog = []; lastChange = new Map(); changeLogGroup = g; return; }
+  const rows = [];
+  try {
+    // 자산이 많은 메뉴(2024·2025)는 id 목록이 길어지므로 나눠서 조회한다.
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data, error } = await sb.from("history")
+        .select("id,asset_id,asset_name,action,before_snap,after_snap,note,approved_by,requester,created_at")
+        .in("asset_id", ids.slice(i, i + 300)).neq("action", "inspect")
+        .order("created_at", { ascending: false }).limit(500);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (g !== currentGroup) return;           // 도중에 메뉴가 바뀌면 중단
+    }
+  } catch (e) { console.warn("변경 이력 로드 실패:", e?.message || e); return; }
+  // 느린 조회가 뒤늦게 끝나 다른 메뉴 데이터를 덮어쓰지 않도록 마지막에 한 번 더 확인한다.
+  if (g !== currentGroup) return;
+  rows.sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at));
+  changeLog = rows;
+  lastChange = new Map();
+  for (const h of rows) if (!lastChange.has(String(h.asset_id))) lastChange.set(String(h.asset_id), h);
+  changeLogGroup = g;
+}
+
+const changeWho = (h) => h.approved_by || h.requester || "";
+const CHG_LABEL = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림" };
+const changedAt = (a) => { const h = lastChange.get(String(a.id)); const t = h ? Date.parse(h.created_at) : NaN; return isNaN(t) ? 0 : t; };
+
+// 목록의 '최근 변경' 칸 — 마지막으로 무엇이 언제 바뀌었는지 한 줄로
+function chgCell(a) {
+  const h = lastChange.get(String(a.id));
+  if (!h) return `<td class="col-chg cell-chg m-empty" data-label="최근 변경">—</td>`;
+  const sum = stripTags(histSummary(h));
+  const who = changeWho(h);
+  const tip = `${fmtSec(h.created_at)} · ${CHG_LABEL[h.action] || h.action}${who ? ` · ${who}` : ""}\n${sum}`;
+  return `<td class="col-chg cell-chg" data-label="최근 변경" title="${esc(tip)}">
+      ${fmtDate(h.created_at)}<span class="insp-hm">${fmtHM(h.created_at)}</span>
+      <span class="chg-sum">${esc(sum.length > 34 ? sum.slice(0, 34) + "…" : sum)}</span>
+    </td>`;
+}
+
+function renderChangeLogModal() {
+  const body = document.getElementById("changeLogBody");
+  if (!body) return;
+  const kw = (document.getElementById("changeLogSearch").value || "").trim().toLowerCase();
+  let rows = changeLog;
+  if (kw) rows = rows.filter((h) =>
+    `${h.asset_name || ""} ${h.asset_id} ${stripTags(histSummary(h))} ${changeWho(h)}`.toLowerCase().includes(kw));
+  if (!rows.length) {
+    body.innerHTML = `<div class="empty-msg"><div class="empty-ic">📜</div>
+      <div class="empty-title">${kw ? "검색 결과가 없습니다" : "변경 기록이 없습니다"}</div>
+      <div class="empty-sub">${kw ? "다른 검색어로 시도해 보세요." : "자산을 등록·수정하면 여기에 시간순으로 쌓입니다."}</div></div>`;
+    return;
+  }
+  // 날짜별로 묶어서 보여준다
+  const byDay = new Map();
+  for (const h of rows) { const d = fmtDate(h.created_at); if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(h); }
+  body.innerHTML = [...byDay.entries()].map(([day, list]) => `
+    <div class="cl-day">
+      <div class="cl-date">${day} <span class="cl-cnt">${list.length}건</span></div>
+      ${list.map((h) => `
+        <div class="cl-row" data-cl-asset="${esc(h.asset_id)}" title="눌러서 이 자산 상세 보기">
+          <span class="cl-time">${fmtHM(h.created_at)}</span>
+          <span class="req-badge ${{ create: "req-create", update: "req-update", delete: "req-delete", revert: "req-revert" }[h.action] || "badge-gray"}">${CHG_LABEL[h.action] || h.action}</span>
+          <span class="cl-name">${esc(h.asset_name || h.asset_id)}</span>
+          <span class="cl-sum">${histSummary(h)}</span>
+          ${changeWho(h) ? `<span class="cl-who">${esc(changeWho(h))}</span>` : ""}
+        </div>`).join("")}
+    </div>`).join("");
+}
+
+async function openChangeLog() {
+  if (!currentUser) { alert("변경 이력은 로그인 후 볼 수 있습니다."); return; }
+  document.getElementById("changeLogTitle").textContent = `📜 ${groupLabel(currentGroup)} · 변경 이력`;
+  document.getElementById("changeLogSearch").value = "";
+  document.getElementById("changeLogBody").innerHTML = `<div class="empty-msg">불러오는 중…</div>`;
+  show("changeLogOverlay");
+  await loadChangeLog(true);
+  renderChangeLogModal();
+}
+
 // 자산별 변경 이력 — 언제 등록됐고 언제 무엇이 바뀌었는지.
 // (전자 자산의 '대여 → 반납' 처럼 값이 언제 바뀌었는지 확인하는 용도)
 // 검수는 위 '검수 기록'에 이미 나오므로 여기서는 뺀다.
@@ -5373,6 +5480,14 @@ document.getElementById("advReset").addEventListener("click", () => {
 document.querySelectorAll(".asset-table th.sortable").forEach((th) => th.addEventListener("click", () => setSort(th.dataset.key)));
 document.getElementById("exportBtn").addEventListener("click", exportExcel);
 document.getElementById("exportInspBtn").addEventListener("click", exportInspectionResult);
+document.getElementById("changeLogBtn").addEventListener("click", openChangeLog);
+document.getElementById("changeLogSearch").addEventListener("input", renderChangeLogModal);
+document.getElementById("changeLogBody").addEventListener("click", (e) => {
+  const row = e.target.closest("[data-cl-asset]");
+  if (!row) return;
+  hide("changeLogOverlay");
+  openAssetFromRecord(row.dataset.clAsset);
+});
 document.getElementById("uninspBtn").addEventListener("click", () => { inspView = inspView === "uninsp" ? "all" : "uninsp"; applyFilter(); });
 document.getElementById("inspDoneBtn").addEventListener("click", () => { inspView = inspView === "done" ? "all" : "done"; applyFilter(); });
 document.getElementById("inspRoundFilter").addEventListener("change", (e) => { inspRound = e.target.value; renderStats(); applyFilter(); });
