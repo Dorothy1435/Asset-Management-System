@@ -1271,6 +1271,8 @@ function render() {
   if (tableEl) {
     tableEl.classList.toggle("hide-insp", !showInsp);
     tableEl.classList.toggle("hide-chg", !showChg);
+    // '최근 변경'을 쓰는 화면에서는 등재일을 숨긴다 — 기록이 없으면 등재일을 그대로 보여주므로 중복이다
+    tableEl.classList.toggle("hide-reg", showChg);
     tableEl.classList.toggle("hide-check", !isAdmin);
   }
   const clBtn = document.getElementById("changeLogBtn");
@@ -1301,7 +1303,7 @@ function render() {
       <td data-label="사용자" class="${mE(a.manager).trim()}">${esc(val(a.manager))}</td>
       <td data-label="부서" class="${mE(a.dept).trim()}">${esc(val(a.dept))}</td>
       <td data-label="상태">${statusBadge(a.status)}</td>
-      <td data-label="등재일">${esc(val(a.regDate))}</td>
+      <td class="col-reg" data-label="등재일">${esc(val(a.regDate))}</td>
       <td class="col-insp cell-insp${li ? "" : " m-empty"}" data-label="검수일"${li ? ` title="${esc(fmtSec(li.checkedAt))}${li.inspector ? ` · ${li.inspector}` : ""}${li.affiliation ? ` (${li.affiliation})` : ""}${li.period ? ` · ${li.period}` : ""}"` : ""}>${inspDate}${inspBy ? `<br>${inspBy}` : ""}</td>
       ${chgCell(a)}
       <td class="cell-actions">
@@ -1618,19 +1620,27 @@ async function loadChangeLog(force) {
 
 const changeWho = (h) => h.approved_by || h.requester || "";
 const CHG_LABEL = { create: "등록", update: "수정", delete: "삭제", revert: "되돌림" };
-const changedAt = (a) => { const h = lastChange.get(String(a.id)); const t = h ? Date.parse(h.created_at) : NaN; return isNaN(t) ? 0 : t; };
+// 정렬용 시각. 기록이 없으면 화면에 보이는 값(등재일)과 같은 기준으로 줄을 세운다.
+const changedAt = (a) => {
+  const h = lastChange.get(String(a.id));
+  const t = h ? Date.parse(h.created_at) : Date.parse(a.regDate || FALLBACK_REG_DATE);
+  return isNaN(t) ? 0 : t;
+};
 
-// 목록의 '최근 변경' 칸 — 마지막으로 무엇이 언제 바뀌었는지 한 줄로
+// 목록의 '최근 변경' 칸 — 화면이 복잡해지지 않게 날짜만 보여준다.
+// 자세한 내용(시각·바뀐 값·처리자)은 마우스를 올리면 나오고, 전체는 📜 변경 이력에서 본다.
+// 변경 기록이 없는 자산은 그 자산의 등재일로 채운다(전자 자산은 전부 2026-06-30).
+const FALLBACK_REG_DATE = "2026-06-30";
 function chgCell(a) {
   const h = lastChange.get(String(a.id));
-  if (!h) return `<td class="col-chg cell-chg m-empty" data-label="최근 변경">—</td>`;
+  if (!h) {
+    const d = a.regDate || FALLBACK_REG_DATE;
+    return `<td class="col-chg cell-chg" data-label="최근 변경" title="변경 기록 없음 · 등재일 기준">${esc(d)}</td>`;
+  }
   const sum = stripTags(histSummary(h));
   const who = changeWho(h);
   const tip = `${fmtSec(h.created_at)} · ${CHG_LABEL[h.action] || h.action}${who ? ` · ${who}` : ""}\n${sum}`;
-  return `<td class="col-chg cell-chg" data-label="최근 변경" title="${esc(tip)}">
-      ${fmtDate(h.created_at)}<span class="insp-hm">${fmtHM(h.created_at)}</span>
-      <span class="chg-sum">${esc(sum.length > 34 ? sum.slice(0, 34) + "…" : sum)}</span>
-    </td>`;
+  return `<td class="col-chg cell-chg" data-label="최근 변경" title="${esc(tip)}">${fmtDate(h.created_at)}</td>`;
 }
 
 function renderChangeLogModal() {

@@ -643,8 +643,8 @@ body {
 /* 최근 변경 열 (전자 메뉴에서 검수일 자리를 대신함) */
 .col-chg { white-space: nowrap; text-align: center; color: #64748b; }
 .asset-table.hide-chg .col-chg { display: none; }
-.cell-chg { font-size: 12px; line-height: 1.5; }
-.cell-chg .chg-sum { display: block; font-size: 11px; color: var(--text-light); max-width: 220px; margin: 1px auto 0; white-space: normal; }
+.cell-chg { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.asset-table.hide-reg .col-reg { display: none; }
 
 /* 변경 이력 타임라인 */
 .cl-day { margin-bottom: 14px; }
