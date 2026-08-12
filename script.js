@@ -5088,7 +5088,8 @@ function renderMembers() {
           let approveBtns = "";
           if (!isSelf && !isSuper && !isAdminRole) {
             if (status !== "approved") approveBtns += `<button class="btn-mini btn-view" data-setstatus="approved" data-id="${esc(m.id)}">승인</button> `;
-            if (status === "pending") approveBtns += `<button class="btn-mini btn-del" data-setstatus="rejected" data-id="${esc(m.id)}">거절</button> `;
+            // 거절 = 계정 삭제(재가입 가능). 예전에 '거절' 상태로 남아 있는 행도 정리할 수 있게 승인 전이면 항상 보인다.
+            if (status !== "approved") approveBtns += `<button class="btn-mini btn-del" data-setstatus="rejected" data-id="${esc(m.id)}" title="로그인 계정까지 삭제 — 같은 아이디로 다시 가입 가능">거절</button> `;
             if (status === "approved") approveBtns += `<button class="btn-mini btn-edit" data-setstatus="pending" data-id="${esc(m.id)}">승인취소</button> `;
           }
           // 관리자 승격: 일반 관리자는 '요청', 최고관리자는 즉시 지정 또는 요청 승인/거절 (승인된 일반 사용자만)
@@ -5187,8 +5188,21 @@ async function setMemberStatus(id, status) {
   if (!m) return;
   // 다른 관리자·최고관리자 계정은 최고관리자만 건드릴 수 있다.
   if ((m.role === "admin" || m.role === "superadmin") && !isSuperAdmin) { alert("다른 관리자 계정은 최고관리자만 변경할 수 있습니다."); return; }
-  const label = { approved: "승인", rejected: "거절", pending: "승인취소" }[status] || status;
-  if (!confirm(`${m.name || m.username || m.email} 님을 ${label}하시겠습니까?`)) return;
+  const who = m.name || m.username || m.email;
+  // '거절'은 계정을 아예 없앤다 — 상태만 바꿔 두면 로그인 계정이 남아 같은 아이디로 다시 가입할 수 없다.
+  // (승인을 잠깐 거두고 싶을 때는 '승인취소'를 쓰면 된다)
+  if (status === "rejected") {
+    if (!confirm(`${who} 님의 가입 신청을 거절하시겠습니까?\n\n· 아이디: ${m.username || m.email}\n· 로그인 계정까지 삭제되어 목록에서 사라집니다.\n· 같은 아이디로 다시 가입할 수 있습니다.\n· 되돌릴 수 없습니다.`)) return;
+    const r = await deleteAccount(id);
+    if (!r.ok) { alert("거절 처리에 실패했습니다.\n원인: " + r.msg); return; }
+    await sbLoadMembers(); renderMembers(); updateUI();
+    toast(r.full ? `${who} 님의 가입 신청을 거절했습니다. 같은 아이디로 다시 가입할 수 있습니다.`
+                 : `프로필은 지웠지만 로그인 계정이 남아 같은 아이디로는 재가입할 수 없습니다. 최고관리자에게 문의하세요.`,
+      r.full ? "success" : "warn");
+    return;
+  }
+  const label = { approved: "승인", pending: "승인취소" }[status] || status;
+  if (!confirm(`${who} 님을 ${label}하시겠습니까?`)) return;
   try {
     const { error } = await sb.from("profiles").update({ status }).eq("id", id);
     if (error) throw error;

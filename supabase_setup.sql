@@ -515,3 +515,38 @@ begin
 end; $$;
 revoke all on function public.delete_account(uuid) from public, anon;
 grant execute on function public.delete_account(uuid) to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- [보완] 2026-08-12 : '거절'도 계정을 지워 같은 아이디로 재가입할 수 있게 한다.
+-- 앞의 delete_account 는 최고관리자만 쓸 수 있어서, 일반 관리자가 가입 신청을
+-- 거절할 수 없었다. 일반 사용자 계정은 관리자도 지울 수 있도록 완화한다.
+-- (관리자 계정은 여전히 최고관리자만, 최고관리자 계정은 아무도 못 지운다)
+-- 이 블록만 다시 붙여넣어 실행하면 됩니다.
+-- ----------------------------------------------------------------------------
+create or replace function public.delete_account(p_id uuid) returns void
+language plpgsql security definer set search_path = public, auth as $$
+declare target_role text;
+begin
+  if p_id is null then raise exception '대상이 없습니다.'; end if;
+  select role into target_role from public.profiles where id = p_id;
+
+  if target_role = 'superadmin' then
+    raise exception '최고관리자 계정은 삭제할 수 없습니다.';
+  end if;
+
+  -- 본인 계정(가입 신청 취소)은 언제든 가능
+  if p_id <> auth.uid() then
+    if target_role = 'admin' then
+      if not public.is_superadmin() then
+        raise exception '관리자 계정은 최고관리자만 삭제할 수 있습니다.';
+      end if;
+    elsif not public.is_admin() then
+      raise exception '관리자만 다른 회원을 삭제할 수 있습니다.';
+    end if;
+  end if;
+
+  delete from public.profiles where id = p_id;
+  delete from auth.users where id = p_id;   -- profiles 는 on delete cascade
+end; $$;
+revoke all on function public.delete_account(uuid) from public, anon;
+grant execute on function public.delete_account(uuid) to authenticated;
