@@ -1094,6 +1094,9 @@ body {
   border: none; border-radius: 50%; background: rgba(17,24,39,0.75); color: #fff; font-size: 11px; cursor: pointer;
 }
 .cam-footer { flex-wrap: wrap; }
+/* 일괄 되돌리기 선택 상자 */
+.hist-check { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; accent-color: var(--primary); }
+.hist-check-blank { width: 16px; flex-shrink: 0; }
 .hist-time { color: var(--text-light); font-size: 12px; white-space: nowrap; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .hist-row .req-badge { flex-shrink: 0; }
 .hist-asset { font-weight: 700; color: var(--text); white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }

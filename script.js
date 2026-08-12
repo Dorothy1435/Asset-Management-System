@@ -5037,8 +5037,13 @@ function renderHistory() {
     // 자산 데이터(특히 2024년분)는 뒤늦게 로드되므로, 여기서 미리 걸러내지 않고 항상 누를 수 있게 둔다.
     // 실제로 못 찾는 경우(삭제됨·로딩중)는 누른 시점에 안내한다.
     const tip = stripTags(`${h.asset_name || h.asset_id} · ${summary}${who ? " · " + who : ""}`) + " — 눌러서 물품 상세 보기";
+    // 되돌릴 수 있는 기록만 선택 상자를 둔다(검수 기록·남의 기록 제외)
+    const pick = canRevert
+      ? `<input type="checkbox" class="hist-check" data-histpick="${h.id}" ${histPicked.has(String(h.id)) ? "checked" : ""} title="일괄 되돌리기 선택" />`
+      : `<span class="hist-check-blank"></span>`;
     return `
       <div class="hist-row hist-openable" data-hist-asset="${esc(h.asset_id)}" title="${esc(tip)}">
+        ${pick}
         <span class="hist-time">${fmtTime(h.created_at)}</span>
         <span class="req-badge ${actCls[h.action] || "badge-gray"}">${actLabel[h.action] || h.action}</span>
         <span class="hist-asset">${esc(h.asset_name || h.asset_id)}</span>
@@ -5047,6 +5052,60 @@ function renderHistory() {
         ${actions}
       </div>`;
   }).join("") + `</div>`;
+  histVisibleRevertable = rows.filter((h) => h.action !== "inspect" && canManageHist(h)).map((h) => String(h.id));
+  syncHistBulk();
+}
+
+// ===== 결재 내역 일괄 되돌리기 =====
+let histPicked = new Set();          // 선택된 이력 id
+let histVisibleRevertable = [];      // 현재 화면에서 되돌릴 수 있는 이력 id
+function syncHistBulk() {
+  const bar = document.getElementById("histBulkBar");
+  if (!bar) return;
+  // 화면에서 사라진 항목은 선택에서 뺀다(검색어를 바꿨을 때)
+  const vis = new Set(histVisibleRevertable);
+  [...histPicked].forEach((id) => { if (!vis.has(id)) histPicked.delete(id); });
+  bar.hidden = histVisibleRevertable.length === 0;
+  document.getElementById("histBulkCount").textContent = histPicked.size;
+  const btn = document.getElementById("histBulkRevertBtn");
+  if (btn) btn.disabled = histPicked.size === 0;
+}
+
+async function bulkRevertHistory() {
+  if (!isAdmin) { alert("되돌리기는 관리자만 할 수 있습니다."); return; }
+  const picked = history.filter((h) => histPicked.has(String(h.id)) && h.action !== "inspect" && canManageHist(h));
+  if (!picked.length) return;
+  // 같은 자산이 여러 건 선택되면 '가장 오래된 변경 직전'으로 한 번에 되돌린다.
+  // (하나씩 순서대로 되돌리면 서로 덮어써서 엉뚱한 상태가 된다)
+  const byAsset = new Map();
+  for (const h of picked) {
+    const k = String(h.asset_id);
+    const cur = byAsset.get(k);
+    if (!cur || Date.parse(h.created_at) < Date.parse(cur.created_at)) byAsset.set(k, h);
+  }
+  const targets = [...byAsset.values()];
+  const dupNote = targets.length < picked.length
+    ? `\n· 같은 자산이 여러 건 선택된 경우 가장 오래된 변경 직전 상태로 한 번에 되돌립니다.` : "";
+  if (!confirm(`선택한 ${picked.length}건을 이전 상태로 되돌립니다. (자산 ${targets.length}개)${dupNote}\n\n되돌린 내역도 이력에 남습니다.\n\n계속할까요?`)) return;
+
+  const btn = document.getElementById("histBulkRevertBtn");
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "되돌리는 중…";
+  let ok = 0; const fails = [];
+  for (const h of targets) {
+    try {
+      const beforeNow = snapshotOf(findAsset(h.asset_id));
+      await applyState(h.asset_id, h.before_snap);
+      await logHistory({ asset_id: h.asset_id, asset_name: h.asset_name, action: "revert",
+        before: beforeNow, after: h.before_snap, note: "이전 상태로 되돌림 (일괄)" });
+      ok++;
+    } catch (e) { console.error(e); fails.push(h.asset_name || h.asset_id); }
+  }
+  histPicked.clear();
+  btn.textContent = label;
+  await reloadAll(); rerender(); renderHistory();
+  if (fails.length) alert(`${ok}건 되돌렸습니다.\n실패 ${fails.length}건: ${fails.slice(0, 5).join(", ")}${fails.length > 5 ? " 외" : ""}`);
+  else toast(`${ok}건을 이전 상태로 되돌렸습니다.`, "success");
 }
 
 // ===== 회원 관리 (관리자) =====
@@ -5987,6 +6046,14 @@ document.getElementById("adminAccessBody").addEventListener("click", (e) => {
   if (e.target.closest("[data-al-back]")) { _accessLogUser = null; renderAccessLog(); }
 });
 document.getElementById("adminHistBody").addEventListener("click", (e) => {
+  const pick = e.target.closest("input[data-histpick]");
+  if (pick) {                                  // 선택 상자는 상세 열기와 겹치지 않게 먼저 처리
+    e.stopPropagation();
+    const id = String(pick.dataset.histpick);
+    if (pick.checked) histPicked.add(id); else histPicked.delete(id);
+    syncHistBulk();
+    return;
+  }
   const rv = e.target.closest("button[data-revert]");
   const dl = e.target.closest("button[data-delhist]");
   if (rv) { revertHistory(rv.dataset.revert); return; }
@@ -5995,6 +6062,12 @@ document.getElementById("adminHistBody").addEventListener("click", (e) => {
   const row = e.target.closest("[data-hist-asset]");
   if (row) openAssetFromRecord(row.dataset.histAsset);
 });
+document.getElementById("histSelectAll").addEventListener("click", () => {
+  histVisibleRevertable.forEach((id) => histPicked.add(id));
+  renderHistory();
+});
+document.getElementById("histClearSel").addEventListener("click", () => { histPicked.clear(); renderHistory(); });
+document.getElementById("histBulkRevertBtn").addEventListener("click", bulkRevertHistory);
 // 회원 관리
 document.getElementById("adminMembersBody").addEventListener("click", (e) => {
   const statusBtn = e.target.closest("button[data-setstatus]");

@@ -222,6 +222,12 @@
      </div>
      <div class="admin-panel" id="admin-hist" hidden>
        <input type="text" id="adminHistSearch" class="hist-search" placeholder="자산명 또는 자산코드로 검색..." autocomplete="off" />
+       <div class="bulk-bar" id="histBulkBar" hidden>
+         <span class="bulk-count"><b id="histBulkCount">0</b>건 선택됨</span>
+         <button class="btn btn-secondary btn-sm" id="histSelectAll">되돌릴 수 있는 항목 전체 선택</button>
+         <button class="btn btn-secondary btn-sm" id="histClearSel">선택 해제</button>
+         <button class="btn btn-primary btn-sm" id="histBulkRevertBtn">↩ 선택 항목 일괄 되돌리기</button>
+       </div>
        <div id="adminHistBody"></div>
      </div>
      <div class="admin-panel" id="admin-members" hidden>
