@@ -552,7 +552,7 @@ function renderNav() {
 async function loadData() {
   // 베이스 자산(읽기 전용)은 3개 파일에서 합쳐 읽는다.
   //  · assets.json        : 2025년도 자산(메인)
-  //  · assets2025add.json : 2025년도 자산에 추가 병합분(6.30 기준, 중복 자산코드 제외됨)
+  //  · assets2025add.json : 2025년도 자산에 추가 병합분(6.30 · 08.13 기준, 중복 자산코드 제외됨)
   //  · assets2024.json    : 2024년도 자산 메뉴 (assetGroup=GROUP_PAST 태깅됨)
   const fetchJson = (url) => fetch(url).then((r) => (r.ok ? r.json() : [])).catch(() => []);
   // 첫 화면을 빨리 띄우려고 '기본(2025)' 데이터만 먼저 로드. 2024 자산(2천여 건)은 뒤에서 이어 로드.
