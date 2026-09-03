@@ -1,22 +1,32 @@
 // 재물조사 목록표 원본에 '정상(T열)' O 표시만 찍어 저장한다.
 //
 //   node build-inspection-mark.js
+//   node build-inspection-mark.js --rooms E116,F307,F308        (그 방의 자산은 검수 기록과 무관하게 O)
+//   node build-inspection-mark.js --in 표시본.xlsx --out 새파일.xlsx   (이미 찍힌 O 위에 덧찍기)
 //
 // 원본 xlsx의 서식·머리글·열너비·이미지·메모를 하나도 건드리지 않는다.
 // zip 안의 시트 XML만 스트리밍으로 훑으면서, 자산관리번호(B열)가 '검수 완료'인 행의
 // T열 빈 셀에만 O 를 넣는다. 나머지 파일들은 압축된 원본 바이트를 그대로 복사한다.
+// O 를 지우는 일은 없다 — 표시본을 --in 으로 넣으면 기존 표시는 그대로 남는다.
 //
 // 왜 이렇게 하나: 이 파일은 엑셀이 빈 셀까지 100만 행 저장해 두어 시트 XML이 600MB가 넘는다.
 // 일반 엑셀 라이브러리로 열었다 다시 저장하면 서식이 깨지거나 아예 열리지 않는다.
 //
 // '검수 완료' 판정 = 그 자산에 '목록표' 또는 '1회차' 검수 기록이 있는 경우(앱과 동일한 연동 규칙).
+// 이 스크립트는 엑셀만 만든다. 웹페이지(Supabase)에는 아무것도 쓰지 않는다.
 
 const fs = require("fs");
 const zlib = require("zlib");
 const path = require("path");
 
-const SRC = "2026년 산학협력단 재물조사 목록표(글로컬대학사업본부).xlsx";
-const OUT = "2026년 산학협력단 재물조사 목록표(글로컬대학사업본부)_검수표시.xlsx";
+// ===== 실행 옵션 =====
+const argv = process.argv.slice(2);
+const opt = (name, def) => { const i = argv.indexOf("--" + name); return i >= 0 && argv[i + 1] ? argv[i + 1] : def; };
+const SRC = opt("in", "2026년 산학협력단 재물조사 목록표(글로컬대학사업본부).xlsx");
+const OUT = opt("out", "2026년 산학협력단 재물조사 목록표(글로컬대학사업본부)_검수표시.xlsx");
+// --rooms 로 준 호실은 검수 기록과 상관없이 O. (현장에서 방 단위로 다 확인한 경우)
+const ROOMS = opt("rooms", "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+const LOC_HEADER = "보관(설치)장소";
 const SHEET = "xl/worksheets/sheet1.xml";
 const MARK_COL = "T";          // 정상
 const MARK = "O";
@@ -94,37 +104,49 @@ function readEntryText(file, ent) {
   if (!sheetEnt) throw new Error("시트를 찾을 수 없습니다: " + SHEET);
 
   // ---- 1) 검수 완료 자산번호 집합 만들기 (웹페이지 DB) ----
-  if (!process.env.ASSET_ID || !process.env.ASSET_PW)
-    throw new Error("계정 정보가 없습니다.\n  ASSET_ID=아이디 ASSET_PW=비밀번호 node build-inspection-mark.js");
-  const lr = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
-    method: "POST", headers: { apikey: SB_KEY, "Content-Type": "application/json" }, body: JSON.stringify(LOGIN) });
-  const auth = await lr.json();
-  if (!lr.ok) throw new Error("로그인 실패: " + JSON.stringify(auth).slice(0, 200));
-  const H = { apikey: SB_KEY, Authorization: "Bearer " + auth.access_token };
-  const overlay = [];
-  for (let from = 0; ; ) {
-    const r = await fetch(`${SB_URL}/rest/v1/assets?select=id,kind,data`, { headers: { ...H, Range: `${from}-${from + 999}` } });
-    const j = await r.json();
-    if (!Array.isArray(j)) throw new Error("자산 조회 실패");
-    if (!j.length) break;
-    overlay.push(...j); from += j.length;
-    if (j.length < 1000) break;
-  }
+  // 검수 기록은 로그인해야 읽는다. 계정이 없으면 DB 부분만 건너뛰고 --rooms 표시만 찍는다.
+  // (--in 으로 기존 표시본을 넣으면 그때까지 찍힌 O 는 그대로 유지된다.)
+  const useDb = !!(process.env.ASSET_ID && process.env.ASSET_PW);
   const inspectedIds = new Set();
-  for (const row of overlay) {
-    if (row.kind === "deleted") continue;
-    const l = (row.data && row.data.inspections) || [];
-    if (l.some((i) => i && ROUNDS_OK.includes(i.period))) inspectedIds.add(String(row.id));
-  }
-  // 자산번호 → id
   const numToId = new Map();
-  for (const f of ["assets.json", "assets2025add.json", "assets2024.json"])
-    for (const a of JSON.parse(fs.readFileSync(f, "utf8"))) {
-      const n = norm(a.assetNumber);
-      if (n && !numToId.has(n)) numToId.set(n, String(a.id));
+  if (useDb) {
+    const lr = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST", headers: { apikey: SB_KEY, "Content-Type": "application/json" }, body: JSON.stringify(LOGIN) });
+    const auth = await lr.json();
+    if (!lr.ok) throw new Error("로그인 실패: " + JSON.stringify(auth).slice(0, 200));
+    const H = { apikey: SB_KEY, Authorization: "Bearer " + auth.access_token };
+    const overlay = [];
+    for (let from = 0; ; ) {
+      const r = await fetch(`${SB_URL}/rest/v1/assets?select=id,kind,data`, { headers: { ...H, Range: `${from}-${from + 999}` } });
+      const j = await r.json();
+      if (!Array.isArray(j)) throw new Error("자산 조회 실패");
+      if (!j.length) break;
+      overlay.push(...j); from += j.length;
+      if (j.length < 1000) break;
     }
+    for (const row of overlay) {
+      if (row.kind === "deleted") continue;
+      const l = (row.data && row.data.inspections) || [];
+      if (l.some((i) => i && ROUNDS_OK.includes(i.period))) inspectedIds.add(String(row.id));
+    }
+    // 자산번호 → id
+    for (const f of ["assets.json", "assets2025add.json", "assets2024.json"])
+      for (const a of JSON.parse(fs.readFileSync(f, "utf8"))) {
+        const n = norm(a.assetNumber);
+        if (n && !numToId.has(n)) numToId.set(n, String(a.id));
+      }
+    console.log(`검수 기록 보유 자산 ${inspectedIds.size}건 확인`);
+  } else {
+    if (!ROOMS.length)
+      throw new Error("계정 정보도 --rooms 도 없습니다. 찍을 기준이 없습니다.\n  ASSET_ID=아이디 ASSET_PW=비밀번호 node build-inspection-mark.js");
+    console.log("계정 정보 없음 → 웹페이지 검수 기록은 건너뜁니다(입력 파일에 이미 찍힌 O 는 유지).");
+  }
   const isDone = (assetNo) => { const id = numToId.get(norm(assetNo)); return !!id && inspectedIds.has(id); };
-  console.log(`검수 기록 보유 자산 ${inspectedIds.size}건 확인`);
+  if (ROOMS.length) console.log(`호실 지정: ${ROOMS.join(", ")} → 검수 기록과 무관하게 O`);
+  // 호실 판정: "성산관(F동)/의생명공학대학 교학과 사무실/F307, F308" 처럼 한 셀에 여러 방이 들어있다.
+  // 'E116'이 'E1160'에 걸리지 않도록 앞뒤가 영숫자가 아닌 자리에서만 인정한다.
+  const roomRes = ROOMS.map((r) => new RegExp(`(^|[^0-9A-Z])${r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^0-9A-Z]|$)`));
+  const inRoom = (loc) => { const s = String(loc || "").toUpperCase(); return roomRes.some((re) => re.test(s)); };
 
   // ---- 2) 공유 문자열 (B열 자산번호를 읽기 위해) ----
   const ssEnt = entries.find((e) => e.name === "xl/sharedStrings.xml");
@@ -153,7 +175,8 @@ function readEntryText(file, ent) {
   // 압축이 밀리면(false) 원본 읽기를 잠시 멈춰 메모리가 부풀지 않게 한다.
   const write = (buf) => { crc = crc32(buf, crc); rawSize += buf.length; if (!deflate.write(buf)) backpressure = true; };
 
-  let marked = 0, dataRows = 0, notFound = [];
+  let marked = 0, dataRows = 0, notFound = [], hitDb = 0, hitRoom = 0, targets = 0;
+  let locCol = "R", locFound = false;  // 보관(설치)장소. 머리글에서 실제 위치를 찾아 덮어쓴다.
   const LAST_SCAN_ROW = 1200;          // 데이터는 9행부터 700행 안쪽. 넉넉히 잡고 이후는 원본 그대로 통과.
   let pending = Buffer.alloc(0), passthrough = false;
 
@@ -162,10 +185,27 @@ function readEntryText(file, ent) {
     const rn = Number((/<row r="(\d+)"/.exec(s) || [])[1] || 0);
     if (!rn || rn > LAST_SCAN_ROW) return buf;
     const assetNo = cellText(s, "B", rn);
-    if (!assetNo || !/^[0-9A-Za-z]/.test(assetNo)) return buf;   // 머리글·빈 행
+    if (!assetNo || !/^[0-9A-Za-z]/.test(assetNo)) {
+      // 머리글 행이면 장소 열이 몇 번째인지 여기서 확인해 둔다(양식이 바뀌어도 따라간다).
+      if (ROOMS.length && !locFound) {
+        for (const m of s.matchAll(/<c r="([A-Z]+)\d+"/g)) {
+          if (cellText(s, m[1], rn).replace(/\s/g, "") === LOC_HEADER) {
+            locCol = m[1]; locFound = true;
+            console.log(`장소 열: ${locCol} (머리글 ${rn}행)`);
+            break;
+          }
+        }
+      }
+      return buf;   // 머리글·빈 행
+    }
     dataRows++;
-    if (!numToId.has(norm(assetNo))) notFound.push(assetNo);
-    if (!isDone(assetNo)) return buf;
+    if (useDb && !numToId.has(norm(assetNo))) notFound.push(assetNo);
+    const byDb = isDone(assetNo);
+    const byRoom = ROOMS.length ? inRoom(cellText(s, locCol, rn)) : false;
+    if (byDb) hitDb++;
+    if (byRoom) hitRoom++;
+    if (!byDb && !byRoom) return buf;
+    targets++;
     const ref = `${MARK_COL}${rn}`;
     let out;
     if (new RegExp(`<c r="${ref}"[^>]*/>`).test(s)) {
@@ -218,7 +258,8 @@ function readEntryText(file, ent) {
   await new Promise((r) => tmpOut.on("close", r));
 
   const compSize = fs.statSync(tmp).size;
-  console.log(`데이터 행 ${dataRows}건 · O 표시 ${marked}건`);
+  console.log(`데이터 행 ${dataRows}건 · O 대상 ${targets}건 (그중 이번에 셀을 바꾼 건 ${marked}건)`);
+  console.log(`  · 검수 기록 ${hitDb}건 · 지정 호실 ${hitRoom}건 (겹치면 한 셀에 한 번만)`);
   if (notFound.length) console.log(`⚠️ 시스템에 없는 자산번호 ${notFound.length}건 (표시 안 함): ${notFound.slice(0, 3).join(", ")}${notFound.length > 3 ? " …" : ""}`);
 
   // ---- 4) zip 다시 쓰기: 시트만 새 데이터, 나머지는 압축된 원본 바이트 그대로 ----
