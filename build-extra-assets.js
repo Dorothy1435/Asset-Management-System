@@ -74,6 +74,8 @@ function build2024() {
 const ADD_FILES = [
   '글로컬대학사업본부_자산_목록(6.30기준_추가).xlsx',
   '글로컬대학사업본부_자산_목록(08.13.기준_추가).xlsx',
+  '글로컬대학사업본부_자산_목록(08.25.기준_추가).xlsx',
+  '글로컬대학사업본부_자산_목록(09.09.기준_추가).xlsx',
 ];
 function build2025add() {
   // 기존 2025 자산번호 집합 (중복 제외 기준)
@@ -131,7 +133,17 @@ function build2025add() {
     });
     console.log(`  · ${file}: +${added}건 / 기존중복 ${skipped} · 중복 ${dupInFile}`);
   });
-  fs.writeFileSync('assets2025add.json', JSON.stringify(out));
+  // 엑셀 맨 끝의 합계 행('건수')이 자산처럼 섞여 들어온다 — 자산명이 없고 취득금액만 총액이라
+  // 목록·총액 통계를 어지럽힌다. id는 이미 매긴 채로 두고 결과에서만 뺀다.
+  // (여기서 id를 다시 매기면 뒤 자산의 id가 당겨져 사진·검수·이력이 엉뚱한 자산에 붙는다.)
+  const junk = out.filter((a) => !/^\d{10,}$/.test(a.assetNumber));
+  if (junk.length) {
+    junk.forEach((a) => console.log(`  · 합계 행 제외: id ${a.id} "${a.assetNumber}"`));
+  }
+  const clean = out.filter((a) => /^\d{10,}$/.test(a.assetNumber));
+  fs.writeFileSync('assets2025add.json', JSON.stringify(clean));
+  out.length = 0;
+  out.push(...clean);
   console.log(`assets2025add.json: 총 ${out.length}건 (id ${out[0] ? out[0].id : '-'} ~ ${out.length ? out[out.length - 1].id : '-'})`);
   if (out[0]) console.log('예시:', JSON.stringify(out[0]));
   return out;
