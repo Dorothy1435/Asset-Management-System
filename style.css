@@ -2020,3 +2020,49 @@ body { max-width: 100%; overflow-x: hidden; }
 .al-dayuser:hover { border-color: var(--primary); background: #f8faff; }
 .al-dayuser-name { font-size: 14px; font-weight: 600; color: var(--text); }
 .al-dayuser-count { font-size: 13px; font-weight: 700; color: var(--primary-dark); }
+
+/* ===== 공지 알림(종) ===== */
+.btn-bell { position: relative; padding-left: 10px; padding-right: 10px; font-size: 15px; line-height: 1; }
+.btn-bell .count-badge {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 17px; height: 17px; line-height: 17px; padding: 0 4px;
+  border: 2px solid #fff; border-radius: 10px; font-size: 10px;
+}
+/* 읽지 않은 공지가 있으면 종을 한 번 흔들어 눈에 띄게 한다 */
+.btn-bell.has-new { border-color: #dc2626; color: #dc2626; animation: bellRing 1.2s ease 0.2s 2; transform-origin: 50% 2px; }
+@keyframes bellRing {
+  0%, 60%, 100% { transform: rotate(0); }
+  10% { transform: rotate(14deg); } 20% { transform: rotate(-12deg); }
+  30% { transform: rotate(9deg); }  40% { transform: rotate(-7deg); } 50% { transform: rotate(4deg); }
+}
+@media (prefers-reduced-motion: reduce) { .btn-bell.has-new { animation: none; } }
+
+/* 목록에서 새 공지·첨부 표시 */
+.post-new {
+  margin-left: 6px; padding: 1px 6px; border-radius: 8px;
+  background: #dc2626; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .02em;
+}
+.post-clip { margin-left: 6px; color: var(--muted, #64748b); font-size: 12px; font-weight: 600; white-space: nowrap; }
+
+/* ===== 글쓰기: 고른 첨부파일 ===== */
+.pf-file-list { display: grid; gap: 6px; margin-top: 8px; }
+.pf-file {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border: 1px solid var(--border, #e2e8f0); border-radius: 8px; background: #f8fafc;
+}
+.pf-file-ic { flex: none; font-size: 15px; }
+.pf-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.pf-file-size { flex: none; color: var(--muted, #64748b); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* ===== 글 보기: 첨부파일 내려받기 ===== */
+.post-files { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border, #e2e8f0); }
+.post-files-h { font-size: 13px; font-weight: 700; color: var(--text, #0f172a); margin-bottom: 8px; }
+.post-file {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; margin-bottom: 6px;
+  border: 1px solid var(--border, #e2e8f0); border-radius: 8px; background: #fff;
+  text-decoration: none; color: inherit;
+}
+.post-file:hover { border-color: #2563eb; background: #f5f9ff; }
+.post-file:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.post-file-dl { flex: none; font-size: 12px; font-weight: 600; color: #2563eb; }

@@ -552,7 +552,7 @@ function renderNav() {
 async function loadData() {
   // 베이스 자산(읽기 전용)은 3개 파일에서 합쳐 읽는다.
   //  · assets.json        : 2025년도 자산(메인)
-  //  · assets2025add.json : 2025년도 자산에 추가 병합분(6.30 · 08.13 · 08.25 · 09.09 · 09.11 기준, 중복 자산코드 제외됨)
+  //  · assets2025add.json : 2025년도 자산에 추가 병합분(6.30 · 08.13 · 08.25 · 09.09 · 09.11 · 10.01 기준, 중복 자산코드 제외됨)
   //  · assets2024.json    : 2024년도 자산 메뉴 (assetGroup=GROUP_PAST 태깅됨)
   const fetchJson = (url) => fetch(url).then((r) => (r.ok ? r.json() : [])).catch(() => []);
   // 첫 화면을 빨리 띄우려고 '기본(2025)' 데이터만 먼저 로드. 2024 자산(2천여 건)은 뒤에서 이어 로드.
@@ -633,7 +633,10 @@ function sbSubscribe() {
       if (!document.getElementById("myReqOverlay").hidden) renderMyRequests();
     })
     .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, async () => {
-      if (currentPageName === "board") { await sbLoadPosts(); renderBoard(); }
+      // 새 공지가 올라오면 게시판을 보고 있지 않아도 종에 바로 표시된다.
+      await sbLoadPosts();
+      if (currentPageName === "board") renderBoard();
+      renderBell();
     })
     .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, async () => {
       if (!document.getElementById("postViewOverlay").hidden && currentPostId) {
@@ -707,11 +710,16 @@ async function applySession(session) {
     const email = (currentUser.email || "").toLowerCase();
     isSuperAdmin = myProfile?.role === "superadmin" || SUPER_ADMINS.map((e) => e.toLowerCase()).includes(email);
     isAdmin = isSuperAdmin || myProfile?.role === "admin";
+    noticesReadAt = myProfile?.notices_read_at || null;
   } else {
     myProfile = null;
     isAdmin = false;
     isSuperAdmin = false;
+    noticesReadAt = null;
   }
+  renderBell();
+  // 게시판에 들어가지 않아도 종에 개수가 뜨도록, 로그인하면 글 목록을 한 번 읽어 둔다.
+  refreshBell();
   // 관리자는 항상 승인, 일반 회원은 profiles.status === 'approved' 여야 이용 가능
   isApproved = isAdmin || myProfile?.status === "approved";
   // 로그인 전에는 시작 화면 / 승인 전에는 대기 화면 / 승인 후에는 자산관리 시스템
@@ -4056,9 +4064,9 @@ async function migrateOverlayMediaOnce() {
 // 어디에서도 참조하지 않는 '고아 파일'(사진 교체·삭제·저장 실패로 남은 찌꺼기)을 정리한다.
 const STORAGE_FREE_LIMIT = 1024 * 1024 * 1024;    // 무료 플랜 Storage 한도 = 1GB
 const STORAGE_WARN_RATIO = 0.8;                   // 80% 넘으면 경고 표시
-const MEDIA_FOLDERS = ["photos", "thumbs", "labels", "inspections", "templates"];
+const MEDIA_FOLDERS = ["photos", "thumbs", "labels", "inspections", "templates", "notices"];
 const ORPHAN_MIN_AGE_MS = 24 * 60 * 60 * 1000;    // 24시간 유예: 방금 올라간(아직 저장 안 끝난) 파일 보호
-const FOLDER_LABEL = { photos: "물품 사진", thumbs: "목록 썸네일", labels: "라벨 파일", inspections: "검수 사진", templates: "등록 양식" };
+const FOLDER_LABEL = { photos: "물품 사진", thumbs: "목록 썸네일", labels: "라벨 파일", inspections: "검수 사진", templates: "등록 양식", notices: "공지 첨부" };
 let storageStat = null;   // 마지막 스캔 결과 (세션 내 캐시)
 let storageBusy = false;
 
@@ -4120,6 +4128,7 @@ async function collectReferencedPaths() {
   await scanTableForMedia("assets", "data", used);
   await scanTableForMedia("history", "before_snap, after_snap", used);
   await scanTableForMedia("requests", "payload", used);
+  await scanTableForMedia("posts", "attachments", used);   // 공지 첨부파일 — 빼먹으면 정리 때 지워진다
   return used;
 }
 
@@ -5345,6 +5354,59 @@ async function sbLoadComments(postId) {
   if (error) { console.error("댓글 로드 오류:", error.message); postComments = []; return; }
   postComments = data || [];
 }
+// ===== 공지 알림 (헤더 종) =====
+// '마지막으로 공지를 읽은 시각(profiles.notices_read_at)' 이후에 올라온 공지를 안 읽은 것으로 본다.
+// 기기가 아니라 계정에 붙어 있어 폰에서 읽으면 PC에서도 함께 사라진다.
+let noticesReadAt = null;
+
+function isUnreadNotice(p) {
+  return !!currentUser && !!p && p.type === "notice" &&
+    (!noticesReadAt || new Date(p.created_at).getTime() > new Date(noticesReadAt).getTime());
+}
+
+function unreadNoticeCount() {
+  return posts.filter(isUnreadNotice).length;
+}
+function renderBell() {
+  const btn = document.getElementById("bellBtn");
+  const badge = document.getElementById("bellCount");
+  if (!btn || !badge) return;
+  btn.hidden = !currentUser;                 // 로그인한 사람에게만 보인다
+  if (!currentUser) return;
+  const n = unreadNoticeCount();
+  badge.textContent = n > 99 ? "99+" : String(n);
+  badge.hidden = n === 0;
+  btn.classList.toggle("has-new", n > 0);
+  btn.title = n ? `읽지 않은 공지 ${n}건` : "새 공지 없음";
+}
+// 글 목록을 다시 읽고 종을 갱신한다. (로그인 직후·공지 등록 후·실시간 반영 때)
+async function refreshBell() {
+  if (!currentUser || !sb) { renderBell(); return; }
+  if (!posts.length) await sbLoadPosts();
+  renderBell();
+}
+// 종을 누르면 공지를 보여 주고 읽음으로 표시한다.
+async function openNotices() {
+  if (!currentUser) return;
+  await sbLoadPosts();
+  await markNoticesRead();
+  navTo("board");
+}
+async function markNoticesRead() {
+  if (!currentUser || !sb) return;
+  const now = new Date().toISOString();
+  try {
+    const { error } = await sb.rpc("mark_notices_read");
+    if (error) throw error;
+    noticesReadAt = now;
+  } catch (e) {
+    // 함수가 아직 없으면(SQL 미실행) 이번 접속 동안만 읽은 것으로 둔다 — 화면은 계속 쓸 수 있게.
+    console.warn("공지 읽음 저장 실패:", e.message || e);
+    noticesReadAt = now;
+  }
+  renderBell();
+}
+
 async function openBoardPage() {
   renderNav();
   updateUI();
@@ -5365,6 +5427,8 @@ function renderBoard() {
         <div class="post-row">
           <span class="post-badge ${isNotice ? "badge-notice" : "badge-suggest"}">${isNotice ? "공지" : "건의"}</span>
           <span class="post-title">${esc(p.title || "(제목 없음)")}</span>
+          ${attachmentsOf(p).length ? `<span class="post-clip" title="첨부 ${attachmentsOf(p).length}개">📎${attachmentsOf(p).length}</span>` : ""}
+          ${isNotice && isUnreadNotice(p) ? `<span class="post-new">NEW</span>` : ""}
           <span class="post-cmt">💬</span>
         </div>
         <div class="post-meta">${esc(p.author_name || "-")}${p.author_affiliation ? " · " + esc(p.author_affiliation) : ""} · ${fmtTime(p.created_at)}</div>
@@ -5396,7 +5460,8 @@ function renderPostView(p) {
       <h3 class="post-view-h">${esc(p.title || "(제목 없음)")}</h3>
       <div class="post-meta">${esc(p.author_name || "-")}${p.author_affiliation ? " · " + esc(p.author_affiliation) : ""} · ${fmtTime(p.created_at)}</div>
     </div>
-    <div class="post-content">${esc(p.content || "").replace(/\n/g, "<br>")}</div>`;
+    <div class="post-content">${esc(p.content || "").replace(/\n/g, "<br>")}</div>` +
+    renderAttachments(p);
   const comments = postComments.map((c) => `
     <div class="comment ${c.is_admin_reply ? "comment-admin" : ""}">
       <div class="comment-meta">
@@ -5411,6 +5476,25 @@ function renderPostView(p) {
     `<div class="comment-section"><h4 class="comment-h">댓글 <span class="insp-count">${postComments.length}</span></h4>` +
     (postComments.length ? comments : `<div class="insp-empty">아직 댓글이 없습니다.</div>`) + `</div>`;
 }
+// 글에 붙은 첨부파일 목록 — 관리자·회원 구분 없이 로그인한 사람이면 누구나 내려받을 수 있다.
+function attachmentsOf(p) {
+  return Array.isArray(p && p.attachments) ? p.attachments.filter((f) => f && f.url) : [];
+}
+function renderAttachments(p) {
+  const list = attachmentsOf(p);
+  if (!list.length) return "";
+  return `<div class="post-files">
+      <div class="post-files-h">📎 첨부파일 <span class="insp-count">${list.length}</span></div>
+      ${list.map((f) => `
+        <a class="post-file" href="${esc(f.url)}" download="${esc(f.name || "")}" target="_blank" rel="noopener">
+          <span class="pf-file-ic">${fileIcon(f.name, f.type)}</span>
+          <span class="pf-file-name">${esc(f.name || "첨부파일")}</span>
+          <span class="pf-file-size">${f.size ? fmtBytes(f.size) : ""}</span>
+          <span class="post-file-dl">내려받기</span>
+        </a>`).join("")}
+    </div>`;
+}
+
 function openPostForm() {
   if (!requireLogin()) return;
   document.getElementById("postFormError").hidden = true;
@@ -5420,6 +5504,8 @@ function openPostForm() {
   document.getElementById("pf-affil").value = myProfile?.affiliation || "";
   document.getElementById("pf-type").value = "suggestion";
   document.getElementById("pf-type-row").style.display = isSuperAdmin ? "" : "none"; // 공지사항은 최고관리자만
+  postFiles = [];
+  renderPostFileList();
   show("postFormOverlay");
 }
 async function submitPost() {
@@ -5437,13 +5523,95 @@ async function submitPost() {
   if (!content) { errEl.textContent = "내용을 입력해주세요."; errEl.hidden = false; return; }
   const btn = document.getElementById("postFormSubmit");
   btn.disabled = true;
+  const prevLabel = btn.textContent;
   try {
-    const { error } = await sb.from("posts").insert({ type, title, content, author_name: name, author_affiliation: affiliation, user_id: currentUser.id });
+    // 파일을 먼저 Storage 에 올리고, 글에는 주소만 적는다. 올리다 실패하면 글도 만들지 않는다.
+    const attachments = [];
+    for (let i = 0; i < postFiles.length; i++) {
+      const f = postFiles[i];
+      btn.textContent = `파일 올리는 중… (${i + 1}/${postFiles.length})`;
+      attachments.push(await uploadPostFile(f));
+    }
+    btn.textContent = "등록 중…";
+    const { error } = await sb.from("posts").insert({ type, title, content, author_name: name, author_affiliation: affiliation, user_id: currentUser.id, attachments });
     if (error) throw error;
-  } catch (e) { console.error(e); errEl.textContent = "등록 실패: " + (e.message || ""); errEl.hidden = false; btn.disabled = false; return; }
-  btn.disabled = false;
+  } catch (e) {
+    console.error(e);
+    // attachments 칸이 아직 DB에 없으면(설치 SQL 미실행) 무엇을 해야 하는지 바로 알려 준다.
+    const msg = String(e.message || "");
+    errEl.textContent = /attachments/.test(msg) && /does not exist|42703/.test(msg)
+      ? "첨부파일 기능이 아직 준비되지 않았습니다. 관리자에게 설치 SQL 실행을 요청하세요. (첨부 없이 등록하면 정상 등록됩니다)"
+      : "등록 실패: " + msg;
+    errEl.hidden = false; btn.disabled = false; btn.textContent = prevLabel; return;
+  }
+  btn.disabled = false; btn.textContent = prevLabel;
+  postFiles = [];
   hide("postFormOverlay");
   await sbLoadPosts(); renderBoard();
+  // 내가 방금 올린 공지가 나에게 '안 읽은 공지'로 뜨지 않도록 읽은 시각을 당겨 둔다.
+  if (type === "notice") await markNoticesRead(); else renderBell();
+}
+
+// ===== 공지 첨부파일 =====
+const POST_FILE_MAX = 20 * 1024 * 1024;   // 한 개당 20MB
+const POST_FILE_MAX_COUNT = 10;
+let postFiles = [];                        // 글쓰기 창에서 고른 파일(아직 안 올림)
+
+// 임의 파일(한글·엑셀·PDF…)을 그대로 올리고 {name,url,size,type} 을 돌려준다.
+// 파일명은 Storage 경로에 쓸 수 있게 다듬되, 화면에 보여 줄 원래 이름은 name 에 그대로 남긴다.
+async function uploadPostFile(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const orig = file.name || "첨부파일";
+  // ※ Storage 는 저장 경로에 한글을 못 쓴다(Invalid key). 경로는 영문·숫자로만 만들고
+  //   사람이 볼 원래 이름은 attachments.name 에 따로 담아 두었다가 내려받을 때 되살린다.
+  const ext = (orig.match(/\.([A-Za-z0-9]{1,8})$/) || [, ""])[1].toLowerCase();
+  const path = `notices/${Date.now()}-${Math.random().toString(36).slice(2, 10)}${ext ? "." + ext : ""}`;
+  const type = file.type || "application/octet-stream";
+  const { error } = await sb.storage.from(MEDIA_BUCKET)
+    .upload(path, new Blob([buf], { type }), { contentType: type, upsert: false, cacheControl: MEDIA_CACHE_CONTROL });
+  if (error) throw new Error(`'${orig}' 올리기 실패: ${error.message}`);
+  // download 옵션을 주면 내려받을 때 원래 이름(한글 포함)으로 저장된다.
+  const { data } = sb.storage.from(MEDIA_BUCKET).getPublicUrl(path, { download: orig });
+  return { name: orig, url: data.publicUrl, size: file.size, type };
+}
+
+// 확장자로 아이콘을 고른다 — 목록에서 무슨 파일인지 한눈에 보이도록. (fmtBytes 는 저장공간 쪽 것을 같이 쓴다)
+function fileIcon(name, type) {
+  const e = String(name || "").split(".").pop().toLowerCase();
+  if (/^(hwp|hwpx)$/.test(e)) return "📄";
+  if (/^(xls|xlsx|csv)$/.test(e)) return "📊";
+  if (/^(doc|docx)$/.test(e)) return "📝";
+  if (/^(ppt|pptx)$/.test(e)) return "📽️";
+  if (e === "pdf") return "📕";
+  if (/^(zip|7z|rar)$/.test(e)) return "🗜️";
+  if (/^(png|jpg|jpeg|gif|webp|bmp)$/.test(e) || String(type).startsWith("image/")) return "🖼️";
+  return "📎";
+}
+
+function addPostFiles(fileList) {
+  const errEl = document.getElementById("postFormError");
+  for (const f of Array.from(fileList || [])) {
+    if (postFiles.length >= POST_FILE_MAX_COUNT) {
+      errEl.textContent = `첨부는 ${POST_FILE_MAX_COUNT}개까지 올릴 수 있습니다.`; errEl.hidden = false; break;
+    }
+    if (f.size > POST_FILE_MAX) {
+      errEl.textContent = `'${f.name}' 은 ${fmtBytes(POST_FILE_MAX)} 를 넘습니다. 더 작은 파일로 올려주세요.`; errEl.hidden = false; continue;
+    }
+    if (postFiles.some((x) => x.name === f.name && x.size === f.size)) continue;  // 같은 파일 두 번 고름
+    postFiles.push(f);
+  }
+  renderPostFileList();
+}
+function renderPostFileList() {
+  const el = document.getElementById("pf-file-list");
+  if (!el) return;
+  el.innerHTML = postFiles.map((f, i) => `
+    <div class="pf-file">
+      <span class="pf-file-ic">${fileIcon(f.name, f.type)}</span>
+      <span class="pf-file-name">${esc(f.name)}</span>
+      <span class="pf-file-size">${fmtBytes(f.size)}</span>
+      <button type="button" class="btn-mini btn-del" data-rmfile="${i}">제거</button>
+    </div>`).join("");
 }
 async function submitComment() {
   if (!requireLogin()) return;
@@ -6096,6 +6264,16 @@ document.getElementById("boardBody").addEventListener("click", (e) => {
 });
 document.getElementById("postFormSubmit").addEventListener("click", submitPost);
 document.getElementById("postForm").addEventListener("submit", (e) => { e.preventDefault(); submitPost(); });
+// 공지 알림(종) · 첨부파일 고르기
+document.getElementById("bellBtn").addEventListener("click", openNotices);
+document.getElementById("pf-file-pick").addEventListener("click", () => document.getElementById("pf-files").click());
+document.getElementById("pf-files").addEventListener("change", (e) => { addPostFiles(e.target.files); e.target.value = ""; });
+document.getElementById("pf-file-list").addEventListener("click", (e) => {
+  const rm = e.target.closest("button[data-rmfile]");
+  if (!rm) return;
+  postFiles.splice(Number(rm.dataset.rmfile), 1);
+  renderPostFileList();
+});
 document.getElementById("commentSubmit").addEventListener("click", submitComment);
 document.getElementById("postDeleteBtn").addEventListener("click", () => deletePost(currentPostId));
 document.getElementById("postViewBackBtn").addEventListener("click", () => hide("postViewOverlay"));

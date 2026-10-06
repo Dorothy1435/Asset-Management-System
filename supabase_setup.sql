@@ -550,3 +550,37 @@ begin
 end; $$;
 revoke all on function public.delete_account(uuid) from public, anon;
 grant execute on function public.delete_account(uuid) to authenticated;
+
+
+-- =====================================================================
+-- [공지 첨부파일 + 공지 알림]  (2026.09 추가)
+--  · 공지에 파일을 붙여 올리고, 관리자·회원 누구나 내려받을 수 있게 한다.
+--  · 새 공지가 올라오면 회원 화면 종(🔔)에 안 읽은 개수가 뜬다.
+-- 이 블록을 SQL Editor에서 한 번 실행하세요. (재실행 안전)
+-- =====================================================================
+
+-- 1) 게시글 첨부파일
+--    [{ name, url, size, type }] 형태. 파일 자체는 Storage(asset-media/notices/)에 있고 여기엔 주소만 둔다.
+alter table public.posts add column if not exists attachments jsonb not null default '[]'::jsonb;
+
+-- 2) 공지를 어디까지 읽었는지 (회원별)
+--    이 시각 이후에 올라온 공지 수 = 안 읽은 개수.
+alter table public.profiles add column if not exists notices_read_at timestamptz;
+
+-- 3) 읽음 처리 함수
+--    profiles 에 '본인 수정' 정책을 열어 주면 회원이 자기 role 까지 바꿀 수 있게 되므로,
+--    읽은 시각만 건드리는 함수를 따로 둔다. (권한 상승 방지)
+create or replace function public.mark_notices_read() returns void
+language sql security definer set search_path = public as $$
+  update public.profiles set notices_read_at = now() where id = auth.uid();
+$$;
+revoke all on function public.mark_notices_read() from public, anon;
+grant execute on function public.mark_notices_read() to authenticated;
+
+-- 4) 공지 수정 권한
+--    지금까지는 글을 고칠 수 없었다(삭제만 가능). 첨부를 붙이려면 본인 글 수정이 필요하다.
+--    건의글은 본인만, 공지는 최고관리자만 고칠 수 있다.
+drop policy if exists "posts_update_own" on public.posts;
+create policy "posts_update_own" on public.posts for update to authenticated
+  using ( user_id = auth.uid() and ( type = 'suggestion' or public.is_superadmin() ) )
+  with check ( user_id = auth.uid() and ( type = 'suggestion' or public.is_superadmin() ) );
