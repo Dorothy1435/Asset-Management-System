@@ -1107,8 +1107,8 @@ function renderStats() {
       ${showExactCost ? `<div class="cost-exact">${totalCost.toLocaleString()}원</div>` : ""}
       <div class="label">총 취득금액 · <button type="button" class="insp-detail-btn" data-cost-toggle>${showExactCost ? "접기" : "자세히 보기"}</button></div>
     </div>
-    <div class="stat-card"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
-    <div class="stat-card"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>
+    <div class="stat-card${labelCount ? "" : " is-zero"}"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
+    <div class="stat-card${inUse ? "" : " is-zero"}"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>
     ${inspCard}`;
 }
 // 부서·위치별 검수 진척 상세(모달) — 평소엔 숨기고 '자세히'로만 연다. 어디가 덜 됐는지 한눈에.
@@ -1354,14 +1354,14 @@ function render() {
     const labelHtml = labelCell(a);
     const mE = (v) => (!String(v == null ? "" : v).trim() ? " m-empty" : "");
     return `
-    <tr>
+    <tr class="${selectedIds.has(String(a.id)) ? "is-picked" : ""}">
       <td class="col-check"><input type="checkbox" class="row-check" data-id="${esc(a.id)}" ${selectedIds.has(String(a.id)) ? "checked" : ""} /></td>
-      <td class="cell-name" title="${esc(a.assetName)}"><div class="name-wrap">${thumb}<span>${esc(a.assetName)} ${tag}</span></div></td>
-      <td class="cell-num" data-label="자산코드">${esc(a.assetNumber)}</td>
+      <td class="cell-name" title="${esc(a.assetName)}"><div class="name-wrap">${thumb}<span class="aname">${esc(a.assetName)} ${tag}</span></div></td>
+      <td class="cell-num cell-code" data-label="자산코드">${esc(a.assetNumber)}</td>
       <td data-label="라벨" class="${labelHtml === "-" ? "m-empty" : ""}">${labelHtml}</td>
       <td class="cell-loc${mE(a.location)}" data-label="위치" title="${esc(a.location)}">${esc(val(a.location))}</td>
       <td data-label="사용자" class="${mE(a.manager).trim()}">${esc(val(a.manager))}</td>
-      <td data-label="부서" class="${mE(a.dept).trim()}">${esc(val(a.dept))}</td>
+      <td data-label="부서" class="cell-dept ${mE(a.dept).trim()}">${esc(val(a.dept))}</td>
       <td data-label="상태">${statusBadge(a.status)}</td>
       <td class="col-reg" data-label="등재일">${esc(val(a.regDate))}</td>
       <td class="col-insp cell-insp${li ? "" : " m-empty"}" data-label="검수일"${li ? ` title="${esc(fmtSec(li.checkedAt))}${li.inspector ? ` · ${li.inspector}` : ""}${li.affiliation ? ` (${li.affiliation})` : ""}${li.period ? ` · ${li.period}` : ""}"` : ""}>${inspDate}${inspBy ? `<br>${inspBy}` : ""}</td>
@@ -5844,7 +5844,11 @@ async function exportInspectionResult() {
 // ===== 이벤트 =====
 document.getElementById("searchInput").addEventListener("input", applyFilter);
 document.getElementById("clearBtn").addEventListener("click", () => { document.getElementById("searchInput").value = ""; applyFilter(); });
-document.getElementById("advToggle").addEventListener("click", () => { const p = document.getElementById("advPanel"); p.hidden = !p.hidden; });
+document.getElementById("advToggle").addEventListener("click", (e) => {
+  const p = document.getElementById("advPanel");
+  p.hidden = !p.hidden;
+  e.currentTarget.setAttribute("aria-expanded", String(!p.hidden));   // 열림 상태를 버튼에도 표시
+});
 ["deptFilter", "statusFilter"].forEach((id) => document.getElementById(id).addEventListener("change", applyFilter));
 ["minCost", "maxCost", "nameFilter", "locFilter"].forEach((id) => document.getElementById(id).addEventListener("input", applyFilter));
 document.getElementById("advReset").addEventListener("click", () => {
@@ -6358,4 +6362,14 @@ loadData();
     attributes: true, attributeFilter: ["hidden"], childList: true, characterData: true, subtree: true,
   });
   sync();
+})();
+
+// 툴바 '더보기' 드롭다운 — 사용자 메뉴와 같은 방식으로 여닫기만 맡는다.
+(function setupMoreMenu() {
+  const menu = document.getElementById("moreMenu");
+  if (!menu) return;
+  const close = () => menu.removeAttribute("open");
+  menu.addEventListener("click", (e) => { if (e.target.closest(".menu-item")) close(); });
+  document.addEventListener("click", (e) => { if (menu.open && !menu.contains(e.target)) close(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && menu.open) close(); });
 })();

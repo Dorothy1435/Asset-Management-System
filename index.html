@@ -18,7 +18,7 @@
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
-  <link rel="stylesheet" href="style.css?v=20261015b" />
+  <link rel="stylesheet" href="style.css?v=20261015c" />
 </head>
 <body>
   <!-- 아이콘 모음 (Lucide). 버튼 안에서 <svg class="ic"><use href="#i-…"/></svg> 로 쓴다. -->
@@ -140,26 +140,42 @@
     <section class="stats" id="stats"></section>
 
     <section class="toolbar">
-      <div class="search-box">
-        <input type="text" id="searchInput" placeholder="자산명, 자산코드, 위치, 사용자, 부서, 검수자 검색..." autocomplete="off" />
-        <button id="clearBtn" class="btn-clear" title="검색어 지우기">✕</button>
+      <!-- 윗줄: 검색 + 핵심 동작 + 더보기 -->
+      <div class="toolbar-main">
+        <div class="search-box">
+          <svg class="ic search-ic" aria-hidden="true"><use href="#i-search"/></svg>
+          <input type="text" id="searchInput" placeholder="자산명, 자산코드, 위치, 사용자, 부서, 검수자 검색..." autocomplete="off" />
+          <button id="clearBtn" class="btn-clear" title="검색어 지우기">✕</button>
+        </div>
+        <button class="btn btn-inspect" id="scanInspectBtn"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg>검수</button>
+        <button class="btn btn-secondary" id="advToggle">상세 필터</button>
+        <!-- 자주 쓰지 않는 기능은 여기로 모았다(요소를 그대로 옮겨 기존 이벤트 유지) -->
+        <details class="more-menu" id="moreMenu">
+          <summary class="more-menu-trigger">
+            더보기 <svg class="ic user-menu-chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+          </summary>
+          <div class="more-menu-panel">
+            <button class="btn btn-secondary menu-item" id="exportBtn"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>엑셀 다운로드</button>
+            <button class="btn btn-secondary menu-item" id="exportInspBtn" hidden><svg class="ic" aria-hidden="true"><use href="#i-clipboard"/></svg>재물조사 결과</button>
+            <button class="btn btn-secondary menu-item" id="changeLogBtn" hidden><svg class="ic" aria-hidden="true"><use href="#i-history"/></svg>변경 이력</button>
+            <div class="user-menu-sep"></div>
+            <button class="btn btn-secondary menu-item" id="batchInspectBtn"><svg class="ic" aria-hidden="true"><use href="#i-tag"/></svg>라벨 사진 등록</button>
+            <button class="btn btn-secondary menu-item" id="pdfInspectBtn"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg>자산 등록 PDF 검수</button>
+          </div>
+        </details>
       </div>
-      <button class="btn btn-secondary" id="advToggle">상세 필터</button>
-      <button class="btn btn-secondary" id="exportBtn"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>엑셀 다운로드</button>
-      <button class="btn btn-secondary" id="exportInspBtn" hidden><svg class="ic" aria-hidden="true"><use href="#i-clipboard"/></svg>재물조사 결과</button>
-      <button class="btn btn-secondary" id="changeLogBtn" hidden><svg class="ic" aria-hidden="true"><use href="#i-history"/></svg>변경 이력</button>
-      <button class="btn btn-inspect" id="scanInspectBtn"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg>검수</button>
-      <button class="btn btn-inspect" id="batchInspectBtn"><svg class="ic" aria-hidden="true"><use href="#i-tag"/></svg>라벨 사진 등록</button>
-      <button class="btn btn-inspect" id="pdfInspectBtn"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg>자산 등록 PDF 검수</button>
-      <div class="insp-filter-group">
-        <!-- 항목은 script.js 의 roundOptions() 가 채운다 (📋 목록표 + 1~8회차) -->
-        <select id="inspRoundFilter" class="insp-round-sel" title="검수 구분 선택 (목록표 / 회차)" hidden>
-          <option value="1회차">1회차</option>
-        </select>
-        <button class="btn btn-secondary" id="uninspBtn" hidden><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>미검수</button>
-        <button class="btn btn-secondary" id="inspDoneBtn" hidden><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>검수 완료</button>
+      <!-- 아랫줄: 검수 회차 세그먼트 + 건수 -->
+      <div class="toolbar-sub">
+        <div class="insp-filter-group">
+          <!-- 항목은 script.js 의 roundOptions() 가 채운다 (📋 목록표 + 1~8회차) -->
+          <select id="inspRoundFilter" class="insp-round-sel" title="검수 구분 선택 (목록표 / 회차)" hidden>
+            <option value="1회차">1회차</option>
+          </select>
+          <button class="btn btn-secondary" id="uninspBtn" hidden><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>미검수</button>
+          <button class="btn btn-secondary" id="inspDoneBtn" hidden><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>검수 완료</button>
+        </div>
+        <span class="result-count" id="resultCount"></span>
       </div>
-      <span class="result-count" id="resultCount"></span>
       <!-- 모바일에서 바로 후면 카메라가 켜지도록 capture="environment" -->
       <input type="file" id="scanCameraInput" accept="image/*" capture="environment" hidden />
       <!-- 상세 화면에서 물품 사진 추가 (여러 장 선택 가능, 모바일은 카메라/앨범 선택) -->
@@ -963,6 +979,6 @@
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20261015b"></script>
+  <script src="script.js?v=20261015c"></script>
 </body>
 </html>
