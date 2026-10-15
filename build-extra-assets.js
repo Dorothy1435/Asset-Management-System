@@ -79,6 +79,12 @@ const ADD_FILES = [
   '글로컬대학사업본부_자산_목록(09.11.기준_추가).xlsx',
   '글로컬대학사업본부_자산_목록(10.01.기준_추가).xlsx',
 ];
+// 부서에서 받은 전체 목록. 위 추가분에 아직 없는 자산만 뒤에 이어 붙인다(레이아웃이 다르다).
+// 나중에 정식 추가분 엑셀이 와도 자산번호로 걸러지니 중복되지 않는다.
+const SUPPLEMENT_FILES = [
+  '2025년 글로컬대학사업본부 자산 목록_소연.xlsx',
+  '2026.03.01.~2026.08.31.글로컬대학사업본부_소연.xlsx',
+];
 function build2025add() {
   // 기존 2025 자산번호 집합 (중복 제외 기준)
   const base = JSON.parse(fs.readFileSync('assets.json', 'utf8'));
@@ -135,6 +141,55 @@ function build2025add() {
     });
     console.log(`  · ${file}: +${added}건 / 기존중복 ${skipped} · 중복 ${dupInFile}`);
   });
+
+  // ===== 보충분: 부서에서 받은 전체 목록에만 있고 위 추가분에는 아직 없는 자산 =====
+  // 정식 추가분 엑셀이 나오기 전에 등재된 건이 생긴다. 레이아웃이 달라 따로 읽는다.
+  // (열: 1자산관리번호 2자산등재일 3자산구분 4물품명 8모델명 9규격 11제작회사 14단가 15수량
+  //      18취득금액 19취득일자 25운영부서 26관리기관 27운영책임자 31과제 35보관장소 36자산상태 41비고)
+  SUPPLEMENT_FILES.forEach((file) => {
+    if (!fs.existsSync(file)) { console.log(`  · 보충 파일 없음(건너뜀): ${file}`); return; }
+    const wb = XLSX.readFile(file);
+    let added = 0;
+    wb.SheetNames.forEach((sn) => {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '' });
+      let hr = -1;
+      for (let i = 0; i < Math.min(8, rows.length); i++)
+        if (rows[i].some((c) => String(c).trim() === '자산관리번호')) { hr = i; break; }
+      if (hr < 0) return;
+      rows.slice(hr + 1).forEach((r) => {
+        const numRaw = str(r[1]);
+        if (!/^\d{10,}$/.test(norm(numRaw))) return;      // 자산번호가 아닌 행(합계 등)
+        const key = norm(numRaw);
+        if (existing.has(key) || seen.has(key)) return;   // 이미 들어온 자산
+        seen.add(key);
+        added++;
+        out.push({
+          id: id++,
+          assetNumber: numRaw,
+          assetName: str(r[4]),
+          category: str(r[3]),
+          classify: str(r[5]) || str(r[3]),
+          model: str(r[8]),
+          spec: str(r[9]),
+          maker: str(r[11]),
+          unitPrice: Number(r[14]) || 0,
+          qty: Number(r[15]) || 0,
+          acquireCost: Number(r[18]) || 0,
+          acquireDate: excelDate(r[19]),
+          regDate: excelDate(r[2]),
+          dept: str(r[25]),
+          org: str(r[26]),
+          manager: str(r[27]),
+          // 보관장소를 안 적은 건은 '//' 처럼 구분자만 남아 온다 — 빈칸으로 둔다.
+          location: /^[/\s]*$/.test(str(r[35])) ? '' : str(r[35]),
+          note: str(r[41]),
+          status: str(r[36]) || '취득',
+        });
+      });
+    });
+    if (added) console.log(`  · [보충] ${file}: +${added}건`);
+  });
+
   // 엑셀 맨 끝의 합계 행('건수')이 자산처럼 섞여 들어온다 — 자산명이 없고 취득금액만 총액이라
   // 목록·총액 통계를 어지럽힌다. id는 이미 매긴 채로 두고 결과에서만 뺀다.
   // (여기서 id를 다시 매기면 뒤 자산의 id가 당겨져 사진·검수·이력이 엉뚱한 자산에 붙는다.)

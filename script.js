@@ -139,15 +139,29 @@ const PER_PAGE = 20;
 const GROUP_2024 = "2025년도 자산";   // 메인(현재) 메뉴 — 값은 레거시 이름 그대로 유지
 const GROUP_ELEC = "전자";
 const GROUP_PAST = "2024자산";        // 2024년도 자산 메뉴 (내부값; 레거시 '2024년도 자산' 문자열과 구분)
-const GROUPS = [GROUP_2024, GROUP_PAST, GROUP_ELEC];
+const GROUP_2026 = "2026자산";        // 2026 글로컬대학 사업으로 취득한 자산
+const GROUP_GIMHAE = "김해시보조금";   // 김해시 보조금 사업 자산
+const GROUPS = [GROUP_2024, GROUP_2026, GROUP_GIMHAE, GROUP_PAST, GROUP_ELEC];
 // 화면에 보이는 메뉴 이름 (내부값 → 표시 라벨)
-const GROUP_LABELS = { [GROUP_2024]: "2025년도 자산", [GROUP_PAST]: "2024년도 자산", [GROUP_ELEC]: "전자" };
+const GROUP_LABELS = {
+  [GROUP_2024]: "2025년도 자산", [GROUP_2026]: "2026년도 자산",
+  [GROUP_GIMHAE]: "김해시 보조금", [GROUP_PAST]: "2024년도 자산", [GROUP_ELEC]: "전자",
+};
 const groupLabel = (g) => GROUP_LABELS[g] || g;
+// 2026년도 자산·김해시 보조금은 자산 파일에 표시가 없고 '과제'로만 갈린다.
+// asset-groups.json(자산번호 → 메뉴)을 읽어 가른다. 없으면 모두 2025년도 자산으로 보인다.
+let assetGroupMap = null;             // { 자산번호(정규화) → 메뉴 }
+let assetTaskMap = null;              // { 자산번호(정규화) → 과제명 }
+const taskOf = (a) => (assetTaskMap && assetTaskMap[normNum(a.assetNumber)]) || "";
 // assetGroup 값이 없거나 옛 이름('2024년도 자산')인 기존 자산은 모두 기본(2025) 메뉴로 간주.
 // 새 2024 메뉴는 별도 내부값(GROUP_PAST)을 쓰므로 레거시와 섞이지 않는다.
 const groupOf = (a) => {
   const g = a.assetGroup;
   if (g === GROUP_PAST) return GROUP_PAST;
+  if (g === GROUP_ELEC) return GROUP_ELEC;
+  if (g === GROUP_2026 || g === GROUP_GIMHAE) return g;      // 직접 등록·수정으로 지정한 경우
+  const byTask = assetGroupMap && assetGroupMap[normNum(a.assetNumber)];
+  if (byTask) return byTask;
   if (!g || g === "2024년도 자산") return GROUP_2024;
   return g;
 };
@@ -158,8 +172,8 @@ let currentPageName = "assets"; // "assets" | "board" | "admin"
 const ADMIN_TABS = ["review", "hist", "members", "access", "storage"];
 let currentAdminTab = "review";
 // 라우트별 자산 그룹 매핑
-const ROUTES = { "2025": GROUP_2024, "past": GROUP_PAST, "elec": GROUP_ELEC };
-const GROUP_TO_ROUTE = { [GROUP_2024]: "2025", [GROUP_PAST]: "past", [GROUP_ELEC]: "elec" };
+const ROUTES = { "2025": GROUP_2024, "2026": GROUP_2026, "gimhae": GROUP_GIMHAE, "past": GROUP_PAST, "elec": GROUP_ELEC };
+const GROUP_TO_ROUTE = { [GROUP_2024]: "2025", [GROUP_2026]: "2026", [GROUP_GIMHAE]: "gimhae", [GROUP_PAST]: "past", [GROUP_ELEC]: "elec" };
 // 운영 부서 표준 목록 (폼/필터 공통)
 const DEPTS = ["기획사무국", "지역혁신국", "교육혁신국", "산업혁신국", "현장캠퍼스"];
 
@@ -559,10 +573,18 @@ async function loadData() {
   const baseP = Promise.all([
     fetchJson("assets.json"),
     fetchJson("assets2025add.json"),
+    fetchJson("asset-groups.json"),   // 과제로 갈린 메뉴(2026년도 자산·김해시 보조금)
   ])
-    .then(([main, add2025]) => {
+    .then(([main, add2025, grp]) => {
       if (!Array.isArray(main) || !main.length) throw new Error("main empty");
       baseAssets = [...main, ...(Array.isArray(add2025) ? add2025 : [])];
+      // 자산번호 → 메뉴 로 뒤집어 둔다. 파일이 없으면 전부 2025년도 자산으로 보인다.
+      if (grp && grp.groups) {
+        assetGroupMap = {};
+        for (const [g, nums] of Object.entries(grp.groups))
+          for (const n of nums) assetGroupMap[n] = g;
+        assetTaskMap = grp.tasks || null;
+      }
     })
     .catch(() => {
       baseAssets = [];
