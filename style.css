@@ -92,65 +92,74 @@ h1, h2, h3, h4 { letter-spacing: -0.02em; }
 /* 헤더 */
 .header {
   background: var(--gray-0);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--gray-200);
+  position: sticky;
+  top: 0;
+  z-index: 50;
 }
 .header-inner {
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 20px 24px;
+  min-height: 64px;
+  padding: 0 32px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
 }
+.header-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand-mark { width: 28px; height: 28px; object-fit: contain; flex: none; }
 .header h1 {
-  font-size: 22px;
-  color: var(--primary-dark);
+  font-size: var(--fs-20);
+  color: var(--brand-900);
   font-weight: 700;
   cursor: pointer;
   display: inline-block;
+  line-height: 1.25;
 }
-.header h1:hover { color: var(--primary); }
+.header h1:hover { color: var(--primary-600); }
 .subtitle {
-  color: var(--text-light);
-  font-size: 13px;
-  margin-top: 4px;
+  color: var(--gray-500);
+  font-size: var(--fs-13);
+  margin-top: 2px;
 }
 
 /* 메인 네비게이션 (페이지 메뉴) */
 .main-nav {
   background: var(--gray-0);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--gray-200);
   position: sticky;
-  top: 0;
-  z-index: 50;
+  top: 64px;
+  z-index: 49;
 }
 .main-nav-inner {
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 32px;
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 .nav-link {
   appearance: none;
   background: none;
   border: none;
-  border-bottom: 3px solid transparent;
-  padding: 14px 18px;
-  font-size: 15px;
+  border-bottom: 2px solid transparent;
+  height: 48px;
+  padding: 0 14px;
+  font-size: var(--fs-15);
   font-weight: 600;
-  color: var(--text-light);
+  color: var(--gray-500);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  transition: color .15s, border-color .15s;
+  white-space: nowrap;
+  transition: color .15s ease-out, border-color .15s ease-out;
 }
-.nav-link:hover { color: var(--primary); }
+.nav-link:hover { color: var(--gray-900); }
 .nav-link.active {
-  color: var(--primary-dark);
-  border-bottom-color: var(--primary);
+  color: var(--gray-900);
+  border-bottom-color: var(--primary-600);
 }
 .nav-count {
   display: inline-flex;
@@ -165,13 +174,15 @@ h1, h2, h3, h4 { letter-spacing: -0.02em; }
   font-weight: 700;
   border-radius: var(--r-6);
 }
-.nav-link.active .nav-count { background: var(--primary-600); color: var(--gray-0); }
+.nav-link.active .nav-count { background: var(--primary-50); color: var(--primary-700); }
+/* 관리자 탭의 승인 대기 건수는 눈에 띄게 */
+.nav-admin .count-badge { background: var(--danger-600); color: var(--gray-0); }
 
 /* 컨테이너 */
 .container {
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 24px 32px;
 }
 
 /* 상세 화면 사용자 등록 */
@@ -199,13 +210,25 @@ h1, h2, h3, h4 { letter-spacing: -0.02em; }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  gap: 16px;
+  margin-bottom: 24px;
 }
 .board-page-title {
-  font-size: 20px;
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-24);
   font-weight: 700;
-  color: var(--primary-dark);
+  color: var(--gray-900);
 }
+.board-page-title .ic { width: 18px; height: 18px; }
+.board-page-head .board-desc, .board-page-head p { font-size: var(--fs-14); color: var(--gray-500); }
+/* '← 자산 목록으로' 는 눈에 덜 띄는 ghost 로 */
+#boardBackBtn, #adminBackBtn {
+  background: none;
+  border-color: transparent;
+  color: var(--gray-700);
+}
+#boardBackBtn:hover, #adminBackBtn:hover { background: var(--gray-100); border-color: transparent; }
 
 /* 관리자 페이지 탭 */
 .admin-tabs {
@@ -683,9 +706,12 @@ h1, h2, h3, h4 { letter-spacing: -0.02em; }
 .footer {
   text-align: center;
   padding: 24px;
-  color: var(--text-light);
-  font-size: 12px;
+  margin-top: 8px;
+  border-top: 1px solid var(--gray-200);
+  color: var(--gray-500);
+  font-size: var(--fs-13);
 }
+.footer b, .footer strong { color: var(--gray-700); font-weight: 600; }
 
 /* 버튼 변형 */
 .btn-primary {
@@ -1038,8 +1064,85 @@ input[type="checkbox"], input[type="radio"] {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
 }
+
+/* ── 종 아이콘 버튼 ── */
+.btn-bell {
+  position: relative;
+  width: 38px;
+  padding: 0;
+  background: none;
+  border-color: transparent;
+  color: var(--gray-700);
+}
+.btn-bell:hover { background: var(--gray-100); border-color: transparent; }
+.btn-bell .count-badge {
+  position: absolute;
+  top: -4px; right: -4px;
+  height: 18px; min-width: 18px;
+  border: 2px solid var(--gray-0);
+  font-size: 11px;
+}
+
+/* ── 사용자 메뉴 ── */
+.user-menu { position: relative; }
+.user-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--h-md);
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-8);
+  background: var(--gray-0);
+  color: var(--gray-700);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  white-space: nowrap;
+}
+.user-menu-trigger::-webkit-details-marker { display: none; }
+.user-menu-trigger:hover { background: var(--gray-50); border-color: var(--gray-300); }
+.user-menu-trigger:focus-visible { outline: 2px solid var(--primary-600); outline-offset: 2px; }
+.user-menu[open] .user-menu-trigger { background: var(--gray-50); border-color: var(--gray-300); }
+.user-menu-chev { width: 14px; height: 14px; color: var(--gray-500); transition: transform .15s ease-out; }
+.user-menu[open] .user-menu-chev { transform: rotate(180deg); }
+.user-menu-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+
+.user-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 220px;
+  padding: 6px;
+  background: var(--gray-0);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-12);
+  box-shadow: var(--sh-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 60;
+}
+.user-menu-info { padding: 8px 10px 6px; }
+.user-menu-info:empty { display: none; }
+.user-menu-sep { height: 1px; margin: 4px 0; background: var(--gray-200); }
+/* 메뉴 항목은 목록처럼 — 버튼이지만 왼쪽 정렬 */
+.user-menu-panel .menu-item {
+  height: var(--h-md);
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  border: none;
+  background: none;
+  color: var(--gray-700);
+  font-weight: 500;
+  border-radius: var(--r-8);
+}
+.user-menu-panel .menu-item:hover { background: var(--gray-100); }
+.user-menu-panel .menu-item .count-badge { margin-left: auto; }
 .admin-tag {
   font-size: 12px;
   color: var(--success-700);
@@ -2228,4 +2331,18 @@ body { max-width: 100%; overflow-x: hidden; }
 .asset-card .ac-val, .ipd-name {
   word-break: normal;
   overflow-wrap: anywhere;
+}
+
+
+/* ===== 앱 셸 여백 ===== */
+@media (max-width: 1024px) {
+  .header-inner, .main-nav-inner { padding-left: 20px; padding-right: 20px; }
+  .container { padding-left: 20px; padding-right: 20px; }
+}
+@media (max-width: 640px) {
+  .header-inner, .main-nav-inner { padding-left: 16px; padding-right: 16px; }
+  .container { padding-left: 16px; padding-right: 16px; }
+  .main-nav { top: 56px; }
+  .header-inner { min-height: 56px; }
+  .user-menu-panel { right: 0; min-width: 200px; }
 }

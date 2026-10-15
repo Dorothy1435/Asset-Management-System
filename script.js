@@ -6328,3 +6328,34 @@ document.addEventListener("keydown", (e) => {
 
 // 시작
 loadData();
+
+// ===== 헤더 사용자 메뉴 (화면 전용) =====
+// 헤더에 흩어져 있던 버튼을 <details> 안으로 옮겨 담았다. 버튼 자체는 그대로라
+// 기존 이벤트가 그대로 동작하고, 여기서는 여닫는 동작과 이름 표시만 맡는다.
+(function setupUserMenu() {
+  const menu = document.getElementById("userMenu");
+  const tag = document.getElementById("userTag");
+  const nameEl = document.getElementById("userMenuName");
+  if (!menu || !tag || !nameEl) return;
+
+  const close = () => menu.removeAttribute("open");
+  // 메뉴 안의 버튼을 누르면 닫는다(그 버튼의 원래 동작은 그대로 실행된다)
+  menu.addEventListener("click", (e) => { if (e.target.closest(".menu-item")) close(); });
+  // 바깥을 누르면 닫는다
+  document.addEventListener("click", (e) => { if (menu.open && !menu.contains(e.target)) close(); });
+  // Esc 로 닫는다
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && menu.open) close(); });
+
+  // userTag('관리자: 홍길동' / '홍길동 님')가 바뀌면 메뉴 이름과 표시 여부를 맞춘다.
+  const sync = () => {
+    const txt = (tag.textContent || "").trim();
+    const loggedIn = !tag.hidden && !!txt;
+    menu.hidden = !loggedIn;
+    if (!loggedIn) { close(); return; }
+    nameEl.textContent = txt.replace(/^관리자:\s*/, "").replace(/\s*님$/, "") || "내 메뉴";
+  };
+  new MutationObserver(sync).observe(tag, {
+    attributes: true, attributeFilter: ["hidden"], childList: true, characterData: true, subtree: true,
+  });
+  sync();
+})();
