@@ -2739,9 +2739,17 @@ body { max-width: 100%; overflow-x: hidden; }
 .asset-table .cell-loc { max-width: clamp(140px, 13vw, 175px); }
 .asset-table .cell-dept { max-width: 118px; }
 .asset-table .cell-actions { width: 132px; }
-/* 그래도 넘치면 잘리지 않게 가로로 민다(이땐 머리글 고정을 포기한다) */
+/* 1200px 이상에서는 표가 칸 안에 들어가므로 overflow 를 풀어 둔다.
+   여기서 overflow-x:auto 로 두면 .table-wrap 이 스크롤 컨테이너가 되어
+   th 의 sticky top:112px 가 페이지가 아닌 표 박스 기준으로 걸린다(머리글이 2행을 덮었다). */
 @media (min-width: 1200px) {
-  .table-wrap { overflow-x: auto; }
+  .table-wrap { overflow: visible; }
+}
+/* 좁은 화면에서는 가로 스크롤이라 머리글 고정을 쓰지 않는다 */
+@media (max-width: 1199px) {
+  .asset-table th { top: auto; }
+  .asset-table th.col-check,
+  .asset-table th:nth-child(2) { background: var(--gray-25); z-index: 2; }
 }
 
 /* ============================================================
@@ -2993,3 +3001,262 @@ body { max-width: 100%; overflow-x: hidden; }
   overflow: clip;
 }
 #detailBody > .detail-photos > .detail-photo img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ============================================================
+   5단계 — 주변 화면
+   ============================================================ */
+
+/* ── 1. 시작 화면 ── */
+.landing-bg {
+  background: linear-gradient(135deg, var(--brand-900) 0%, #0b5f6b 100%);
+}
+.landing-bg::before {
+  background:
+    radial-gradient(circle at 86% 84%, rgba(11, 162, 169, .35), transparent 48%),
+    radial-gradient(circle 1px at 1px 1px, rgba(255, 255, 255, .06) 1px, transparent 0);
+  background-size: auto, 22px 22px;
+}
+.landing-box {
+  width: 420px;
+  border-radius: 20px;
+  padding: 40px 36px;
+  box-shadow: var(--sh-3);
+}
+.landing-logo { width: 72px; height: 72px; margin-bottom: 20px; }
+.landing-box h1, .landing-box h2 {
+  font-size: var(--fs-24);
+  font-weight: 700;
+  color: var(--gray-900);
+  line-height: 1.35;
+}
+.landing-actions { display: flex; gap: 8px; width: 100%; margin-top: 24px; }
+/* 세로로 쌓이는 배치라 flex:1 을 주면 높이가 눌린다 — 높이만 고정한다 */
+.landing-actions .btn { flex: none; height: 46px; }
+.install-app-link {
+  text-decoration: none;
+  font-size: var(--fs-14);
+  color: var(--primary-600);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.install-app-link:hover { text-decoration: underline; }
+/* 로그인 창이 열리면 뒤 카드가 겹쳐 '카드 위에 카드'로 보인다 */
+body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
+
+/* 승인 대기 */
+#pendingApproval .landing-actions { flex-direction: column; }
+#pendingApproval .landing-actions .btn { width: 100%; height: 46px; }
+#pendingApproval .btn-cancel-signup {
+  background: none;
+  border-color: transparent;
+  color: var(--danger-600);
+}
+#pendingApproval .btn-cancel-signup:hover { background: var(--danger-50); border-color: transparent; }
+#pendingApproval .landing-box p { font-size: var(--fs-15); color: var(--gray-700); }
+
+/* ── 2. 로그인·회원가입 ── */
+#authOverlay .modal { width: 420px; }
+#authOverlay .form-row input { height: 46px; }
+/* '@inje.ac.kr' 은 입력과 한 덩어리로 */
+#authOverlay .id-suffix {
+  display: inline-flex;
+  align-items: center;
+  height: 46px;
+  padding: 0 12px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-300);
+  border-left: none;
+  border-radius: 0 var(--r-8) var(--r-8) 0;
+  color: var(--gray-500);
+  font-size: var(--fs-14);
+  white-space: nowrap;
+}
+#authOverlay .id-row { display: flex; }
+#authOverlay .id-row input { border-radius: var(--r-8) 0 0 var(--r-8); flex: 1; min-width: 0; }
+#authOverlay .form-info { background: var(--primary-50); color: var(--primary-700); }
+.consent-box {
+  background: var(--gray-25);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-12);
+  padding: 14px 16px;
+}
+.consent-box .consent-all, .consent-box > label:first-child { font-size: var(--fs-15); font-weight: 600; }
+.consent-box label { font-size: var(--fs-14); }
+.consent-box .btn-link, .consent-box a { color: var(--primary-600); }
+#authOverlay .modal-footer #authSwitch { margin-right: auto; order: -1; }
+.btn-link { color: var(--primary-600); font-weight: 600; }
+
+/* ── 3. 건의 게시판 ── */
+.post-card {
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-12);
+  padding: 16px 20px;
+  margin-bottom: 10px;
+}
+.post-card:hover { background: var(--gray-25); border-color: var(--gray-300); }
+.post-title { font-size: 16px; font-weight: 600; color: var(--gray-900); }
+.post-meta { font-size: var(--fs-13); color: var(--gray-500); }
+#boardBody .empty-msg { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+#boardBody .empty-msg .empty-ic { font-size: 40px; color: var(--gray-300); margin: 0; }
+/* 댓글 입력 한 줄 */
+.comment-write { display: flex; gap: 8px; align-items: flex-start; }
+.comment-write textarea { flex: 1; min-height: 44px; }
+
+/* ── 4. 관리자 ── */
+.admin-tab {
+  height: 44px;
+  padding: 0 16px;
+  font-size: var(--fs-15);
+  font-weight: 600;
+  color: var(--gray-500);
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.admin-tab:hover { color: var(--gray-900); background: none; }
+.admin-tab.active { color: var(--gray-900); border-bottom-color: var(--primary-600); }
+.admin-tabs { border-bottom: 1px solid var(--gray-200); gap: 2px; }
+/* 관리자 표도 목록 표와 같은 밀도로 */
+#page-admin table { width: 100%; border-collapse: collapse; font-size: var(--fs-14); }
+#page-admin table th {
+  background: var(--gray-25);
+  text-align: left;
+  padding: 10px 12px;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--gray-500);
+  border-bottom: 1px solid var(--gray-200);
+  white-space: nowrap;
+}
+#page-admin table td { padding: 10px 12px; border-bottom: 1px solid var(--gray-100); }
+/* 저장공간 */
+.stor-bar, .stor-gauge { height: 8px; border-radius: 999px; background: var(--gray-100); overflow: clip; }
+.stor-bar > span, .stor-fill { background: var(--teal-500); }
+.stor-bar.is-warn > span, .stor-fill.is-warn { background: var(--warn-700); }
+.stor-bar.is-danger > span, .stor-fill.is-danger { background: var(--danger-600); }
+.stor-ok, .stor-note-ok { background: var(--success-50); color: var(--success-700); border-radius: var(--r-8); padding: 8px 12px; }
+/* 결재 내역 선택 바도 목록과 같게 */
+#histBulkBar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 40;
+  margin: 0;
+  width: fit-content;
+  padding: 8px 8px 8px 16px;
+  background: var(--gray-0);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-12);
+  box-shadow: var(--sh-3);
+}
+
+/* ── 5. 내 정보 ── */
+.mp-tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0 24px 4px;
+  padding: 3px;
+  background: var(--gray-100);
+  border: none;
+  border-radius: var(--r-8);
+}
+.mp-tabs .admin-tab {
+  height: 36px;
+  padding: 0 14px;
+  font-size: var(--fs-14);
+  border: none;
+  border-radius: var(--r-6);
+  margin: 0;
+  color: var(--gray-700);
+}
+.mp-tabs .admin-tab.active {
+  background: var(--gray-0);
+  box-shadow: var(--sh-1);
+  color: var(--gray-900);
+  border: none;
+}
+#myProfileOverlay input[readonly], #myProfileOverlay input:disabled {
+  background: var(--gray-50);
+  color: var(--gray-500);
+}
+
+/* ── 6. 토스트 ── */
+.toast {
+  background: var(--gray-900);
+  border: none;
+  border-left: none;
+  border-radius: 10px;
+  padding: 12px 16px;
+  box-shadow: var(--sh-3);
+  transform: translateY(8px);
+  transition: opacity .16s ease-out, transform .16s ease-out;
+}
+.toast-msg { color: var(--gray-0); font-size: var(--fs-14); }
+.toast-x { color: rgba(255, 255, 255, .6); }
+.toast-x:hover { color: var(--gray-0); }
+.toast-ic { font-size: 16px; }
+/* 종류는 아이콘 색으로만 — 배경은 칠하지 않는다 */
+.toast-success .toast-ic { color: #4ade80; }
+.toast-warn .toast-ic, .toast-error .toast-ic { color: #fbbf24; }
+.toast-info .toast-ic { color: #7dd3fc; }
+
+/* ── 7. 알림 패널·안내 ── */
+#installGuideOverlay .modal { width: 420px; }
+.inapp-warn {
+  background: var(--warn-50);
+  color: var(--warn-700);
+  border: 1px solid rgba(181, 71, 8, .25);
+  border-radius: var(--r-12);
+}
+
+/* ── 8. 검수 화면 손질 (CSS만 · 구조·id·이벤트는 그대로) ── */
+/* 촬영 안내 */
+.scan-guide-hero {
+  background: linear-gradient(135deg, var(--teal-700) 0%, var(--teal-500) 100%);
+}
+.scan-guide-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-14);
+  color: var(--gray-700);
+}
+/* 안내 네 줄의 아이콘을 같은 크기의 원으로 */
+.scan-guide-list .sg-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px; height: 32px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--teal-50);
+  font-size: 16px;
+  line-height: 1;
+}
+.scan-guide-list b { color: var(--teal-700); }
+.scan-guide-sub b { color: var(--teal-700); }
+#scanGuideStart {
+  height: 48px;
+  background: var(--teal-700);
+  border-color: var(--teal-700);
+  color: var(--gray-0);
+}
+#scanGuideStart:hover { background: #09666b; border-color: #09666b; }
+
+/* 검수 확인 창 — 자산 정보 박스가 분홍이라 경고처럼 보였다 */
+#inspectOverlay .del-target {
+  background: var(--gray-25);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-8);
+  color: var(--gray-900);
+}
+#inspectOverlay #inspectSubmit {
+  background: var(--teal-700);
+  border-color: var(--teal-700);
+  color: var(--gray-0);
+}
+#inspectOverlay #inspectSubmit:hover { background: #09666b; border-color: #09666b; }
+#inspectOverlay .insp-note { background: var(--teal-50); color: var(--teal-700); }
