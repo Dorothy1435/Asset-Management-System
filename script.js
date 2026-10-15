@@ -6373,3 +6373,16 @@ loadData();
   document.addEventListener("click", (e) => { if (menu.open && !menu.contains(e.target)) close(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && menu.open) close(); });
 })();
+
+// 좁은 화면에서 연도 탭이 가로로 밀릴 때, 지금 보고 있는 탭이 화면 밖에 있지 않게 한다.
+(function keepActiveTabInView() {
+  const nav = document.querySelector(".main-nav-inner");
+  if (!nav) return;
+  const bring = () => {
+    const el = nav.querySelector(".nav-link.active");
+    if (el) el.scrollIntoView({ inline: "center", block: "nearest" });
+  };
+  new MutationObserver(bring).observe(nav, { attributes: true, attributeFilter: ["class"], subtree: true });
+  window.addEventListener("hashchange", () => setTimeout(bring, 50));
+  setTimeout(bring, 300);
+})();

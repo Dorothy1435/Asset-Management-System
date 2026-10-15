@@ -1384,7 +1384,7 @@ input[type="checkbox"], input[type="radio"] {
 .bulk-insp-row:first-child { grid-column: 1 / -1; }
 .bulk-insp-row label { font-size: 12px; font-weight: 600; color: var(--text-light); }
 .bulk-insp-row input, .bulk-insp-row select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
-@media (max-width: 560px) { .bulk-insp-fields { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .bulk-insp-fields { grid-template-columns: 1fr; } }
 .bulk-photo-fields { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 10px; }
 .bulk-photo-fields .bulkphoto-preview img { max-width: 100%; max-height: 200px; border-radius: 10px; border: 1px solid var(--border); }
 .bulk-progress { font-size: 13px; color: var(--primary-dark); margin-top: 8px; }
@@ -1422,7 +1422,7 @@ input[type="checkbox"], input[type="radio"] {
 .req-bulk-actions { display: flex; gap: 8px; margin-left: auto; }
 .req-check { display: flex; align-items: center; }
 .req-check input { width: 18px; height: 18px; }
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .req-bulk-actions { margin-left: 0; width: 100%; }
   .req-bulk-actions .btn { flex: 1; }
 }
@@ -1996,36 +1996,31 @@ body.pending-approval .footer { display: none !important; }
 body { max-width: 100%; overflow-x: hidden; }
 
 /* 태블릿 이하: 네비/탭은 가로 스크롤로 (줄바꿈으로 깨지지 않게) */
-@media (max-width: 860px) {
-  .header-inner, .main-nav-inner, .container { padding-left: 16px; padding-right: 16px; }
-  .main-nav-inner {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-  .main-nav-inner::-webkit-scrollbar { display: none; }
-  .nav-link { white-space: nowrap; padding: 13px 14px; font-size: 14px; }
-  .admin-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .admin-tabs::-webkit-scrollbar { display: none; }
-  .admin-tab { white-space: nowrap; }
+/* 탭 줄은 넘칠 때만 가로로 밀린다 — 폭과 무관하게 켜 둔다 */
+.main-nav-inner {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.main-nav-inner::-webkit-scrollbar { display: none; }
+.nav-link { white-space: nowrap; }
+.admin-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.admin-tabs::-webkit-scrollbar { display: none; }
+.admin-tab { white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .nav-link { padding: 0 14px; font-size: var(--fs-14); }
   /* 저장공간 패널: 좁은 화면에서 제목과 버튼을 세로로 */
   .stor-card { padding: 14px 15px; }
   .stor-head { flex-direction: column; align-items: stretch; }
-  .stor-table { font-size: 13px; }
+  .stor-table { font-size: var(--fs-13); }
   .stor-table th, .stor-table td { padding: 9px 10px; }
 }
 
 /* 모바일 */
 @media (max-width: 640px) {
   .container { padding: 14px 12px; }
-
-  /* 헤더: 제목/버튼 세로 정리 */
-  .header-inner { flex-direction: column; align-items: stretch; padding: 12px 14px; gap: 10px; }
-  .header h1 { font-size: 18px; }
-  .subtitle { font-size: 12px; }
-  .header-actions { width: 100%; gap: 6px; }
-  .header-actions .btn { padding: 7px 10px; font-size: 13px; }
   .admin-tag { order: -1; }
 
   /* 통계: 2열 */
@@ -2288,8 +2283,8 @@ body { max-width: 100%; overflow-x: hidden; }
 .bulkphoto-preview img { max-width: 100%; max-height: 240px; border-radius: 10px; border: 1px solid var(--border); }
 .bulkphoto-check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; cursor: pointer; }
 #bulkPhotoBtn, #bulkEditAllBtn { width: 100%; margin-top: 4px; }
-@media (min-width: 561px) { #bulkPhotoBtn, #bulkEditAllBtn { width: auto; } }
-@media (max-width: 560px) {
+@media (min-width: 641px) { #bulkPhotoBtn, #bulkEditAllBtn { width: auto; } }
+@media (max-width: 640px) {
   .batch-filters { grid-template-columns: 1fr; }
   .batch-fields { grid-template-columns: 1fr; }
   /* 모바일: 완료 버튼을 크고 누르기 쉽게, 세로로 */
@@ -2326,7 +2321,7 @@ body { max-width: 100%; overflow-x: hidden; }
 .toast-error { border-left-color: var(--warn-700); }
 .toast-warn { border-left-color: var(--warn-700); }
 .toast-info { border-left-color: var(--primary-600); }
-@media (max-width: 520px) { .toast-wrap { bottom: 14px; } .toast-msg { font-size: 15px; } }
+@media (max-width: 640px) { .toast-wrap { bottom: 14px; } .toast-msg { font-size: var(--fs-15); } }
 
 /* 접속 로그 (최고관리자) */
 .access-log-table .al-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -3260,3 +3255,281 @@ body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
 }
 #inspectOverlay #inspectSubmit:hover { background: #09666b; border-color: #09666b; }
 #inspectOverlay .insp-note { background: var(--teal-50); color: var(--teal-700); }
+
+/* ============================================================
+   6단계 — 모바일 (현장 검수 중심)
+   1순위 검수 · 2순위 검색 · 3순위 자산 등록
+   ============================================================ */
+/* PC 에서는 툴바 버튼의 글자를 그대로 보여 준다 */
+.more-ic { display: none; }
+
+@media (max-width: 640px) {
+  body { font-size: 16px; }
+
+  /* ── 헤더 1줄 ── */
+  /* 예전 모바일 규칙이 세로 배치였다 — 한 줄로 되돌린다 */
+  .header-inner { flex-direction: row; align-items: center; min-height: 56px; padding: 0 16px; gap: 8px; }
+  .header-brand { gap: 8px; min-width: 0; flex: 1; }
+  .brand-mark { width: 28px; height: 28px; }
+  .header h1 { font-size: var(--fs-17); }
+  .subtitle { display: none; }
+  .header-actions { gap: 6px; flex: none; }
+  /* 등록은 3순위라 아이콘만 */
+  #addBtn {
+    width: 40px; height: 40px; padding: 0;
+    font-size: 0;
+    background: var(--primary-50);
+    border-color: var(--primary-50);
+    color: var(--primary-700);
+  }
+  #addBtn::before { content: "+"; font-size: 24px; font-weight: 600; line-height: 1; }
+  #addBtn:hover { background: var(--primary-100); border-color: var(--primary-100); }
+  .btn-bell { width: 40px; height: 40px; }
+  /* 사용자 메뉴는 원형 아바타 */
+  .user-menu-trigger {
+    width: 32px; height: 32px; padding: 0;
+    border-radius: 50%;
+    background: var(--primary-100);
+    border-color: var(--primary-100);
+    justify-content: center;
+  }
+  .user-menu-name, .user-menu-chev { display: none; }
+  .user-menu-trigger::after {
+    content: "내";
+    font-size: var(--fs-14); font-weight: 700; color: var(--primary-700);
+  }
+  /* 메뉴는 하단 시트 */
+  .user-menu[open]::before {
+    content: ""; position: fixed; inset: 0;
+    background: rgba(17, 24, 39, .4); z-index: 55;
+  }
+  .user-menu-panel {
+    position: fixed;
+    left: 0; right: 0; bottom: 0; top: auto;
+    min-width: 0;
+    border-radius: var(--r-16) var(--r-16) 0 0;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    z-index: 56;
+  }
+  .user-menu-panel .menu-item { height: 48px; font-size: var(--fs-15); }
+
+  /* ── 탭 ── */
+  .main-nav { top: 56px; }
+  .main-nav-inner { padding-left: 16px; padding-right: 16px; }
+  .nav-link { height: 46px; }
+  .main-nav::after {
+    content: ""; position: absolute; top: 0; right: 0; bottom: 1px; width: 24px;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0), var(--gray-0));
+    pointer-events: none;
+  }
+
+  /* ── 통계: 가로 1줄 + 검수 카드는 전체 폭 ── */
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    margin-bottom: 12px;
+  }
+  .stats::-webkit-scrollbar { display: none; }
+  .stat-card {
+    flex: 0 0 140px;
+    height: 72px;
+    padding: 12px 14px;
+    scroll-snap-align: start;
+  }
+  .stat-card .num { font-size: 22px; }
+  .stat-card .label { font-size: var(--fs-12); }
+  /* 현장에서 가장 중요한 정보 */
+  .stat-card.stat-insp {
+    flex: 1 0 100%;
+    height: auto;
+    padding: 14px 16px;
+    order: 99;
+  }
+  .stat-insp .num { font-size: var(--fs-24); }
+  .stat-insp .insp-bar { height: 10px; margin: 6px 0 4px; }
+  .stat-insp .label { font-size: var(--fs-13); }
+
+  /* ── 툴바 ── */
+  .toolbar-main { gap: 6px; flex-wrap: nowrap; }
+  .search-box { min-width: 0; }
+  .search-box input { height: 46px; font-size: 16px; }
+  .toolbar-main .btn, .more-menu-trigger { height: 46px; }
+  /* 필터·더보기는 아이콘만 */
+  #advToggle, .more-menu-trigger {
+    width: 46px; padding: 0; flex: none; justify-content: center; gap: 0;
+  }
+  #advToggle .btn-tx, .more-menu-trigger .btn-tx, .more-menu-trigger .user-menu-chev { display: none; }
+  .more-ic { display: block; }
+  .more-menu-panel { right: 0; min-width: 220px; }
+  /* 세그먼트는 전체 폭 3등분 */
+  .toolbar-sub { gap: 8px; }
+  .insp-filter-group { display: flex; width: 100%; }
+  .insp-filter-group > * { flex: 1; }
+  .insp-filter-group .btn, .insp-round-sel { height: 40px; }
+  .result-count { width: 100%; margin-left: 0; text-align: right; }
+
+  /* ── 검수 바 (엄지 영역) ── */
+  #scanInspectBtn {
+    position: fixed;
+    left: 16px; right: 16px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    z-index: 45;
+    height: 56px;
+    border-radius: 14px;
+    background: var(--teal-700);
+    border-color: var(--teal-700);
+    color: var(--gray-0);
+    font-size: 18px;
+    font-weight: 700;
+    box-shadow: var(--sh-2);
+  }
+  #scanInspectBtn .ic { width: 22px; height: 22px; }
+  #scanInspectBtn:active { transform: scale(.98); background: #09666b; }
+  /* 버튼 뒤 흰 바 — 검수 버튼이 보일 때만 */
+  body:has(#scanInspectBtn:not([hidden]))::after {
+    content: "";
+    position: fixed; left: 0; right: 0; bottom: 0;
+    height: calc(76px + env(safe-area-inset-bottom));
+    background: var(--gray-0);
+    border-top: 1px solid var(--gray-200);
+    box-shadow: 0 -4px 16px rgba(16, 24, 40, .08);
+    pointer-events: none;
+    z-index: 44;
+  }
+  /* 창이나 메뉴가 열리면 가린다 */
+  body:has(.modal-overlay:not([hidden])) #scanInspectBtn,
+  body:has(.user-menu[open]) #scanInspectBtn { display: none; }
+  body:has(.modal-overlay:not([hidden]))::after,
+  body:has(.user-menu[open])::after { display: none; }
+  /* 마지막 카드·페이지네이션이 바에 가리지 않게 */
+  .container { padding-bottom: calc(56px + 20px + 24px + env(safe-area-inset-bottom)); }
+
+  /* ── 자산 카드 ── */
+  .asset-table td { font-size: var(--fs-14); padding: 3px 0; }
+  .asset-table td[data-label]::before { width: 72px; flex: none; }
+  .asset-table .cell-name { font-size: 16px; font-weight: 600; min-width: 0; }
+  .asset-table .cell-num { font-size: var(--fs-13); color: var(--gray-500); }
+  /* 관리 버튼 세 개를 한 덩어리로 */
+  .asset-table td.cell-actions {
+    display: flex; width: 100%;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--r-8);
+    overflow: clip;
+    margin-top: 6px;
+    padding: 0;
+  }
+  .asset-table td.cell-actions .btn-mini {
+    flex: 1; height: 40px; margin: 0;
+    border-radius: 0;
+    border-left: 1px solid var(--gray-200);
+  }
+  .asset-table td.cell-actions .btn-mini:first-child { border-left: none; }
+  /* 선택 바는 검수 바 위로 */
+  .bulk-bar {
+    left: 16px; right: 16px;
+    width: auto;
+    transform: none;
+    bottom: calc(86px + env(safe-area-inset-bottom));
+  }
+
+  /* ── 모달은 풀스크린 시트 ── */
+  .modal-overlay.modal-v2,
+  #detailOverlay, #formOverlay, #bulkEditOverlay, #authOverlay { padding: 0; }
+  .modal-v2 .modal,
+  .modal-v2 .modal.modal-narrow,
+  .modal-v2 .modal.modal-wide,
+  .modal-v2 .modal.modal-xwide,
+  #detailOverlay .modal, #formOverlay .modal, #bulkEditOverlay .modal, #authOverlay .modal {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+  }
+  .modal-v2 .modal-header {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--gray-0);
+    min-height: 56px;
+    padding: 12px 16px;
+  }
+  .modal-v2 .modal-header h2 { font-size: var(--fs-17); }
+  .modal-v2 .modal-body { padding: 8px 16px 16px; }
+  .modal-v2 .modal-footer {
+    position: sticky; bottom: 0; z-index: 2;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    border-radius: 0;
+  }
+  .modal-v2 .modal-footer .btn { height: 48px; }
+  .modal-v2 .form-grid { grid-template-columns: 1fr; }
+  /* 상세: 사진 전체 폭 4:3, 현장에선 '검수 확인'이 주 동작 */
+  #detailBody > .detail-photos > .detail-photo,
+  #detailBody > .detail-photo { aspect-ratio: 4 / 3; }
+  #detailOverlay .modal-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #detailOverlay .modal-footer #detailInspectBtn {
+    order: 1;
+    background: var(--teal-700); border-color: var(--teal-700); color: var(--gray-0);
+  }
+  #detailOverlay .modal-footer #detailEditBtn { order: 2; }
+  #detailOverlay .modal-footer #detailPhotoBtn { order: 3; }
+  #detailOverlay .modal-footer [data-close] { order: 4; }
+  #detailOverlay .modal-footer .btn-danger {
+    order: 5; margin-right: 0;
+    background: none; border-color: transparent;
+  }
+  #detailOverlay .modal-footer #detailLabelBtn,
+  #detailOverlay .modal-footer #detailLabelDelBtn,
+  #detailOverlay .modal-footer #detailDownloadBtn { order: 6; }
+
+  /* ── 검수 화면 (CSS만) ── */
+  #scanGuideOverlay .modal, #inspectOverlay .modal, #camOverlay .modal,
+  #batchInspectOverlay .modal, #manualCodeOverlay .modal, #inspDetailOverlay .modal {
+    width: 100%; max-width: none; height: 100dvh; max-height: none; border-radius: 0;
+  }
+  .scan-guide-hero { min-height: 160px; display: flex; align-items: center; justify-content: center; }
+  .scan-guide-list li { font-size: var(--fs-15); }
+  /* '촬영 시작'을 검수 바와 같은 자리·모양으로 — 연달아 눌러 촬영까지 이어진다 */
+  .scan-guide-actions #scanGuideStart {
+    position: fixed;
+    left: 16px; right: 16px;
+    width: auto;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    z-index: 46;
+    height: 56px;
+    border-radius: 14px;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .scan-guide-actions { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  /* 검수 확인 */
+  #inspectOverlay .del-target { font-size: var(--fs-17); font-weight: 700; }
+  #inspectOverlay .del-target .del-note,
+  #inspectOverlay .del-target small {
+    font-size: var(--fs-14); font-weight: 400; font-variant-numeric: tabular-nums;
+  }
+  #inspectOverlay .form-row input, #inspectOverlay .form-row select { height: 46px; }
+  #inspectOverlay .insp-check { display: flex; align-items: center; min-height: 48px; gap: 10px; }
+  #inspectOverlay #inspectSubmit {
+    height: 56px; font-size: 18px; font-weight: 700; border-radius: 14px;
+  }
+  /* 셔터 */
+  #camShotBtn {
+    width: 64px; height: 64px; padding: 0;
+    border-radius: 50%;
+    border: 4px solid var(--gray-0);
+    font-size: 0;
+  }
+
+  /* ── 관리자 표 ── */
+  #page-admin .table-wrap { overflow-x: auto; }
+  #page-admin table th { position: static; top: auto; }
+}
+
+@media (max-width: 380px) {
+  .stat-card { flex-basis: 128px; }
+  .header h1 { font-size: var(--fs-15); }
+  .insp-filter-group .btn { font-size: var(--fs-13); padding: 0 6px; }
+}
