@@ -656,9 +656,11 @@ h1, h2, h3, h4 { letter-spacing: -0.02em; }
   color: var(--text-light);
 }
 .cell-num {
-  font-family: "Consolas", monospace;
-  font-size: 12px;
-  color: var(--text-light);
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  font-size: var(--fs-13);
+  color: var(--gray-500);
 }
 
 /* 상태 배지 */
@@ -2629,3 +2631,115 @@ body { max-width: 100%; overflow-x: hidden; }
 }
 /* 라벨 칸이 '라/벨'로 쪼개지지 않게 */
 .asset-table td[data-label="라벨"], .asset-table td[data-label="라벨"] * { white-space: nowrap; }
+
+
+/* ===== 3.5 보정 ===== */
+
+/* 1. 가장 중요한 자산명 열이 먼저 눌리던 문제 */
+.asset-table .cell-name { min-width: 240px; }
+.asset-table .cell-loc { max-width: clamp(140px, 16vw, 260px); }
+.asset-table .cell-code, .asset-table .cell-num { letter-spacing: 0; }
+
+/* 2. 선택 바는 흐름에서 빼낸다.
+   sticky 였을 때는 체크하는 순간 표가 통째로 아래로 밀렸고,
+   아래쪽 행을 고르면 바가 화면 위로 지나가 보이지 않았다. */
+.bulk-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 40;
+  margin: 0;
+  animation: bulkIn .16s ease-out;
+}
+@keyframes bulkIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 3. 선택된 행에서는 배지가 배경에 묻힌다 */
+.asset-table tbody tr.is-picked .badge,
+.asset-table tbody tr:has(input.row-check:checked) .badge {
+  background: var(--gray-0);
+  box-shadow: inset 0 0 0 1px var(--primary-100);
+}
+
+/* 4. 검색어가 없으면 지우기 버튼도 없다 */
+#searchInput:placeholder-shown ~ #clearBtn { display: none; }
+
+/* 7. 헤더 로고는 심볼만 */
+.brand-mark { width: 36px; height: 36px; }
+
+/* 9. 숫자 카드는 세로 가운데 — 검수 카드 높이에 맞춰 늘어나도 빈 느낌이 없게 */
+.stat-card { justify-content: center; }
+.stat-card.stat-insp { justify-content: flex-start; gap: 2px; }
+.stat-insp .insp-bar { margin: 4px 0 2px; }
+.stat-insp .label { gap: 6px; }
+
+/* 10. 세그먼트 안 select 는 자체 테두리를 없애고 구분선만 */
+.insp-filter-group .insp-round-sel {
+  border: none;
+  border-right: 1px solid var(--gray-200);
+  background: transparent;
+  box-shadow: none;
+}
+.insp-filter-group .btn:first-child { border-left: none; }
+
+/* ── 노트북 폭 대응 ── */
+@media (max-width: 1366px) {
+  .asset-table .cell-actions { width: 120px; }
+  .asset-table .cell-actions .btn-mini { padding: 0 6px; }
+}
+@media (max-width: 1280px) {
+  .asset-table .cell-name { min-width: 200px; }
+  /* 라벨·사용자는 상세에서 볼 수 있으니 좁은 화면에서는 접는다 */
+  .asset-table .col-label, .asset-table td[data-label="라벨"],
+  .asset-table .col-user, .asset-table td[data-label="사용자"] { display: none; }
+}
+@media (max-width: 1024px) {
+  .table-wrap { overflow-x: auto; position: relative; }
+  /* 가로로 밀어도 체크·자산명은 남는다 */
+  .asset-table .col-check, .asset-table td.col-check {
+    position: sticky; left: 0; z-index: 1; background: var(--gray-0);
+  }
+  .asset-table .cell-name, .asset-table th:nth-child(2) {
+    position: sticky; left: 44px; z-index: 1; background: var(--gray-0);
+  }
+  .asset-table tbody tr:hover .col-check,
+  .asset-table tbody tr:hover .cell-name { background: var(--gray-25); }
+  .asset-table tbody tr.is-picked .col-check,
+  .asset-table tbody tr.is-picked .cell-name,
+  .asset-table tbody tr:has(input.row-check:checked) .col-check,
+  .asset-table tbody tr:has(input.row-check:checked) .cell-name { background: var(--primary-50); }
+  /* 더 밀 수 있다는 힌트 */
+  .table-wrap::after {
+    content: "";
+    position: absolute; top: 0; right: 0; bottom: 0; width: 24px;
+    background: linear-gradient(to right, rgba(255,255,255,0), var(--gray-0));
+    pointer-events: none;
+  }
+}
+/* 9. 이 구간에서는 검수 카드가 혼자 다음 줄로 내려가 오른쪽이 비었다 */
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .stat-card.stat-insp { grid-column: 1 / -1; }
+}
+
+/* 9-보정. 검수 카드가 가장 높아 다른 카드까지 늘리고 있었다 — 100px 아래로 */
+.stat-card.stat-insp { padding: 12px 20px; }
+.stat-insp .num { line-height: 1.15; }
+.stat-insp .insp-bar { margin: 2px 0 0; }
+.stat-insp .stat-sel { height: 28px; }
+
+/* 1-보정. 자산명을 넓히면서 표가 칸보다 커져 관리 열이 잘렸다.
+   라벨·사용자를 접는 기준을 올리고, 덜 중요한 열의 상한을 낮춰 칸 안에 들인다. */
+@media (max-width: 1400px) {
+  .asset-table .col-label, .asset-table td[data-label="라벨"],
+  .asset-table .col-user, .asset-table td[data-label="사용자"] { display: none; }
+}
+.asset-table .cell-loc { max-width: clamp(140px, 13vw, 175px); }
+.asset-table .cell-dept { max-width: 118px; }
+.asset-table .cell-actions { width: 132px; }
+/* 그래도 넘치면 잘리지 않게 가로로 민다(이땐 머리글 고정을 포기한다) */
+@media (min-width: 1200px) {
+  .table-wrap { overflow-x: auto; }
+}

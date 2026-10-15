@@ -1062,7 +1062,7 @@ function updateUI() {
     const uname = myProfile?.name || myProfile?.username || (currentUser.email || "").split("@")[0];
     g("userTag").textContent = isAdmin ? `관리자: ${uname}` : `${uname} 님`;
   }
-  g("pendingCount").textContent = assetReqN;
+  setBadge("pendingCount", assetReqN);
 
   const n = unseenCount();
   const badge = g("myReqCount");
@@ -1097,7 +1097,7 @@ function renderStats() {
     ? `<div class="stat-card stat-insp">
          <div class="num">${inspectedCnt.toLocaleString()}/${total.toLocaleString()} <span class="rate">(${inspRate}%)</span></div>
          <div class="insp-bar" title="${inspRate}% 검수 완료"><div class="insp-bar-fill" style="width:${inspRate}%"></div></div>
-         <div class="label">${roundSel} 검수 진행${remaining ? ` · <button type="button" class="insp-jump" data-insp-jump="uninsp">미검수 ${remaining.toLocaleString()}건 →</button>` : ` · <span class="insp-done-all">✅ 전체 완료</span>`} · <button type="button" class="insp-detail-btn" data-insp-detail>📊 자세히</button></div>
+         <div class="label">${roundSel} 검수 진행${remaining ? ` · <button type="button" class="insp-jump" data-insp-jump="uninsp">미검수 ${remaining.toLocaleString()}건 →</button>` : ` · <span class="insp-done-all">✅ 전체 완료</span>`} · <button type="button" class="insp-detail-btn" data-insp-detail><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg>자세히</button></div>
        </div>`
     : "";
   document.getElementById("stats").innerHTML = `
