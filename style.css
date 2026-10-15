@@ -2743,3 +2743,253 @@ body { max-width: 100%; overflow-x: hidden; }
 @media (min-width: 1200px) {
   .table-wrap { overflow-x: auto; }
 }
+
+/* ============================================================
+   4단계 — 모달
+   검수·인식 화면(#inspectOverlay·#camOverlay·#scanGuideOverlay·
+   #batchInspectOverlay·#manualCodeOverlay·#inspDetailOverlay)은
+   건드리지 않기 위해, 새 class .modal-v2 가 붙은 모달에만 적용한다.
+   ============================================================ */
+
+.modal-v2 {
+  background: rgba(17, 24, 39, .48);
+  backdrop-filter: blur(2px);
+  animation: ovIn .16s ease-out;
+}
+@keyframes ovIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-v2 .modal {
+  background: var(--gray-0);
+  border-radius: var(--r-16);
+  box-shadow: var(--sh-3);
+  max-height: calc(100dvh - 48px);
+  display: flex;
+  flex-direction: column;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  animation: modalIn .18s ease-out;
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(8px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.modal-v2 .modal.modal-narrow { width: 400px; }
+.modal-v2 .modal.modal-wide { width: 760px; }
+.modal-v2 .modal.modal-xwide { width: 1120px; }
+
+.modal-v2 .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px 12px;
+  border-bottom: none;
+}
+.modal-v2 .modal-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+.modal-v2 .modal-close {
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: none;
+  border-radius: var(--r-8);
+  color: var(--gray-500);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background .12s ease-out, color .12s ease-out;
+}
+.modal-v2 .modal-close:hover { background: var(--gray-100); color: var(--gray-900); }
+
+.modal-v2 .modal-body {
+  padding: 8px 24px 20px;
+  overflow: auto;
+  flex: 1 1 auto;
+}
+.modal-v2 .modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 16px 24px;
+  border-top: 1px solid var(--gray-100);
+  background: var(--gray-0);
+  border-radius: 0 0 var(--r-16) var(--r-16);
+}
+/* 지우는 동작은 왼쪽 끝으로 떼어 놓는다 — 주 동작과 멀수록 잘못 누르지 않는다 */
+.modal-v2 .modal-footer .btn-danger { margin-right: auto; order: -1; }
+
+/* ── 상세 ── */
+#detailOverlay .modal { width: 880px; }
+/* 푸터 순서: 삭제 … 사진 추가 · 검수 · 목록으로 · 수정 */
+#detailOverlay .modal-footer #detailPhotoBtn { order: 1; }
+#detailOverlay .modal-footer #detailInspectBtn { order: 2; }
+#detailOverlay .modal-footer [data-close] { order: 3; }
+#detailOverlay .modal-footer #detailEditBtn { order: 4; }
+
+/* ── 등록/수정 ── */
+#formOverlay .modal { width: 760px; }
+.modal-v2 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; }
+.modal-v2 .form-row label {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--gray-700);
+}
+.modal-v2 .form-row .req { color: var(--danger-600); }
+/* 파일 입력 — 구조는 그대로 두고 모양만 */
+.modal-v2 input[type="file"] {
+  width: 100%;
+  padding: 10px;
+  height: auto;
+  border: 1.5px dashed var(--gray-300);
+  border-radius: var(--r-12);
+  background: var(--gray-25);
+  font-size: var(--fs-14);
+  color: var(--gray-500);
+  cursor: pointer;
+}
+.modal-v2 input[type="file"]:hover { border-color: var(--primary-600); }
+.modal-v2 input[type="file"]::file-selector-button {
+  height: 34px;
+  padding: 0 14px;
+  margin-right: 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-8);
+  background: var(--gray-0);
+  color: var(--gray-700);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.modal-v2 input[type="file"]::file-selector-button:hover {
+  background: var(--gray-50);
+  border-color: var(--gray-300);
+}
+/* OCR 안내 문구 */
+.modal-v2 .form-info {
+  background: var(--teal-50);
+  color: var(--teal-700);
+  border-radius: var(--r-8);
+  padding: 10px 12px;
+  font-size: var(--fs-13);
+}
+.modal-v2 input[type="date"] { height: var(--h-md); padding: 0 12px; }
+
+/* ── 일괄 수정 ── */
+#bulkEditOverlay .modal { width: 640px; }
+#bulkEditOverlay .bulk-field {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+#bulkEditOverlay .bulk-field > .bulk-check { margin: 0; }
+/* 체크하지 않은 줄의 입력칸은 흐리게 — 회색 칸이 줄지어 보이지 않게 */
+#bulkEditOverlay .bulk-field input:disabled,
+#bulkEditOverlay .bulk-field select:disabled,
+#bulkEditOverlay .bulk-field textarea:disabled { opacity: .5; }
+#bulkEditOverlay .bulk-insp-block {
+  display: block;
+  grid-template-columns: none;
+  background: var(--gray-25);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--r-12);
+  padding: 12px 14px;
+  margin-top: 8px;
+}
+#bulkEditOverlay .bulk-insp-block > .bulk-check { font-size: var(--fs-14); font-weight: 600; }
+
+/* ── 작은 확인창 ── */
+#delReqOverlay .modal, #pwOverlay .modal { width: 400px; }
+#delReqOverlay .modal-body, #pwOverlay .modal-body { font-size: var(--fs-15); }
+
+/* ── 라이트박스 ── */
+.lightbox { background: rgba(0, 0, 0, .85); }
+.lightbox .lightbox-close, .lightbox > button {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--gray-0);
+  border: none;
+  color: var(--gray-900);
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .modal-v2 .modal,
+  .modal-v2 .modal.modal-narrow,
+  .modal-v2 .modal.modal-wide,
+  .modal-v2 .modal.modal-xwide,
+  #detailOverlay .modal, #formOverlay .modal, #bulkEditOverlay .modal { width: 100%; }
+  .modal-v2 .form-grid { grid-template-columns: 1fr; }
+  #bulkEditOverlay .bulk-field { grid-template-columns: 1fr; gap: 6px; }
+  .modal-v2 .modal-header { padding: 16px 16px 10px; }
+  .modal-v2 .modal-body { padding: 8px 16px 16px; }
+  .modal-v2 .modal-footer { padding: 12px 16px; }
+}
+
+/* ── 상세: 실제 구조(.detail-photo + dl.detail-grid)에 맞춘 2단 ── */
+@media (min-width: 900px) {
+  #detailBody {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    gap: 0 24px;
+    align-items: start;
+  }
+  /* 사진이 있으면 .detail-photos 래퍼, 없으면 .detail-photo.no-photo 가 온다 */
+  #detailBody > .detail-photos,
+  #detailBody > .detail-photo { grid-column: 1; }
+  #detailBody > *:not(.detail-photos):not(.detail-photo) { grid-column: 2; }
+}
+#detailBody > .detail-photo {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  height: auto;
+  border-radius: var(--r-12);
+  background: var(--gray-50);
+  overflow: clip;
+}
+#detailBody > .detail-photo img { width: 100%; height: 100%; object-fit: cover; }
+/* 사진이 없을 때 넓은 빈 박스 대신 간단한 안내 */
+#detailBody > .detail-photo.no-photo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  height: auto;
+  font-size: var(--fs-14);
+  color: var(--gray-500);
+}
+/* 정보 목록 — 구분선 없이 라벨/값만 */
+#detailOverlay .detail-grid { grid-template-columns: 112px minmax(0, 1fr); gap: 10px 12px; }
+#detailOverlay .detail-grid dt {
+  padding: 0;
+  border-bottom: none;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--gray-500);
+}
+#detailOverlay .detail-grid dd {
+  padding: 0;
+  border-bottom: none;
+  font-size: var(--fs-15);
+  color: var(--gray-900);
+  font-variant-numeric: tabular-nums;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 사진 여러 장일 때도 정사각 칸으로 */
+#detailBody > .detail-photos { display: grid; gap: 8px; }
+#detailBody > .detail-photos > .detail-photo {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  height: auto;
+  border-radius: var(--r-12);
+  background: var(--gray-50);
+  overflow: clip;
+}
+#detailBody > .detail-photos > .detail-photo img { width: 100%; height: 100%; object-fit: cover; }
