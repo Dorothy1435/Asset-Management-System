@@ -3,25 +3,25 @@
     {
       "source": "/assets.json",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=86400" }
+        { "key": "Cache-Control", "value": "no-cache" }
       ]
     },
     {
       "source": "/assets2024.json",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=86400" }
+        { "key": "Cache-Control", "value": "no-cache" }
       ]
     },
     {
       "source": "/assets2025add.json",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=86400" }
+        { "key": "Cache-Control", "value": "no-cache" }
       ]
     },
     {
       "source": "/asset-groups.json",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=86400" }
+        { "key": "Cache-Control", "value": "no-cache" }
       ]
     },
     {

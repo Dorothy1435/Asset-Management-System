@@ -1078,6 +1078,8 @@ function updateUI() {
 }
 
 // ===== 통계 =====
+// 총 취득금액은 '25.2억'처럼 줄여 보여 준다. '자세히 보기'를 누르면 원 단위까지 펼친다.
+let showExactCost = false;
 function renderStats() {
   // 목록표 모드에서는 모든 수치를 목록표 661건 기준으로 낸다(회차 검수와 섞이지 않게).
   const inGroup = inspScope();
@@ -1100,7 +1102,11 @@ function renderStats() {
     : "";
   document.getElementById("stats").innerHTML = `
     <div class="stat-card${surveyMode() ? " stat-survey" : ""}"><div class="num">${total.toLocaleString()}</div><div class="label">${surveyMode() ? "📋 재물조사 목록표" : esc(groupLabel(currentGroup))}</div></div>
-    <div class="stat-card"><div class="num">${(totalCost / 100000000).toFixed(1)}억</div><div class="label">총 취득금액</div></div>
+    <div class="stat-card">
+      <div class="num">${(totalCost / 100000000).toFixed(1)}억</div>
+      ${showExactCost ? `<div class="cost-exact">${totalCost.toLocaleString()}원</div>` : ""}
+      <div class="label">총 취득금액 · <button type="button" class="insp-detail-btn" data-cost-toggle>${showExactCost ? "접기" : "자세히 보기"}</button></div>
+    </div>
     <div class="stat-card"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
     <div class="stat-card"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>
     ${inspCard}`;
@@ -5877,6 +5883,7 @@ document.getElementById("inspDetailBody").addEventListener("click", (e) => {
 });
 // 검수 대시보드의 '미검수 N건 →' 클릭 → 미검수 필터로 이동 + 목록으로 스크롤
 document.getElementById("stats").addEventListener("click", (e) => {
+  if (e.target.closest("[data-cost-toggle]")) { showExactCost = !showExactCost; renderStats(); return; }
   if (e.target.closest("[data-insp-detail]")) { openInspProgressDetail(); return; }
   const jump = e.target.closest("[data-insp-jump]");
   if (!jump) return;

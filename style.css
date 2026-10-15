@@ -2066,3 +2066,14 @@ body { max-width: 100%; overflow-x: hidden; }
 .post-file:hover { border-color: #2563eb; background: #f5f9ff; }
 .post-file:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .post-file-dl { flex: none; font-size: 12px; font-weight: 600; color: #2563eb; }
+
+/* 총 취득금액 '자세히 보기' — 원 단위 전체 금액 */
+.stat-card .cost-exact {
+  margin-top: 3px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary-dark, #1e40af);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+}
