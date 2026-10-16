@@ -6406,6 +6406,13 @@ loadData();
     clearTimeout(authTimer);
   };
   const authTimer = setTimeout(dropAuth, 1500);
+  // 로그인한 적이 없으면 기다릴 것도 없다. 로그아웃 상태에서는 applySession 이 authed 를
+  // '안 붙인 채로' 두기만 해서 class 변화가 없고, 그대로면 1.5초 동안 빈 화면만 보인다.
+  // (키 이름은 Supabase 기본값 — storageKey 를 바꾸지 않았다)
+  try {
+    const k = "sb-pmjwwvgcmaywbatryibc-auth-token";
+    if (!localStorage.getItem(k) && !/access_token|type=recovery/.test(location.hash)) dropAuth();
+  } catch { dropAuth(); }
 
   let loadOff = false;
   const dropLoad = () => {
