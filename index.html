@@ -19,9 +19,20 @@
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
-  <link rel="stylesheet" href="style.css?v=20261016e" />
+  <link rel="stylesheet" href="style.css?v=20261016f" />
 </head>
 <body class="is-loading is-auth-pending">
+  <!-- 로그인한 적이 없으면 세션을 기다릴 이유가 없다. script.js 가 내려오기 전에
+       여기서 먼저 걷어야 처음 오는 사람이 빈 화면을 한 순간도 보지 않는다.
+       (script.js 끝의 clearLoadingSkeleton 에도 같은 판단이 있다 — 이쪽은 첫 그리기 전용) -->
+  <script>
+    try {
+      if (!localStorage.getItem("sb-pmjwwvgcmaywbatryibc-auth-token")
+          && !/access_token|type=recovery/.test(location.hash)) {
+        document.body.classList.remove("is-auth-pending");
+      }
+    } catch (e) { document.body.classList.remove("is-auth-pending"); }
+  </script>
   <!-- 아이콘 모음 (Lucide). 버튼 안에서 <svg class="ic"><use href="#i-…"/></svg> 로 쓴다. -->
   <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
     <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
@@ -987,6 +998,6 @@
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20261016e"></script>
+  <script src="script.js?v=20261016f"></script>
 </body>
 </html>
