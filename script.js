@@ -31,12 +31,13 @@ function toast(msg, kind) {
       else if (/(완료|접수|되었|저장|등록되|반영|환영|성공|승인)/.test(text)) kind = "success";
       else kind = "info";
     }
-    const icons = { success: "✅", error: "⚠️", warn: "⚠️", info: "ℹ️" };
+    const icons = { success: "i-check", error: "i-alert", warn: "i-alert", info: "i-info" };
     let c = document.getElementById("toastWrap");
     if (!c) { c = document.createElement("div"); c.id = "toastWrap"; c.className = "toast-wrap"; (document.body || document.documentElement).appendChild(c); }
     const el = document.createElement("div");
     el.className = "toast toast-" + kind;
-    const ic = document.createElement("span"); ic.className = "toast-ic"; ic.textContent = icons[kind] || "ℹ️";
+    const ic = document.createElement("span"); ic.className = "toast-ic";
+    ic.innerHTML = '<svg class="ic" aria-hidden="true"><use href="#' + (icons[kind] || "i-info") + '"/></svg>';
     const m = document.createElement("span"); m.className = "toast-msg"; m.textContent = text; // textContent = XSS 안전, \n은 CSS pre-line로 표시
     const x = document.createElement("button"); x.className = "toast-x"; x.setAttribute("aria-label", "닫기"); x.textContent = "✕";
     el.append(ic, m, x);
@@ -6385,4 +6386,51 @@ loadData();
   new MutationObserver(bring).observe(nav, { attributes: true, attributeFilter: ["class"], subtree: true });
   window.addEventListener("hashchange", () => setTimeout(bring, 50));
   setTimeout(bring, 300);
+})();
+
+// 첫 화면이 고장 난 것처럼 보이던 두 가지를 가린다. (loadData 등 기존 함수는 건드리지 않고 DOM 변화만 지켜본다)
+//  · is-auth-pending : 로그인 여부가 정해지기 전. 로그인해 둔 사람에게도 시작 화면(로그인/회원가입)이
+//                      잠깐 번쩍이던 것을 막는다. 판정되거나 1.5초가 지나면 걷는다.
+//  · is-loading      : 자산 JSON(약 2.3MB)을 받는 중. 그동안 숫자·표 자리를 뼈대로 채운다.
+//                      첫 행이 생기거나 8초가 지나면 걷는다.
+(function clearLoadingSkeleton() {
+  const body = document.body;
+  const tbody = document.getElementById("assetTbody");
+  const authKnown = () => body.classList.contains("authed") || body.classList.contains("pending-approval");
+
+  let authOff = false;
+  const dropAuth = () => {
+    if (authOff) return;
+    authOff = true;
+    body.classList.remove("is-auth-pending");
+    clearTimeout(authTimer);
+  };
+  const authTimer = setTimeout(dropAuth, 1500);
+
+  let loadOff = false;
+  const dropLoad = () => {
+    if (loadOff) return;
+    loadOff = true;
+    body.classList.remove("is-loading");
+    clearTimeout(loadTimer);
+  };
+  const loadTimer = setTimeout(dropLoad, 8000);
+
+  const check = () => {
+    if (authKnown()) dropAuth();
+    // 로그아웃 상태로 판정되면 기다릴 표가 없다
+    if (!body.classList.contains("authed") && authOff && !body.classList.contains("pending-approval")) {
+      const landing = document.getElementById("landing");
+      if (landing && getComputedStyle(landing).display !== "none") dropLoad();
+    }
+    if (tbody && tbody.children.length > 0) dropLoad();
+    if (authOff && loadOff) { rowObs && rowObs.disconnect(); clsObs.disconnect(); }
+  };
+
+  const rowObs = tbody ? new MutationObserver(check) : null;
+  rowObs && rowObs.observe(tbody, { childList: true });
+  const clsObs = new MutationObserver(check);
+  clsObs.observe(body, { attributes: true, attributeFilter: ["class"] });
+  setTimeout(check, 1600);
+  check();
 })();
