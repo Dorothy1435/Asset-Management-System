@@ -212,6 +212,8 @@ borrower 값이 없으면 status는 “보관 중”으로 한다.
 
 ## 디자인 요구사항
 
+→ 최신 규칙은 맨 아래 '디자인 시스템 (2026-10 리뉴얼)' 참조
+
 전체 디자인은 깔끔하고 단순하게 만든다.
 
 관리자가 빠르게 자산을 확인할 수 있도록 표 형태를 중심으로 구성한다.
@@ -405,3 +407,129 @@ localStorage를 사용할 경우 이미지는 Base64 형태로 저장할 수 있
 * 자산 정보를 수정하거나 삭제할 수 있다.
 * 물품 사진을 등록하고 확인할 수 있다.
 * 전체 화면은 깔끔하고 행정 업무용 시스템처럼 보여야 한다.
+
+---
+
+## 디자인 시스템 (2026-10 리뉴얼)
+
+> 위의 '디자인 요구사항'·'UI 구성 방향'은 초기 기획 내용이다. **화면을 만들거나 고칠 때는 이 절을 따른다.**
+> 모든 값은 `style.css`의 `:root`에 토큰으로 들어 있다. 아래 표는 실제 값을 옮겨 적은 것이다.
+
+### 원칙 3가지
+
+1. **조용한 바탕, 강조는 한 곳.** 화면 대부분은 흰 카드 + 연한 테두리다. 진한 배경은 자산 목록의 **검수 히어로 밴드(`.stat-card.stat-insp`) 하나뿐**이다. 새로운 진한 영역을 만들지 않는다.
+2. **색의 역할을 고정한다.** 파랑(primary) = 일반 동작·링크·활성 탭 / 청록(teal) = **검수 관련 전용** / 빨강(danger) = 삭제·오류만 / 주황(warn) = 경고·주의 / 그 밖은 전부 회색. 색으로 멋을 내지 않는다.
+3. **모바일에서 1순위 동작은 검수다.** 640px 이하에서는 화면 아래에 검수 바(`#scanInspectBtn`)가 고정으로 뜬다. 모바일 화면을 설계할 때 이 바(56px + 여백)에 가리지 않도록 아래 여백을 둔다.
+
+### 토큰
+
+**색**
+
+| 쓰임 | 토큰 | 값 |
+| --- | --- | --- |
+| 제목·로고 | `--brand-900` | `#14306b` |
+| 주 동작·링크·활성 | `--primary-600` | `#2453d6` |
+| 주 동작 hover | `--primary-700` | `#1c43b3` |
+| 주 동작 연한 바탕 | `--primary-100` / `--primary-50` | `#dbe5ff` / `#eef3ff` |
+| 검수 글자·버튼 | `--teal-700` | `#0b7a80` |
+| 검수 버튼 hover·눌림 | `--teal-800` / `--teal-100` | `#09666b` / `#d8efef` |
+| 검수 연한 바탕 | `--teal-50` | `#e7f6f6` |
+| 검수 밴드 그라데이션 | `--hero-1` → `--hero-2` → `--hero-3` | `#13306b` → `#0e4f6e` → `#0b6f75` |
+| 밴드 위 강조·진행바 | `--mint-200` / `--mint-400` | `#9fe3d6` / `#5cbdaa` |
+| 보관 중 배지 | `--mint-50` / `--mint-700` | `#e7f4f1` / `#0b6b62` |
+| 흰색·카드 바탕 | `--gray-0` / `--gray-25` | `#ffffff` / `#fafbfc` |
+| 페이지 배경 | `--gray-50` | `#f7f8f7` |
+| 연한 칸·뼈대 | `--gray-100` | `#eef1f5` |
+| 테두리 | `--gray-200` | `#e8eae7` |
+| 비활성 글자 | `--gray-300` / `--num-zero` | `#cfd5de` / `#b8bec6` |
+| 보조 글자 | `--gray-500` | `#666f7b` |
+| 본문 글자 | `--gray-900` | `#111827` |
+| 표 행 hover | `--row-hover` | `#f3f8f7` |
+| 삭제·오류 | `--danger-600` / `--danger-50` | `#d92d20` / `#fef3f2` |
+| 경고 | `--warn-700` / `--warn-50` | `#b54708` / `#fffaeb` |
+| 성공 | `--success-700` / `--success-50` | `#067647` / `#ecfdf3` |
+
+대비: 글자는 배경 대비 **4.5:1 이상**. `--gray-500`은 `--gray-50` 배경 위에서 4.74:1이 되도록 맞춘 값이라 더 흐리게 바꾸지 않는다. 값이 비어 있음을 뜻하는 `−`·`0` 표시만 예외로 `--gray-300`·`--num-zero`를 쓴다.
+
+**글자**
+
+글꼴은 Pretendard Variable (없으면 맑은 고딕). 본문 `--fs-15: 15px`, 줄간격 1.55.
+`--fs-12` ~ `--fs-30` (12 / 13 / 14 / 15 / 17 / 20 / 24 / 30). **12px 미만은 쓰지 않는다.**
+
+**간격 · 반경 · 그림자 · 높이**
+
+| 종류 | 토큰 |
+| --- | --- |
+| 간격(4px 그리드) | `--sp-1` 4 · `--sp-2` 8 · `--sp-3` 12 · `--sp-4` 16 · `--sp-5` 20 · `--sp-6` 24 · `--sp-8` 32 · `--sp-10` 40 |
+| 반경 | `--r-6` 6(배지) · `--r-8` 8 · `--r-10` 10(버튼·입력) · `--r-12` 12(카드) · `--r-16` 16(표·밴드) |
+| 그림자 | `--sh-1` 카드 · `--sh-2` 떠오름 · `--sh-3` 모달 · `--sh-hero` 밴드 |
+| 컨트롤 높이 | `--h-sm` 32 · `--h-md` 38(기본) · `--h-lg` 46 |
+
+### 컴포넌트 규칙
+
+**버튼 4종**
+
+| 종류 | 클래스 | 언제 |
+| --- | --- | --- |
+| 주 동작 | `.btn .btn-primary` | 화면마다 하나. 등록·저장·적용·로그인 |
+| 보조 | `.btn .btn-secondary` | 취소·닫기·목록으로·그 밖 전부 |
+| 검수 | `.btn .btn-inspect` | **검수 관련에만.** 검수 바, 검수 확인, 촬영 시작 |
+| 삭제 | `.btn .btn-danger` | 삭제·반려처럼 되돌리기 어려운 것 |
+
+표 안의 작은 버튼은 `.btn-mini`. 아이콘은 `<svg class="ic"><use href="#i-…"/></svg>`.
+
+**모달** — `.modal-overlay.modal-v2 > .modal`, 안에 `.modal-header` / `.modal-body` / `.modal-footer`.
+푸터 버튼 순서는 **파괴적인 것이 맨 왼쪽, 주 동작이 맨 오른쪽**. 640px 이하에서는 전체 화면 시트(`width:100%`, `height:100dvh`, 모서리 0)가 되고 헤더·푸터가 sticky로 붙는다. 상세 모달만 예외로 모바일에서 2열 격자이고 **'검수 확인'이 첫 번째**다(현장에서 가장 많이 누른다).
+
+**표** — `.table-wrap > table.asset-table`. 머리글은 1200px 이상에서 화면 위에 고정된다(`th { position: sticky }`). 그 아래에서는 `.table-wrap`이 가로 스크롤 컨테이너가 되므로 **고정을 끈다**(스크롤 컨테이너 안에서 sticky가 엉켜 머리글이 2행을 덮은 적이 있다). 열을 접는 기준은 아래 '반응형'. 640px 이하에서는 행이 카드로 바뀌고 `td[data-label]::before`가 칸 이름을 왼쪽에 찍는다.
+
+**배지** — `.badge` + `.badge-normal`(보관/정상, 민트) · `.badge-warn`(대여/주의, 주황) · `.badge-gray`(그 밖). 배경은 연한 색, 글자는 진한 색 한 쌍으로만 쓴다.
+
+**빈 상태** — `.empty-msg` 안에 `.empty-ic`(SVG) + `.empty-title` + `.empty-sub`. 목록을 만들면 빈 상태를 반드시 같이 만든다. 자료를 아직 못 받은 동안에는 빈 상태 대신 뼈대(`body.is-loading`)를 보여 준다.
+
+**토스트** — `toast(글[, 종류])`. 어두운 바탕에 아이콘 색으로만 종류를 구분한다. 성공 민트 / 경고 `--warn-700` / 오류 `--danger-600` / 안내 `--toast-info`. 배경은 칠하지 않는다.
+
+**로딩** — `<body class="is-loading is-auth-pending">`로 시작한다. `is-auth-pending`은 로그인 여부가 정해질 때까지(최대 1.5초) 시작 화면과 헤더 버튼을 가린다. 저장된 로그인 토큰이 없으면 기다리지 않고 바로 걷는다. `is-loading`은 자산 JSON을 받는 동안(첫 행이 생기거나 8초까지) 숫자와 표를 뼈대로 덮는다. 둘 다 `script.js` 끝의 `clearLoadingSkeleton()`이 걷는다.
+
+### 하지 말 것
+
+* **이모지를 아이콘으로 쓰지 않는다.** `index.html` 맨 위 SVG sprite를 쓴다. 현재 있는 것: `i-bell i-clipboard i-tool i-download i-history i-camera i-tag i-file i-search i-check i-edit i-receipt i-storage i-phone i-image i-chevron i-chart i-filter i-dots i-qr i-bulb i-alert i-info`. 없으면 같은 모양(Lucide, `stroke-width:1.75`)으로 sprite에 추가한다.
+* **`style="color:#..."` 같은 인라인 색 하드코딩.** 토큰을 쓴다. 토큰에 없으면 `:root`에 추가한다.
+* **새 진한 배경 영역 추가.** 진한 곳은 검수 밴드 하나뿐이다.
+* **탭·메뉴마다 다른 색 쓰기.** 2024/2025/2026/김해시/전자 탭은 모두 같은 모양이다.
+* **상시 움직이는 애니메이션.** 전환은 0.12~0.2초로 짧게. 반짝임은 로딩 뼈대에서만. `prefers-reduced-motion`에서 멈추게 한다.
+* **`[hidden]` 덮어쓰기.** `style.css` 맨 위의 `[hidden] { display: none !important; }`는 JS가 `hidden`으로 숨긴 요소가 `display:flex` 같은 뒤 규칙에 밀려 다시 나타나던 버그를 막는 장치다. 지우지 말고, 새 규칙에서 `[hidden]`인 요소를 보이게 만들지 않는다.
+* **`!important` 남발.** 위 `[hidden]`과 인쇄 규칙 외에는 쓰지 않는다.
+
+### 보존 구역 — 디자인 작업 시 수정 금지
+
+라벨 인식·촬영은 실제 재물조사에 쓰고 있다. **아래는 읽기만 한다.**
+
+* `script.js` 함수: `ensureTesseract` `ensureJsQR` `getNumberOcrWorker` `warmupNumberOcr` `terminateNumberOcrWorker` `recognizeAssetNumber` `recognizeAssetInPool` `buildInspectPool` `preprocessOcrImage` `rotateImageDataUrl` `decodeLabelQR` `fillFromQR` `runLabelOcr` `fillFromOcr` `startScanInspect` `launchScanCamera` `handleScanCapture` `cancelScanRecognition` `retakeFromScan` `openBatchInspect` `setBatchMode` `openPdfInspect` `handleBatchFiles` `handlePdfInspect` `classifyBatchItem` `recognizeIntoItem` `retryBatchItem` `applyBatchInspect` `openInspect` `submitInspect` `writeInspections` `applyInspect` `handleInspExtraCapture` `camStart` `camStop` `camCapture` `openCamera` `closeCamera` `showScanSuccess` `scanHaptic` `loadData` `initAuth` `applySession`
+* 촬영용 숨은 입력(`#scanCameraInput`, `#inspExtraInput` 등 `capture="environment"`)의 속성·`hidden`·`id`
+* `vendor/` 폴더 전체
+
+검수 화면(`#inspectOverlay` `#camOverlay` `#scanGuideOverlay` `#batchInspectOverlay` `#manualCodeOverlay` `#inspDetailOverlay`)은 **CSS로 모양을 바꾸는 것은 되지만**, 요소를 지우거나 `id`를 바꾸거나 JS가 찾는 구조를 바꾸면 안 된다. 손댔으면 폰에서 검수 1회를 실제로 돌려 본다.
+
+### 반응형 기준점
+
+| 폭 | 바뀌는 것 |
+| --- | --- |
+| 1440 | 본문 최대 폭. 그 위로는 가운데 정렬만 |
+| 1400 이하 | 표에서 **라벨·사용자** 열을 접는다 |
+| 1280 이하 | 자산명 최소 폭을 줄인다 |
+| 1200 이상 | 표 머리글 고정(sticky). 아래로는 끈다 |
+| 1025 이상 | 검수 밴드가 왼쪽 한 칸에서 두 행(`2.3fr 1fr 1fr`), 나머지 4장은 오른쪽 2×2 |
+| 1024 이하 | 검수 밴드가 맨 위 전체 폭 + 작은 카드 4장 한 줄. 표는 `.table-wrap` 가로 스크롤(체크·자산명 열은 왼쪽 고정) |
+| 640 이하 | 헤더 1줄 56px, 등록은 아이콘만, 사용자 메뉴는 아바타 + 하단 시트, 통계 2열, 표는 카드, 모달은 전체 화면 시트, **하단 고정 검수 바** |
+| 380 이하 | 글자·여백 한 단계 축소 |
+
+중간에 새 기준점을 만들지 않는다. (한때 860/640/560/520/380으로 쪼개져 있던 것을 640/380으로 정리했다.)
+
+### 새 화면을 만들 때 체크리스트
+
+1. 색·간격·반경·높이를 **토큰으로만** 쓴다. 필요하면 `:root`에 추가하고 주석에 쓰임을 적는다.
+2. 버튼은 primary / secondary / inspect / danger 중 하나를 고르고, 주 동작은 화면당 하나만 둔다.
+3. 목록이면 **빈 상태**를, 자료를 받아 오면 **로딩 뼈대**를 같이 만든다.
+4. **390px 폭에서 확인**한다. 가로 스크롤이 생기면 안 되고, 하단 검수 바에 내용이 가리면 안 된다.
+5. `prefers-reduced-motion`에서 애니메이션이 멈추는지, `Tab`으로 모든 버튼에 포커스 링이 보이는지 확인한다.
