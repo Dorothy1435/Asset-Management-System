@@ -1097,7 +1097,7 @@ function renderStats() {
     ? `<div class="stat-card stat-insp">
          <div class="num">${inspectedCnt.toLocaleString()}/${total.toLocaleString()} <span class="rate">(${inspRate}%)</span></div>
          <div class="insp-bar" title="${inspRate}% 검수 완료"><div class="insp-bar-fill" style="width:${inspRate}%"></div></div>
-         <div class="label">${roundSel} 검수 진행${remaining ? ` · <button type="button" class="insp-jump" data-insp-jump="uninsp">미검수 ${remaining.toLocaleString()}건 →</button>` : ` · <span class="insp-done-all">✅ 전체 완료</span>`} · <button type="button" class="insp-detail-btn" data-insp-detail><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg>자세히</button></div>
+         <div class="label"><span class="insp-lb-head">${roundSel} 검수 진행</span>${remaining ? `<span class="insp-sep"> · </span><button type="button" class="insp-jump" data-insp-jump="uninsp">미검수 ${remaining.toLocaleString()}건 →</button>` : `<span class="insp-sep"> · </span><span class="insp-done-all"><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>전체 완료</span>`}<span class="insp-sep"> · </span><button type="button" class="insp-detail-btn" data-insp-detail><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg>자세히</button></div>
        </div>`
     : "";
   document.getElementById("stats").innerHTML = `
@@ -1292,13 +1292,13 @@ function syncInspButtons() {
   const uninspBtn = document.getElementById("uninspBtn");
   if (uninspBtn) {
     uninspBtn.hidden = !showInsp;
-    uninspBtn.textContent = `🔍 미검수`;
+    uninspBtn.innerHTML = `<svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>미검수`;
     uninspBtn.classList.toggle("active", showInsp && inspView === "uninsp");
   }
   const inspDoneBtn = document.getElementById("inspDoneBtn");
   if (inspDoneBtn) {
     inspDoneBtn.hidden = !showInsp;
-    inspDoneBtn.textContent = `✅ 검수 완료`;
+    inspDoneBtn.innerHTML = `<svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>검수 완료`;
     inspDoneBtn.classList.toggle("active", showInsp && inspView === "done");
   }
 }
@@ -1541,7 +1541,7 @@ function renderPagination() {
   for (let p = currentPage - 2; p <= currentPage + 2; p++) if (p > 1 && p < totalPages) range.push(p);
   if (totalPages > 1) range.push(totalPages);
   [...new Set(range)].sort((a, b) => a - b).forEach((p, i, arr) => {
-    if (i > 0 && p - arr[i - 1] > 1) html += `<span style="padding:0 4px;color:#9ca3af;">…</span>`;
+    if (i > 0 && p - arr[i - 1] > 1) html += `<span class="page-ellipsis">…</span>`;
     html += `<button data-page="${p}" class="${p === currentPage ? "active" : ""}">${p}</button>`;
   });
   html += `<button data-page="${currentPage + 1}" ${currentPage === totalPages ? "disabled" : ""}>›</button>`;
@@ -1600,7 +1600,7 @@ function openDetail(id) {
         `<div class="detail-photo"><img src="${src}" alt="물품 사진 ${i + 1}" />${
           isAdmin ? `<button type="button" class="detail-photo-del" data-photo-del="${i}" title="이 사진 삭제">✕</button>` : ""
         }</div>`).join("")}</div>`
-    : `<div class="detail-photo no-photo">등록된 사진 없음</div>`;
+    : `<div class="detail-photo no-photo"><svg class="ic no-photo-ic" aria-hidden="true"><use href="#i-image"/></svg>등록된 사진 없음</div>`;
   const labelImgSrc = isImageData(a.labelFile) ? a.labelFile : (a.labelPreview || "");
   const labelPhoto = labelImgSrc
     ? `<div class="detail-photo detail-label-photo"><span class="detail-photo-cap">라벨 사진${isImageData(a.labelFile) ? "" : " (PDF 1페이지)"}</span><img src="${labelImgSrc}" alt="라벨 사진" /></div>`
@@ -1639,7 +1639,7 @@ function openDetail(id) {
   const full = pics.length >= MAX_PHOTOS;
   photoBtn.hidden = !currentUser;
   photoBtn.disabled = full;
-  photoBtn.textContent = full ? `📷 사진 ${MAX_PHOTOS}장 가득참` : (isAdmin ? "📷 사진 추가" : "📷 사진 추가 요청");
+  photoBtn.innerHTML = `<svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg>` + (full ? `사진 ${MAX_PHOTOS}장 가득참` : (isAdmin ? "사진 추가" : "사진 추가 요청"));
   photoBtn.title = full
     ? `사진은 자산당 최대 ${MAX_PHOTOS}장입니다. 더 넣으려면 '수정'에서 기존 사진을 지워주세요.`
     : `현재 ${pics.length}/${MAX_PHOTOS}장 · 촬영하거나 앨범에서 골라 추가합니다`;
@@ -3739,7 +3739,7 @@ function renderInspExtra() {
   ).join("");
   const full = inspectExtraPhotos.length >= INSP_EXTRA_MAX;
   btn.hidden = full;
-  btn.textContent = inspectExtraPhotos.length ? `📷 물품 사진 더 찍기 (${inspectExtraPhotos.length}/${INSP_EXTRA_MAX})` : "📷 물품 사진 촬영";
+  btn.innerHTML = `<svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg>` + (inspectExtraPhotos.length ? `물품 사진 더 찍기 (${inspectExtraPhotos.length}/${INSP_EXTRA_MAX})` : "물품 사진 촬영");
   if (hint) hint.textContent = full
     ? `물품 사진 ${INSP_EXTRA_MAX}장을 모두 찍었어요. ‘검수 확인’을 누르면 함께 저장됩니다.`
     : "검수한 자산의 실물 사진을 최대 3장까지 이어서 찍을 수 있어요. 원하는 만큼만 찍고 ‘검수 확인’을 누르면 함께 저장됩니다.";

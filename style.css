@@ -19,13 +19,19 @@
   --teal-700: #0b7a80;                     /* 검수 글자·버튼 */
   --teal-500: #0ba2a9;                     /* 진행바 채움(장식) */
   --teal-50: #e7f6f6;
+  --teal-100: #d8efef;                     /* 검수 버튼 hover */
+  --teal-800: #09666b;                     /* 검수 버튼 눌림·hover */
+  --brand-800: #0b5f6b;                    /* 시작 화면 그라데이션 끝 */
+  --toast-ok: #4ade80;                     /* 어두운 토스트 위 아이콘 — 밝은 쪽이라 회색 계열 토큰이 안 맞는다 */
+  --toast-warn: #fbbf24;
+  --toast-info: #7dd3fc;
   --gray-0: #ffffff;
   --gray-25: #fafbfc;
   --gray-50: #f5f7fa;                      /* 페이지 배경 */
   --gray-100: #eef1f5;
   --gray-200: #e3e7ed;                     /* 테두리 */
   --gray-300: #cfd5de;
-  --gray-500: #6b7480;                     /* 보조 글자 */
+  --gray-500: #666f7b;                     /* 보조 글자 — gray-50 배경 위에서 4.5:1 이 되도록 한 칸 어둡게 */
   --gray-700: #374151;
   --gray-900: #111827;                     /* 본문 */
   --danger-600: #d92d20;  --danger-50: #fef3f2;
@@ -714,6 +720,17 @@ h1, h2, h3, h4 { letter-spacing: -0.02em; }
   outline: 2px solid var(--primary-600);
   outline-offset: 2px;
 }
+/* 키보드로 다닐 때 지금 어디에 있는지 언제나 보이게 — 버튼 말고 나머지 전부 */
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--primary-600);
+  outline-offset: 2px;
+}
 .btn:disabled, .btn[disabled] { opacity: .45; cursor: not-allowed; }
 .btn svg { width: 16px; height: 16px; flex: none; }
 .btn-detail {
@@ -1139,10 +1156,10 @@ input[type="checkbox"], input[type="radio"] {
 
 /* 검수(Inspection) */
 .btn-inspect { background: var(--teal-50); color: var(--teal-700); border: 1px solid rgba(11, 122, 128, .25); }
-.btn-inspect:hover { background: #d8efef; }
+.btn-inspect:hover { background: var(--teal-100); }
 /* 현장 핵심 동작인 '검수'만 채움 */
 #scanInspectBtn { background: var(--teal-700); color: var(--gray-0); border-color: var(--teal-700); }
-#scanInspectBtn:hover { background: #09666b; border-color: #09666b; }
+#scanInspectBtn:hover { background: var(--teal-800); border-color: var(--teal-800); }
 .req-inspect { background: var(--teal-50); color: var(--teal-700); }
 
 .insp-period { display: flex; gap: 8px; }
@@ -2961,11 +2978,14 @@ body { max-width: 100%; overflow-x: hidden; }
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-direction: column;
+  gap: 8px;
   aspect-ratio: 1 / 1;
   height: auto;
   font-size: var(--fs-14);
   color: var(--gray-500);
 }
+#detailBody > .detail-photo.no-photo .no-photo-ic { width: 28px; height: 28px; color: var(--gray-300); }
 /* 정보 목록 — 구분선 없이 라벨/값만 */
 #detailOverlay .detail-grid { grid-template-columns: 112px minmax(0, 1fr); gap: 10px 12px; }
 #detailOverlay .detail-grid dt {
@@ -3003,7 +3023,7 @@ body { max-width: 100%; overflow-x: hidden; }
 
 /* ── 1. 시작 화면 ── */
 .landing-bg {
-  background: linear-gradient(135deg, var(--brand-900) 0%, #0b5f6b 100%);
+  background: linear-gradient(135deg, var(--brand-900) 0%, var(--brand-800) 100%);
 }
 .landing-bg::before {
   background:
@@ -3194,9 +3214,9 @@ body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
 .toast-x:hover { color: var(--gray-0); }
 .toast-ic { font-size: 16px; }
 /* 종류는 아이콘 색으로만 — 배경은 칠하지 않는다 */
-.toast-success .toast-ic { color: #4ade80; }
-.toast-warn .toast-ic, .toast-error .toast-ic { color: #fbbf24; }
-.toast-info .toast-ic { color: #7dd3fc; }
+.toast-success .toast-ic { color: var(--toast-ok); }
+.toast-warn .toast-ic, .toast-error .toast-ic { color: var(--toast-warn); }
+.toast-info .toast-ic { color: var(--toast-info); }
 
 /* ── 7. 알림 패널·안내 ── */
 #installGuideOverlay .modal { width: 420px; }
@@ -3239,7 +3259,7 @@ body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
   border-color: var(--teal-700);
   color: var(--gray-0);
 }
-#scanGuideStart:hover { background: #09666b; border-color: #09666b; }
+#scanGuideStart:hover { background: var(--teal-800); border-color: var(--teal-800); }
 
 /* 검수 확인 창 — 자산 정보 박스가 분홍이라 경고처럼 보였다 */
 #inspectOverlay .del-target {
@@ -3253,7 +3273,7 @@ body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
   border-color: var(--teal-700);
   color: var(--gray-0);
 }
-#inspectOverlay #inspectSubmit:hover { background: #09666b; border-color: #09666b; }
+#inspectOverlay #inspectSubmit:hover { background: var(--teal-800); border-color: var(--teal-800); }
 #inspectOverlay .insp-note { background: var(--teal-50); color: var(--teal-700); }
 
 /* ============================================================
@@ -3325,33 +3345,39 @@ body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
 
   /* ── 통계: 가로 1줄 + 검수 카드는 전체 폭 ── */
   .stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
     margin-bottom: 12px;
   }
-  .stats::-webkit-scrollbar { display: none; }
   .stat-card {
-    flex: 0 0 140px;
     height: 72px;
     padding: 12px 14px;
-    scroll-snap-align: start;
   }
   .stat-card .num { font-size: 22px; }
-  .stat-card .label { font-size: var(--fs-12); }
+  .stat-card .label { font-size: var(--fs-13); line-height: 1.35; }
+  /* '총 취득금액 · 자세히 보기'는 링크가 아랫줄로 내려가도 된다 */
+  .stat-card .label { white-space: normal; }
+  .stat-card .cost-exact { display: inline-block; }
   /* 현장에서 가장 중요한 정보 */
   .stat-card.stat-insp {
-    flex: 1 0 100%;
+    grid-column: 1 / -1;
     height: auto;
     padding: 14px 16px;
     order: 99;
   }
   .stat-insp .num { font-size: var(--fs-24); }
   .stat-insp .insp-bar { height: 10px; margin: 6px 0 4px; }
-  .stat-insp .label { font-size: var(--fs-13); }
+  /* F: 두 줄로 나눠 '자세히'가 줄 끝 구분점 뒤로 떨어지지 않게 */
+  .stat-insp .label { font-size: var(--fs-13); row-gap: 6px; column-gap: 0; }
+  .stat-insp .label .insp-sep { display: none; }
+  .stat-insp .label .insp-lb-head {
+    flex: 1 0 100%;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .stat-insp .label .insp-jump,
+  .stat-insp .label .insp-done-all { margin-right: auto; }
+  .stat-insp .label .insp-detail-btn { margin-left: auto; }
 
   /* ── 툴바 ── */
   .toolbar-main { gap: 6px; flex-wrap: nowrap; }
@@ -3388,9 +3414,9 @@ body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
     box-shadow: var(--sh-2);
   }
   #scanInspectBtn .ic { width: 22px; height: 22px; }
-  #scanInspectBtn:active { transform: scale(.98); background: #09666b; }
-  /* 버튼 뒤 흰 바 — 검수 버튼이 보일 때만 */
-  body:has(#scanInspectBtn:not([hidden]))::after {
+  #scanInspectBtn:active { transform: scale(.98); background: var(--teal-800); }
+  /* 버튼 뒤 흰 바 — 자산 목록 화면에서 검수 버튼이 보일 때만 */
+  body.authed:has(#page-assets:not([hidden])):has(#scanInspectBtn:not([hidden]))::after {
     content: "";
     position: fixed; left: 0; right: 0; bottom: 0;
     height: calc(76px + env(safe-area-inset-bottom));
@@ -3405,11 +3431,29 @@ body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
   body:has(.user-menu[open]) #scanInspectBtn { display: none; }
   body:has(.modal-overlay:not([hidden]))::after,
   body:has(.user-menu[open])::after { display: none; }
-  /* 마지막 카드·페이지네이션이 바에 가리지 않게 */
-  .container { padding-bottom: calc(56px + 20px + 24px + env(safe-area-inset-bottom)); }
+  /* 마지막 카드·페이지네이션이 바에 가리지 않게 — 목록 화면일 때만 */
+  body.authed:has(#page-assets:not([hidden])):has(#scanInspectBtn:not([hidden])) .container {
+    padding-bottom: calc(56px + 20px + 24px + env(safe-area-inset-bottom));
+  }
 
   /* ── 자산 카드 ── */
   .asset-table td { font-size: var(--fs-14); padding: 3px 0; }
+  /* PC 표에서 칸 폭을 묶어 둔 규칙이 카드에도 걸려 '기타/김해·', '글로컬' 처럼 잘렸다.
+     현장 검수에서 위치는 핵심 정보라 카드에서는 폭 제한을 푼다. */
+  .asset-table .cell-loc, .asset-table .cell-dept {
+    max-width: none;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  /* 위치는 길면 두 줄까지. display 를 -webkit-box 로 바꾸면 라벨/값 두 칸 배치가 깨져서
+     flex 를 그대로 두고 높이로 끊는다. */
+  .asset-table .cell-loc {
+    align-items: flex-start;
+    max-height: calc(2 * 1.5em + 10px);
+    overflow: hidden;
+  }
+  .asset-table .cell-loc::before { line-height: 1.5; }
   .asset-table td[data-label]::before { width: 72px; flex: none; }
   .asset-table .cell-name { font-size: 16px; font-weight: 600; min-width: 0; }
   .asset-table .cell-num { font-size: var(--fs-13); color: var(--gray-500); }
@@ -3468,6 +3512,16 @@ body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
   /* 상세: 사진 전체 폭 4:3, 현장에선 '검수 확인'이 주 동작 */
   #detailBody > .detail-photos > .detail-photo,
   #detailBody > .detail-photo { aspect-ratio: 4 / 3; }
+  /* 사진이 없을 땐 빈 박스가 첫 화면을 다 먹지 않게 한 줄로 */
+  #detailBody > .detail-photo.no-photo {
+    aspect-ratio: auto;
+    height: 72px;
+    gap: 8px;
+    background: var(--gray-25);
+    font-size: var(--fs-14);
+  }
+  #detailBody > .detail-photo.no-photo .no-photo-ic { width: 20px; height: 20px; }
+  #detailBody > .detail-photo.no-photo { flex-direction: row; }
   #detailOverlay .modal-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   #detailOverlay .modal-footer #detailInspectBtn {
     order: 1;
@@ -3533,3 +3587,34 @@ body:has(#authOverlay:not([hidden])) .landing-box { visibility: hidden; }
   .header h1 { font-size: var(--fs-15); }
   .insp-filter-group .btn { font-size: var(--fs-13); padding: 0 6px; }
 }
+
+/* ───────────────────────────────────────────────
+   인쇄 — 자산 목록 표만 나오게
+   ─────────────────────────────────────────────── */
+@media print {
+  /* 화면 전용 요소는 모두 숨긴다 */
+  .header, .main-nav, .toolbar, .stats, .bulk-bar, .pagination, .footer,
+  #scanInspectBtn, .modal-overlay, .toast-wrap, .result-count,
+  .asset-table .cell-actions, .asset-table th:last-child,
+  .asset-table .cell-check, .asset-table th:first-child { display: none !important; }
+  /* 검수 바 뒤 흰 바도 없앤다 */
+  body::after { display: none !important; }
+
+  html, body { background: #fff; }
+  .container { max-width: none; padding: 0; }
+  .asset-table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+  .asset-table th, .asset-table td {
+    border: 1px solid #999;
+    padding: 4px 6px;
+    white-space: normal;
+    max-width: none;
+  }
+  .asset-table thead { display: table-header-group; }   /* 쪽마다 머리글 반복 */
+  .asset-table tr { page-break-inside: avoid; }
+  .badge { border: 1px solid #999; background: none !important; color: #000 !important; }
+  a { text-decoration: none; color: #000; }
+  * { box-shadow: none !important; }
+}
+
+/* 페이지 번호 사이 '…' — 인라인 색을 토큰으로 옮겼다 */
+.page-ellipsis { padding: 0 4px; color: var(--gray-500); }

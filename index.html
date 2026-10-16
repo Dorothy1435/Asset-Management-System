@@ -18,7 +18,7 @@
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
-  <link rel="stylesheet" href="style.css?v=20261015f" />
+  <link rel="stylesheet" href="style.css?v=20261016a" />
 </head>
 <body>
   <!-- 아이콘 모음 (Lucide). 버튼 안에서 <svg class="ic"><use href="#i-…"/></svg> 로 쓴다. -->
@@ -42,6 +42,8 @@
     <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
     <symbol id="i-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M7 12h10M11 18h2"/></symbol>
     <symbol id="i-dots" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r=".6"/><circle cx="12" cy="12" r=".6"/><circle cx="12" cy="19" r=".6"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20h1"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.5.4.8 1 .8 1.6v.5h5.4v-.5c0-.6.3-1.2.8-1.6A6 6 0 0 0 12 3Z"/></symbol>
   </svg>
 
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -724,7 +726,7 @@
           <label>물품 사진 추가 <span class="label-hint">(선택 · 최대 3장)</span></label>
           <div class="insp-extra-grid" id="inspExtraPreview"></div>
           <input type="file" id="inspExtraInput" accept="image/*" capture="environment" hidden />
-          <button type="button" class="btn btn-secondary btn-sm" id="inspExtraBtn">📷 물품 사진 촬영</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="inspExtraBtn"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg>물품 사진 촬영</button>
           <p class="insp-extra-hint" id="inspExtraHint">검수한 자산의 실물 사진을 최대 3장까지 이어서 찍을 수 있어요. 원하는 만큼만 찍고 <b>‘검수 확인’</b>을 누르면 함께 저장됩니다.</p>
         </div>
         <div class="form-row" style="margin-bottom:12px;">
@@ -908,10 +910,10 @@
       <h2 class="scan-guide-title">자산 검수 촬영</h2>
       <p class="scan-guide-sub">라벨에 인쇄된 <b>자산코드</b>가<br />또렷하게 보이도록 촬영해 주세요.</p>
       <ul class="scan-guide-list">
-        <li><span class="sg-ic">📱</span> <span>휴대폰을 <b>세로</b>로 들고 촬영하세요.</span></li>
-        <li><span class="sg-ic">🔍</span> <span>자산코드가 화면에 <b>크고 반듯하게</b> 담기도록.</span></li>
-        <li><span class="sg-ic">🔳</span> <span>라벨의 <b>QR코드</b>도 함께 화면에 나오도록 찍어주세요.</span></li>
-        <li><span class="sg-ic">💡</span> <span><b>밝은 곳</b>에서 그림자·흔들림 없이.</span></li>
+        <li><span class="sg-ic"><svg class="ic" aria-hidden="true"><use href="#i-phone"/></svg></span> <span>휴대폰을 <b>세로</b>로 들고 촬영하세요.</span></li>
+        <li><span class="sg-ic"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg></span> <span>자산코드가 화면에 <b>크고 반듯하게</b> 담기도록.</span></li>
+        <li><span class="sg-ic"><svg class="ic" aria-hidden="true"><use href="#i-qr"/></svg></span> <span>라벨의 <b>QR코드</b>도 함께 화면에 나오도록 찍어주세요.</span></li>
+        <li><span class="sg-ic"><svg class="ic" aria-hidden="true"><use href="#i-bulb"/></svg></span> <span><b>밝은 곳</b>에서 그림자·흔들림 없이.</span></li>
       </ul>
       <div class="scan-guide-actions">
         <button class="btn btn-primary btn-lg" id="scanGuideStart"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg>촬영 시작</button>
@@ -982,6 +984,6 @@
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20261015f"></script>
+  <script src="script.js?v=20261016a"></script>
 </body>
 </html>
