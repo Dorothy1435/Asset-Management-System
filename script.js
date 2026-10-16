@@ -937,7 +937,7 @@ async function renderMyHistory() {
     }
   }
   if (!myHistCache.length) {
-    body.innerHTML = `<div class="empty-msg"><div class="empty-ic">🧾</div><div class="empty-title">아직 기록이 없습니다</div>
+    body.innerHTML = `<div class="empty-msg"><div class="empty-ic"><svg class="empty-art" aria-hidden="true"><use href="#i-empty-clip"/></svg></div><div class="empty-title">아직 기록이 없습니다</div>
       <div class="empty-sub">자산을 등록·수정·검수하면 여기에 쌓입니다.</div></div>`;
     return;
   }
@@ -1106,7 +1106,7 @@ function renderStats() {
     <div class="stat-card">
       <div class="num">${(totalCost / 100000000).toFixed(1)}억</div>
       ${showExactCost ? `<div class="cost-exact">${totalCost.toLocaleString()}원</div>` : ""}
-      <div class="label">총 취득금액 · <button type="button" class="insp-detail-btn" data-cost-toggle>${showExactCost ? "접기" : "자세히 보기"}</button></div>
+      <div class="label">총 취득금액<span class="cost-sep"> · </span><button type="button" class="insp-detail-btn" data-cost-toggle>${showExactCost ? "접기" : "자세히 보기"}</button></div>
     </div>
     <div class="stat-card${labelCount ? "" : " is-zero"}"><div class="num">${labelCount}</div><div class="label">라벨 파일</div></div>
     <div class="stat-card${inUse ? "" : " is-zero"}"><div class="num">${inUse}</div><div class="label">사용/대여 중</div></div>
@@ -1316,7 +1316,7 @@ function render() {
     emptyMsg.innerHTML = (surveyMode() && inspView === "uninsp" && surveyTargets)
       ? `<div class="empty-ic">🎉</div><div class="empty-title">재물조사 목록표 검수 완료</div>
          <div class="empty-sub">목록표 ${surveyTargets.size.toLocaleString()}건을 모두 검수했습니다. ‘📋 재물조사 결과’로 내보내세요.</div>`
-      : `<div class="empty-ic">🔍</div><div class="empty-title">검색 결과가 없습니다</div>
+      : `<div class="empty-ic"><svg class="empty-art" aria-hidden="true"><use href="#i-empty-search"/></svg></div><div class="empty-title">검색 결과가 없습니다</div>
          <div class="empty-sub">검색어나 필터를 바꿔 다시 시도해 보세요.</div>`;
     emptyMsg.hidden = false;
     document.getElementById("pagination").innerHTML = "";
@@ -1715,7 +1715,7 @@ function renderChangeLogModal() {
   if (kw) rows = rows.filter((h) =>
     `${h.asset_name || ""} ${h.asset_id} ${stripTags(histSummary(h))} ${changeWho(h)}`.toLowerCase().includes(kw));
   if (!rows.length) {
-    body.innerHTML = `<div class="empty-msg"><div class="empty-ic">📜</div>
+    body.innerHTML = `<div class="empty-msg"><div class="empty-ic"><svg class="empty-art" aria-hidden="true"><use href="#i-empty-clip"/></svg></div>
       <div class="empty-title">${kw ? "검색 결과가 없습니다" : "변경 기록이 없습니다"}</div>
       <div class="empty-sub">${kw ? "다른 검색어로 시도해 보세요." : "자산을 등록·수정하면 여기에 시간순으로 쌓입니다."}</div></div>`;
     return;
@@ -4784,7 +4784,7 @@ function renderAccessLog() {
   // 실제 '접속(login)'만. 업로드 오류 등 진단 로그는 접속 로그에서 제외.
   const logs = accessLogs.filter((l) => String(l.event || "") === "login");
   if (!logs.length) {
-    body.innerHTML = `<div class="empty-msg"><div class="empty-ic">🧾</div><div class="empty-title">접속 기록이 없습니다</div><div class="empty-sub">사용자가 로그인하면 여기에 표시됩니다.</div></div>`;
+    body.innerHTML = `<div class="empty-msg"><div class="empty-ic"><svg class="empty-art" aria-hidden="true"><use href="#i-empty-clip"/></svg></div><div class="empty-title">접속 기록이 없습니다</div><div class="empty-sub">사용자가 로그인하면 여기에 표시됩니다.</div></div>`;
     return;
   }
   // 사용자별 그룹(이메일 기준)
@@ -4851,7 +4851,7 @@ function renderReview() {
   if (!body) return;
   // 관리자 승격 요청(grant_admin)은 자산 결재 목록이 아니라 '회원 관리'에서 처리한다.
   const reviewable = requests.filter((r) => r.action !== "grant_admin");
-  if (reviewable.length === 0) { selectedReqIds.clear(); body.innerHTML = `<div class="empty-msg">대기 중인 요청이 없습니다.</div>`; return; }
+  if (reviewable.length === 0) { selectedReqIds.clear(); body.innerHTML = `<div class="empty-msg"><div class="empty-ic"><svg class="empty-art" aria-hidden="true"><use href="#i-empty-clip"/></svg></div><div class="empty-title">대기 중인 요청이 없습니다.</div></div>`; return; }
   // 유효한 선택만 유지
   const validIds = new Set(reviewable.map((r) => String(r.id)));
   selectedReqIds.forEach((id) => { if (!validIds.has(id)) selectedReqIds.delete(id); });
@@ -5446,7 +5446,7 @@ async function openBoardPage() {
 }
 function renderBoard() {
   const body = document.getElementById("boardBody");
-  if (posts.length === 0) { body.innerHTML = `<div class="empty-msg">아직 게시글이 없습니다. 첫 글을 남겨보세요.</div>`; return; }
+  if (posts.length === 0) { body.innerHTML = `<div class="empty-msg"><div class="empty-ic"><svg class="empty-art" aria-hidden="true"><use href="#i-empty-chat"/></svg></div><div class="empty-title">아직 게시글이 없습니다. 첫 글을 남겨보세요.</div></div>`; return; }
   const notices = posts.filter((p) => p.type === "notice");
   const suggestions = posts.filter((p) => p.type !== "notice");
   const card = (p) => {
@@ -6440,4 +6440,63 @@ loadData();
   clsObs.observe(body, { attributes: true, attributeFilter: ["class"] });
   setTimeout(check, 1600);
   check();
+})();
+
+// 통계·밴드 숫자를 처음 볼 때만 0에서 세어 올린다. (renderStats 가 그린 결과의 '표시'만 바꾼다)
+// 같은 값으로 다시 그려지면 애니메이션 없이 그대로 둔다.
+(function countUpStats() {
+  const stats = document.getElementById("stats");
+  if (!stats) return;
+  const slow = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const last = new Map();                 // 라벨 → 지난번 숫자 (같으면 다시 세지 않는다)
+  const NUM = /\d[\d,]*(\.\d+)?/;
+
+  function animate(el, raw) {
+    const m = NUM.exec(raw);
+    if (!m) return;
+    const target = Number(m[0].replace(/,/g, ""));
+    if (!isFinite(target) || target <= 0) return;
+    const dec = (m[0].split(".")[1] || "").length;
+    const comma = m[0].includes(",");
+    const head = raw.slice(0, m.index), tail = raw.slice(m.index + m[0].length);
+    const fmt = (v) => {
+      const s = comma ? v.toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec })
+                      : v.toFixed(dec);
+      return head + s + tail;
+    };
+    const t0 = performance.now(), dur = 600;
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / dur);
+      const e = 1 - Math.pow(1 - p, 3);    // ease-out
+      el.textContent = fmt(target * e);
+      if (p < 1) requestAnimationFrame(step);
+      else el.textContent = raw;           // 끝나면 원래 글자 그대로
+    };
+    requestAnimationFrame(step);
+  }
+
+  function run() {
+    if (document.body.classList.contains("is-loading")) return;
+    stats.querySelectorAll(".stat-card").forEach((card) => {
+      const num = card.querySelector(".num");
+      if (!num) return;
+      // 밴드는 '1,145/2,253' 처럼 첫 숫자만 센다 — 첫 텍스트 노드만 건드린다
+      const node = [...num.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+      if (!node) return;
+      const key = (card.querySelector(".label")?.textContent || "").trim().slice(0, 20);
+      if (last.has(key)) return;                 // 이 칸은 이미 세어 올렸다
+      const raw = node.textContent;
+      const m = NUM.exec(raw);
+      // 검수 건수는 자료가 늦게 와서 처음엔 0이다 — 실제 값이 들어올 때까지 기다린다
+      if (!m || Number(m[0].replace(/,/g, "")) <= 0) return;
+      last.set(key, raw);
+      if (slow.matches) return;                  // 모션을 줄여 달라면 그냥 둔다
+      animate(node, raw);
+    });
+  }
+
+  new MutationObserver(() => requestAnimationFrame(run)).observe(stats, { childList: true });
+  new MutationObserver(() => requestAnimationFrame(run))
+    .observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  run();
 })();

@@ -19,7 +19,7 @@
   <link rel="dns-prefetch" href="https://pmjwwvgcmaywbatryibc.supabase.co" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
-  <link rel="stylesheet" href="style.css?v=20261016f" />
+  <link rel="stylesheet" href="style.css?v=20261016g" />
 </head>
 <body class="is-loading is-auth-pending">
   <!-- 로그인한 적이 없으면 세션을 기다릴 이유가 없다. script.js 가 내려오기 전에
@@ -34,7 +34,8 @@
     } catch (e) { document.body.classList.remove("is-auth-pending"); }
   </script>
   <!-- 아이콘 모음 (Lucide). 버튼 안에서 <svg class="ic"><use href="#i-…"/></svg> 로 쓴다. -->
-  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <!-- display:none 으로 숨기면 symbol 안의 그라데이션이 적용되지 않는다(빈 상태 그림). 0px 로 숨긴다. -->
+  <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
     <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
     <symbol id="i-clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></symbol>
     <symbol id="i-tool" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
@@ -58,6 +59,45 @@
     <symbol id="i-bulb" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.5.4.8 1 .8 1.6v.5h5.4v-.5c0-.6.3-1.2.8-1.6A6 6 0 0 0 12 3Z"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+    <!-- 빈 상태 그림(64) — 면 위주 + 위→아래 그라데이션 + 좌상단 하이라이트 + 바닥 그림자 -->
+    <symbol id="i-empty-chat" viewBox="0 0 64 64">
+      <defs>
+        <linearGradient id="ec-a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bce1d9"/><stop offset="1" stop-color="#5cbdaa"/></linearGradient>
+        <linearGradient id="ec-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity=".55"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+      </defs>
+      <ellipse cx="32" cy="55" rx="17" ry="3.4" fill="#13306b" opacity=".10"/>
+      <path d="M14 10h36a7 7 0 0 1 7 7v19a7 7 0 0 1-7 7H31l-10 8.5V43h-7a7 7 0 0 1-7-7V17a7 7 0 0 1 7-7Z" fill="url(#ec-a)"/>
+      <path d="M14 10h36a7 7 0 0 1 7 7v6H7v-6a7 7 0 0 1 7-7Z" fill="url(#ec-b)"/>
+      <circle cx="23" cy="27" r="3.1" fill="#ffffff" opacity=".9"/>
+      <circle cx="32" cy="27" r="3.1" fill="#ffffff" opacity=".9"/>
+      <circle cx="41" cy="27" r="3.1" fill="#ffffff" opacity=".9"/>
+    </symbol>
+    <symbol id="i-empty-search" viewBox="0 0 64 64">
+      <defs>
+        <linearGradient id="es-a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bce1d9"/><stop offset="1" stop-color="#5cbdaa"/></linearGradient>
+        <linearGradient id="es-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity=".85"/><stop offset=".55" stop-color="#ffffff" stop-opacity=".25"/><stop offset="1" stop-color="#ffffff" stop-opacity=".05"/></linearGradient>
+      </defs>
+      <ellipse cx="32" cy="56" rx="16" ry="3.2" fill="#13306b" opacity=".10"/>
+      <rect x="38.5" y="38.5" width="8.5" height="20" rx="4.25" transform="rotate(-45 42.75 48.5)" fill="#0ba2a9"/>
+      <rect x="40" y="38.5" width="5.5" height="17" rx="2.75" transform="rotate(-45 42.75 47)" fill="#13306b" opacity=".18"/>
+      <circle cx="27" cy="27" r="20" fill="url(#es-a)"/>
+      <circle cx="27" cy="27" r="13.5" fill="#ffffff" opacity=".92"/>
+      <circle cx="27" cy="27" r="13.5" fill="url(#es-g)"/>
+      <path d="M17.5 17.5a13.4 13.4 0 0 1 7-3.7 1.9 1.9 0 1 1 .6 3.75 9.6 9.6 0 0 0-5 2.65 1.9 1.9 0 1 1-2.6-2.7Z" fill="#ffffff" opacity=".95"/>
+    </symbol>
+    <symbol id="i-empty-clip" viewBox="0 0 64 64">
+      <defs>
+        <linearGradient id="el-a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dff0ec"/></linearGradient>
+        <linearGradient id="el-b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bce1d9"/><stop offset="1" stop-color="#5cbdaa"/></linearGradient>
+      </defs>
+      <ellipse cx="32" cy="57" rx="16" ry="3.2" fill="#13306b" opacity=".10"/>
+      <rect x="11" y="9" width="42" height="47" rx="7" fill="url(#el-b)"/>
+      <rect x="15.5" y="15" width="33" height="36.5" rx="4" fill="url(#el-a)"/>
+      <rect x="23" y="4.5" width="18" height="10" rx="5" fill="#0ba2a9"/>
+      <rect x="26.5" y="7" width="11" height="5" rx="2.5" fill="#ffffff" opacity=".75"/>
+      <path d="m22.5 33.5 6.2 6.4 13.2-13.6" fill="none" stroke="#0ba2a9" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M18.5 15h8a3 3 0 0 1 0 6h-8Z" fill="#ffffff" opacity=".5"/>
+    </symbol>
   </svg>
 
   <!-- 시작(로그인/회원가입) 화면 : 로그인 전에는 이 화면만 보임 -->
@@ -257,7 +297,7 @@
         <tbody id="assetTbody"></tbody>
       </table>
       <div id="emptyMsg" class="empty-msg" hidden>
-        <div class="empty-ic">🔍</div>
+        <div class="empty-ic"><svg class="empty-art" aria-hidden="true"><use href="#i-empty-search"/></svg></div>
         <div class="empty-title">검색 결과가 없습니다</div>
         <div class="empty-sub">검색어나 필터를 바꿔 다시 시도해 보세요.</div>
       </div>
@@ -998,6 +1038,6 @@
 
   <!-- 코어(로그인·데이터)만 처음에 로드. 엑셀/PDF/OCR 라이브러리는 필요할 때 로드해 첫 화면을 빠르게. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="script.js?v=20261016f"></script>
+  <script src="script.js?v=20261016g"></script>
 </body>
 </html>

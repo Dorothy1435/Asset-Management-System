@@ -3870,6 +3870,137 @@ body.is-loading .table-wrap::before {
   #loginBtn { height: 36px; padding: 0 14px; }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   2막 9 — 8단계 보정 + 빈 상태·손맛·검수 성공 순간
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 0a. 회차 선택이 화면에 둘이었다 (밴드 안 · 툴바 세그먼트) ──
+   같은 inspRound 를 바꾸는 같은 기능이라, 밴드가 있으면 툴바 쪽은 감춘다.
+   hidden 속성과 JS 는 그대로 두고 보이기만 끈다. */
+body:has(#inspRoundSel) #inspRoundFilter { display: none; }
+/* 그러면 세그먼트가 [미검수][검수 완료] 두 칸이 된다 — 양끝만 둥글게 */
+.insp-filter-group > .btn:first-child { border-radius: var(--r-10) 0 0 var(--r-10) !important; }
+.insp-filter-group > .btn:last-child { border-radius: 0 var(--r-10) var(--r-10) 0 !important; }
+.insp-filter-group > .btn:first-child { border-left: 1px solid var(--gray-200); }
+
+/* ── 0c. 641~1024px: 밴드 아래 카드 4장이 한 줄을 꽉 채우게 ── */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .stats:has(.stat-insp) { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* ── 1. 빈 상태 그림 ── */
+.empty-art { width: 64px; height: 64px; display: block; }
+.empty-msg .empty-ic:has(.empty-art) {
+  font-size: 0; opacity: 1; color: inherit;
+  margin-bottom: 14px; display: flex; justify-content: center;
+}
+.empty-msg .empty-title { font-size: var(--fs-15); color: var(--gray-700); }
+.empty-msg .empty-sub { font-size: var(--fs-14); color: var(--gray-500); }
+
+/* ── 3. 손맛 ── */
+.btn:active:not(:disabled), .btn-mini:active:not(:disabled) { transform: scale(.98); }
+.btn, .btn-mini { transition: background .14s ease-out, border-color .14s ease-out, color .14s ease-out, transform .12s ease-out, box-shadow .14s ease-out; }
+/* 눌러서 여는 카드형은 살짝 떠오른다 */
+.post-card, .hist-row.hist-openable, .stor-card {
+  transition: box-shadow .16s ease-out, border-color .16s ease-out, transform .16s ease-out;
+}
+.post-card:hover, .hist-row.hist-openable:hover { transform: translateY(-1px); box-shadow: var(--sh-2); }
+
+/* ── 4. 검수 성공 순간 (CSS만 — showScanSuccess 는 건드리지 않았다) ── */
+@keyframes scan-fill { from { background: var(--primary-600); } to { background: var(--success-700); } }
+@keyframes scan-check { 0% { transform: scale(.6); opacity: 0; } 60% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes scan-ripple {
+  0% { box-shadow: 0 0 0 0 rgba(92, 189, 170, .55); }
+  100% { box-shadow: 0 0 0 26px rgba(92, 189, 170, 0); }
+}
+.scan-ring.done {
+  animation: scan-fill .2s ease-out both, scan-ripple .4s ease-out .1s 1;
+}
+.scan-ring.done::before { animation: scan-fill .2s ease-out both; }
+.scan-ring.done .scan-ring-num {
+  display: inline-block;
+  animation: scan-check .28s cubic-bezier(.34, 1.56, .64, 1) .08s both;
+}
+
+/* ── 5. 토스트 성공 체크 그리기 ── */
+@keyframes toast-draw { from { stroke-dashoffset: 34; } to { stroke-dashoffset: 0; } }
+.toast-success .toast-ic .ic {
+  stroke-dasharray: 34;
+  animation: toast-draw .3s ease-out both;
+}
+
+/* ── 모바일 ── */
+@media (max-width: 640px) {
+  /* 0b. 작은 카드 4장이 2×2 로 170px 을 먹어 첫 자산 카드가 검수 바까지 밀렸다.
+         한 장짜리 '요약 줄'로 바꾼다 — 칸 사이 세로선, 양끝만 둥근 한 덩어리. */
+  .stats:has(.stat-insp) { grid-template-columns: repeat(4, 1fr); gap: 0; }
+  .stats:has(.stat-insp) .stat-card.stat-insp { margin-bottom: 10px; }
+  .stats .stat-card:not(.stat-insp) {
+    height: auto;
+    min-width: 0;
+    padding: 10px 4px;
+    background: var(--gray-0);
+    border: 1px solid var(--gray-200);
+    border-left-width: 0;
+    border-radius: 0;
+    box-shadow: none;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 1px;
+  }
+  .stats .stat-card:not(.stat-insp):first-child {
+    border-left-width: 1px;
+    border-radius: 14px 0 0 14px;
+  }
+  .stats .stat-card:not(.stat-insp):nth-child(4) { border-radius: 0 14px 14px 0; }
+  .stats .stat-card:not(.stat-insp) .num { font-size: 18px; font-weight: 700; line-height: 1.2; }
+  .stats .stat-card:not(.stat-insp) .label {
+    font-size: var(--fs-12); color: var(--gray-500); line-height: 1.25; white-space: normal;
+  }
+  .stats .stat-card.is-zero .num { color: var(--num-zero); }
+  /* '자세히 보기'는 라벨 아래 한 줄로 */
+  .stats .stat-card .label .cost-sep { display: none; }
+  .stats .stat-card .label .insp-detail-btn {
+    display: block; margin: 1px auto 0; font-size: var(--fs-12);
+  }
+  .stats .stat-card .cost-exact { font-size: var(--fs-12); }
+
+  /* 로딩 뼈대도 이 모양(밴드 + 요약 줄)에 맞춘다 */
+  body.is-loading #stats {
+    min-height: 259px;
+    border-radius: var(--r-16);
+    background-color: var(--gray-100);
+    background-image: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, .85) 45%, transparent 70%);
+    background-size: 280% 100%;
+    background-repeat: no-repeat;
+    animation: sk-block 1.2s linear infinite;
+  }
+}
+@media (min-width: 641px) {
+  body.is-loading #stats {
+    min-height: 179px;
+    border-radius: var(--r-16);
+    background-color: var(--gray-100);
+    background-image: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, .85) 45%, transparent 70%);
+    background-size: 280% 100%;
+    background-repeat: no-repeat;
+    animation: sk-block 1.2s linear infinite;
+  }
+}
+
+/* ── 움직임을 줄여 달라고 한 기기에서는 전부 끈다 ── */
+@media (prefers-reduced-motion: reduce) {
+  .btn:active:not(:disabled), .btn-mini:active:not(:disabled) { transform: none; }
+  .post-card:hover, .hist-row.hist-openable:hover { transform: none; }
+  .scan-ring.done,
+  .scan-ring.done::before,
+  .scan-ring.done .scan-ring-num,
+  .toast-success .toast-ic .ic { animation: none; }
+  .toast-success .toast-ic .ic { stroke-dasharray: none; }
+  body.is-loading #stats { animation: none; background-image: none; }
+}
+
 /* ───────────────────────────────────────────────
    인쇄 — 자산 목록 표만 나오게
    (지금 보고 있는 쪽 20건만 찍힌다. 전체는 엑셀 다운로드로)
